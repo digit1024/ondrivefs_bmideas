@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tiny_http::{Server, Response, Header};
 use url::Url;
 
-const CLIENT_ID: &str = "your-azure-app-client-id"; // Replace with your Azure app ID
+const CLIENT_ID: &str = "95367b4f-624c-452c-b099-bfc9c27b69b9"; // Replace with your Azure app ID
 const REDIRECT_URI: &str = "http://localhost:8080/callback";
 const SCOPES: &str = "https://graph.microsoft.com/Files.ReadWrite offline_access";
 const AUTH_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
