@@ -7,9 +7,11 @@ use tokio::time::sleep;
 
 mod onedrive_auth;
 mod onedrive_client;
+mod token_store;
 
 use onedrive_auth::OneDriveAuth;
 use onedrive_client::OneDriveClient;
+use token_store::AuthConfig;
 
 #[derive(Debug)]
 struct SyncConfig {
@@ -214,6 +216,26 @@ async fn main() -> Result<()> {
                 .action(clap::ArgAction::SetTrue)
                 .help("List files in OneDrive root")
         )
+        .arg(
+            Arg::new("list-dir")
+                .long("list-dir")
+                .value_name("PATH")
+                .help("List files in a specific OneDrive directory")
+        )
+        .arg(
+            Arg::new("get-file")
+                .long("get-file")
+                .num_args(2)
+                .value_names(["REMOTE_PATH", "LOCAL_PATH"])
+                .help("Download a file from OneDrive to a local path")
+        )
+        .arg(
+            Arg::new("put-file")
+                .long("put-file")
+                .num_args(2)
+                .value_names(["LOCAL_PATH", "REMOTE_PATH"])
+                .help("Upload a local file to a OneDrive directory")
+        )
         .get_matches();
 
     let mut config = SyncConfig::default();
@@ -249,6 +271,43 @@ async fn main() -> Result<()> {
             let type_str = if item.folder.is_some() { "📁" } else { "📄" };
             println!("{} {} ({})", type_str, item.name, item.last_modified);
         }
+        return Ok(());
+    }
+
+    if let Some(list_dir) = matches.get_one::<String>("list-dir") {
+        // List files in a specific OneDrive directory
+        let client = OneDriveClient::new()?;
+        let items = client.list_folder_by_path(list_dir).await?;
+        println!("Files in OneDrive directory '{}':", list_dir);
+        for item in items {
+            let type_str = if item.folder.is_some() { "📁" } else { "📄" };
+            println!("{} {} ({})", type_str, item.name, item.last_modified);
+        }
+        return Ok(());
+    }
+
+    if let Some(get_args) = matches.get_many::<String>("get-file") {
+        let args: Vec<_> = get_args.collect();
+        let remote_path = &args[0];
+        let local_path = &args[1];
+        let client = OneDriveClient::new()?;
+        let item = client.get_item_by_path(remote_path).await?;
+        if let Some(download_url) = &item.download_url {
+            client.download_file(download_url, std::path::Path::new(local_path)).await?;
+            println!("Downloaded '{}' to '{}'", remote_path, local_path);
+        } else {
+            println!("No download URL found for '{}'. Is it a folder?", remote_path);
+        }
+        return Ok(());
+    }
+
+    if let Some(put_args) = matches.get_many::<String>("put-file") {
+        let args: Vec<_> = put_args.collect();
+        let local_path = &args[0];
+        let remote_path = &args[1];
+        let client = OneDriveClient::new()?;
+        client.upload_file(std::path::Path::new(local_path), remote_path).await?;
+        println!("Uploaded '{}' to '{}'", local_path, remote_path);
         return Ok(());
     }
 

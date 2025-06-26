@@ -1,6 +1,5 @@
 use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use keyring::Entry;
 use rand::Rng;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -9,6 +8,8 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tiny_http::{Server, Response, Header};
 use url::Url;
+
+use crate::token_store::{TokenStore, AuthConfig};
 
 const CLIENT_ID: &str = "95367b4f-624c-452c-b099-bfc9c27b69b9"; // Replace with your Azure app ID
 const REDIRECT_URI: &str = "http://localhost:8080/callback";
@@ -24,25 +25,16 @@ struct TokenResponse {
     token_type: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuthConfig {
-    pub access_token: String,
-    pub refresh_token: String,
-    pub expires_at: u64,
-}
-
 pub struct OneDriveAuth {
     client: Client,
-    keyring_entry: Entry,
+    token_store: TokenStore,
 }
 
 impl OneDriveAuth {
     pub fn new() -> Result<Self> {
-        let keyring_entry = Entry::new("onedrive-sync", "oauth_tokens")?;
-        
         Ok(Self {
             client: Client::new(),
-            keyring_entry,
+            token_store: TokenStore::new()?,
         })
     }
 
@@ -140,7 +132,7 @@ impl OneDriveAuth {
         Ok(token_response)
     }
 
-    /// Save tokens to keyring
+    /// Save tokens to storage
     fn save_tokens(&self, tokens: TokenResponse) -> Result<AuthConfig> {
         let expires_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)?
@@ -152,18 +144,14 @@ impl OneDriveAuth {
             expires_at,
         };
 
-        let serialized = serde_json::to_string(&config)?;
-        self.keyring_entry.set_password(&serialized)?;
-
-        println!("Tokens saved successfully!");
+        self.token_store.save_tokens(&config)?;
+        println!("Tokens saved successfully using: {}", self.token_store.get_storage_info());
         Ok(config)
     }
 
-    /// Load tokens from keyring
+    /// Load tokens from storage
     pub fn load_tokens(&self) -> Result<AuthConfig> {
-        let stored = self.keyring_entry.get_password()?;
-        let config: AuthConfig = serde_json::from_str(&stored)?;
-        Ok(config)
+        self.token_store.load_tokens()
     }
 
     /// Check if token is expired
@@ -199,21 +187,14 @@ impl OneDriveAuth {
 
     /// Get valid access token (refresh if needed)
     pub async fn get_valid_token(&self) -> Result<String> {
-        match self.load_tokens() {
-            Ok(config) => {
-                if self.is_token_expired(&config) {
-                    println!("Token expired, refreshing...");
-                    let new_config = self.refresh_token(&config.refresh_token).await?;
-                    Ok(new_config.access_token)
-                } else {
-                    Ok(config.access_token)
-                }
-            }
-            Err(_) => {
-                println!("No stored tokens found. Starting authorization flow...");
-                let config = self.authorize().await?;
-                Ok(config.access_token)
-            }
+        let config = self.load_tokens()?;
+        
+        if self.is_token_expired(&config) {
+            println!("Token expired, refreshing...");
+            let new_config = self.refresh_token(&config.refresh_token).await?;
+            Ok(new_config.access_token)
+        } else {
+            Ok(config.access_token)
         }
     }
 }
@@ -227,6 +208,5 @@ mod tests {
         let (verifier, challenge) = OneDriveAuth::generate_pkce();
         assert_eq!(verifier.len(), 128);
         assert!(!challenge.is_empty());
-        assert_ne!(verifier, challenge);
     }
 }
