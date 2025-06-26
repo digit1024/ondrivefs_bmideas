@@ -6,10 +6,12 @@
             "type": "lldb",
             "request": "launch",
             "program": "${workspaceFolder}/target/debug/onedrive-sync",
-            "args": ["--settings-list-folders-to-sync"],
+            "args": ["--daemon"],
             "cwd": "${workspaceFolder}",
             "sourceLanguages": ["rust"],
-            "env": {},
+            "env": {
+                "RUST_LOG": "debug"
+            },
             "terminal": "integrated",
             "preLaunchTask": "cargo build"
         }

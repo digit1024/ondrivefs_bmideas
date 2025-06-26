@@ -4,6 +4,7 @@ use serde::Deserialize;
 use std::path::Path;
 use tokio::fs;
 use urlencoding;
+use log::info;
 
 use crate::onedrive_auth::OneDriveAuth;
 
@@ -116,6 +117,7 @@ impl OneDriveClient {
         }
 
         fs::write(local_path, content).await?;
+        info!("Downloaded file: {}", local_path.to_string_lossy());
         Ok(())
     }
 
@@ -141,6 +143,7 @@ impl OneDriveClient {
         }
 
         let item: DriveItem = response.json().await?;
+        info!("Uploaded file: {}", remote_path);
         Ok(item)
     }
 
@@ -182,6 +185,7 @@ impl OneDriveClient {
             return Err(anyhow!("Failed to delete item: {}", error_text));
         }
 
+        info!("Deleted item: {}", path);
         Ok(())
     }
 
@@ -216,6 +220,7 @@ impl OneDriveClient {
         }
 
         let item: DriveItem = response.json().await?;
+        info!("Created folder: {}", folder_name);
         Ok(item)
     }
 }

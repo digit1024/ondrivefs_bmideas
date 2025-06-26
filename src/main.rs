@@ -13,24 +13,8 @@ mod config;
 use onedrive_auth::OneDriveAuth;
 use onedrive_client::OneDriveClient;
 use token_store::AuthConfig;
-use config::Settings;
+use config::{Settings, SyncConfig, ChangedQueue};
 
-#[derive(Debug)]
-struct SyncConfig {
-    local_dir: PathBuf,
-    remote_dir: String,
-    sync_interval: Duration,
-}
-
-impl Default for SyncConfig {
-    fn default() -> Self {
-        Self {
-            local_dir: PathBuf::from("./sync"),
-            remote_dir: "/sync".to_string(),
-            sync_interval: Duration::from_secs(300), // 5 minutes
-        }
-    }
-}
 
 struct SyncDaemon {
     client: OneDriveClient,
@@ -182,7 +166,6 @@ async fn main() -> Result<()> {
                 .long("remote-dir")
                 .value_name("PATH")
                 .help("Remote directory to sync")
-                .default_value("/sync")
         )
         .arg(
             Arg::new("interval")
@@ -190,7 +173,7 @@ async fn main() -> Result<()> {
                 .long("interval")
                 .value_name("SECONDS")
                 .help("Sync interval in seconds")
-                .default_value("300")
+                .default_value("15")
         )
         .arg(
             Arg::new("auth")
