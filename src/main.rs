@@ -4,6 +4,7 @@ use log::{info, error, warn};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::time::sleep;
+use tokio::signal;
 
 mod onedrive_auth;
 mod onedrive_client;
@@ -12,14 +13,14 @@ mod config;
 
 use onedrive_auth::OneDriveAuth;
 use onedrive_client::OneDriveClient;
-use token_store::AuthConfig;
-use config::{Settings, SyncConfig, ChangedQueue};
+use config::{Settings, SyncConfig, MetaConfig};
 
 
 struct SyncDaemon {
     client: OneDriveClient,
     config: SyncConfig,
     settings: Settings,
+    meta: MetaConfig,
 }
 
 impl SyncDaemon {
@@ -28,6 +29,7 @@ impl SyncDaemon {
             client: OneDriveClient::new()?,
             config,
             settings,
+            meta: MetaConfig::load()?,
         })
     }
 
@@ -49,93 +51,182 @@ impl SyncDaemon {
         }
     }
 
-    /// Sync files from OneDrive to local directory
-    async fn sync_from_remote(&self) -> Result<()> {
-        info!("Starting sync from remote...");
-        tokio::fs::create_dir_all(&self.config.local_dir).await?;
+    /// Extract delta token from delta link URL
+    fn extract_delta_token(delta_link: &str) -> Option<String> {
+        if let Some(token_start) = delta_link.find("token=") {
+            let token = &delta_link[token_start + 6..];
+            Some(token.to_string())
+        } else {
+            None
+        }
+    }
+
+    /// Sync files from OneDrive to local directory using delta queries
+    async fn sync_from_remote(&mut self) -> Result<()> {
+        info!("Starting sync from remote using delta queries...");
+        
         for folder in &self.settings.sync_folders {
-            let items = match self.client.list_folder_by_path(folder).await {
-                Ok(items) => items,
-                Err(e) => {
-                    warn!("Remote directory '{}' might not exist: {}", folder, e);
-                    self.client.create_folder("/", folder.trim_start_matches('/')).await?;
-                    Vec::new()
-                }
+            info!("Processing folder: {}", folder);
+            
+            // Get delta token for this folder
+            let delta_token = self.meta.get_delta_token(folder);
+            
+            // Get changes using delta query
+            let changes = if let Some(token) = delta_token {
+                self.client.get_delta_with_token(folder, token).await?
+            } else {
+                // Initial sync - get all files
+                self.client.get_initial_delta(folder).await?
             };
-            for item in items {
-                if item.file.is_some() {
-                    let local_path = self.config.local_dir.join(&item.name);
-                    if let Some(download_url) = &item.download_url {
-                        match self.client.download_file(download_url, &local_path).await {
-                            Ok(_) => info!("Downloaded: {}", item.name),
-                            Err(e) => error!("Failed to download {}: {}", item.name, e),
+
+            // Process changes
+            for item in &changes.value {
+                if item.deleted.is_some() {
+                    // Handle deleted files
+                    let local_path = self.get_local_path_for_item(folder, item);
+                    if local_path.exists() {
+                        if let Err(e) = std::fs::remove_file(&local_path) {
+                            error!("Failed to delete local file {:?}: {}", local_path, e);
+                        } else {
+                            info!("Deleted local file: {:?}", local_path);
+                        }
+                    }
+                } else if item.file.is_some() {
+                    
+                    // Handle new/updated files
+                    let local_path = self.get_local_path_for_item(folder, item);
+                    
+                    // Create parent directory if it doesn't exist
+                    if let Some(parent) = local_path.parent() {
+                        if let Err(e) = tokio::fs::create_dir_all(parent).await {
+                            error!("Failed to create directory {:?}: {}", parent, e);
+                            continue;
+                        }
+                    }
+                    // Get the full item metadata including download URL
+                    let remote_path = format!("{}/{}", folder, item.name.as_ref().map_or("Unknown", |v| v));
+                    match self.client.get_item_by_path(&remote_path).await {
+                        Ok(full_item) => {
+                            if let Some(download_url) = &full_item.download_url {
+                                match self.client.download_file(download_url, &local_path, &item.id, item.name.as_ref().map_or("Unknown", |v| v)).await {
+                                    Ok(_) => info!("Downloaded: {} -> {:?}", item.name.as_ref().map_or("Unknown", |v| v), local_path),
+                                    Err(e) => error!("Failed to download {}: {}", item.name.as_ref().map_or("Unknown", |v| v), e),
+                                }
+                            } else {
+                                error!("No download URL available for file: {}", item.name.as_ref().map_or("Unknown", |v| v));
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to get download URL for {}: {}", item.name.as_ref().map_or("Unknown", |v| v), e);
                         }
                     }
                 }
             }
+
+            // Save delta token for next sync
+            if let Some(delta_link) = &changes.delta_link {
+                if let Some(token) = Self::extract_delta_token(delta_link) {
+                    self.meta.set_delta_token(folder, token)?;
+                    info!("Saved delta token for folder: {}", folder);
+                }
+            }
         }
+        
         Ok(())
     }
 
-    /// Sync files from local directory to OneDrive
+    /// Get local path for a OneDrive item
+    fn get_local_path_for_item(&self, folder: &str, item: &onedrive_client::DriveItem) -> PathBuf {
+        let mut local_path = self.config.local_dir.clone();
+        
+        // Add the folder path (without leading slash)
+        if folder != "/" {
+            let folder_path = folder.trim_start_matches('/');
+            local_path.push(folder_path);
+        }
+        if item.name.is_none() {
+            panic!("Item name is missing for item with ID: {}", item.id);
+        }else{
+        // Add the item name
+            local_path.push(item.clone().name.as_ref().unwrap());
+        }
+        local_path
+    }
+
+    /// Sync files from local directory to OneDrive (simplified for now)
     async fn sync_to_remote(&self) -> Result<()> {
         info!("Starting sync to remote...");
-        for folder in &self.settings.sync_folders {
-            let local_folder = self.config.local_dir.join(folder.trim_start_matches('/'));
-            let mut entries = match tokio::fs::read_dir(&local_folder).await {
-                Ok(e) => e,
-                Err(_) => continue, // Skip if local folder doesn't exist
-            };
-            while let Some(entry) = entries.next_entry().await? {
-                let path = entry.path();
-                if path.is_file() {
-                    if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                        let remote_path = format!("{}/{}", folder, file_name);
-                        match self.client.upload_file(&path, &remote_path).await {
-                            Ok(_) => info!("Uploaded: {}", file_name),
-                            Err(e) => error!("Failed to upload {}: {}", file_name, e),
-                        }
-                    }
-                }
-            }
-        }
+        // TODO: Implement proper local-to-remote sync using changed queue
+        // For now, this is a placeholder
         Ok(())
     }
 
     /// Run a single sync cycle
-    async fn sync_cycle(&self) -> Result<()> {
+    async fn sync_cycle(&mut self) -> Result<()> {
         info!("Starting sync cycle");
         
-        // Bi-directional sync
+        // Sync from remote using delta queries
         if let Err(e) = self.sync_from_remote().await {
             error!("Failed to sync from remote: {}", e);
         }
 
-        if let Err(e) = self.sync_to_remote().await {
-            error!("Failed to sync to remote: {}", e);
-        }
+        // TODO: Implement local-to-remote sync
+        // if let Err(e) = self.sync_to_remote().await {
+        //     error!("Failed to sync to remote: {}", e);
+        // }
 
         info!("Sync cycle completed");
         Ok(())
     }
 
+    /// Wait for shutdown signals (Ctrl+C or SIGTERM)
+    async fn wait_for_shutdown() {
+        tokio::select! {
+            _ = signal::ctrl_c() => {
+                info!("Received Ctrl+C");
+            }
+            _ = async {
+                let mut sigterm = signal::unix::signal(signal::unix::SignalKind::terminate())
+                    .expect("Failed to create SIGTERM signal handler");
+                sigterm.recv().await;
+            } => {
+                info!("Received SIGTERM");
+            }
+        }
+    }
+
     /// Run daemon mode
-    async fn run_daemon(&self) -> Result<()> {
+    async fn run_daemon(&mut self) -> Result<()> {
         info!("Starting OneDrive sync daemon");
         info!("Local directory: {:?}", self.config.local_dir);
-        info!("Remote directory: {}", self.config.remote_dir);
+        info!("Sync folders: {:?}", self.settings.sync_folders);
         info!("Sync interval: {:?}", self.config.sync_interval);
+        info!("Press Ctrl+C or send SIGTERM to stop the daemon gracefully");
 
         self.ensure_authorized().await?;
 
         loop {
-            if let Err(e) = self.sync_cycle().await {
-                error!("Sync cycle failed: {}", e);
+            // Use tokio::select! to handle both sync and shutdown signals
+            tokio::select! {
+                // Handle shutdown signals
+                _ = Self::wait_for_shutdown() => {
+                    info!("Shutting down gracefully...");
+                    break;
+                }
+                // Run sync cycle with timeout
+                _ = async {
+                    if let Err(e) = self.sync_cycle().await {
+                        error!("Sync cycle failed: {}", e);
+                    }
+                    sleep(self.config.sync_interval).await;
+                } => {
+                    // Sync cycle completed, continue to next iteration
+                }
             }
-
-            info!("Waiting {} seconds until next sync", self.config.sync_interval.as_secs());
-            sleep(self.config.sync_interval).await;
         }
+
+        info!("Daemon stopped gracefully");
+        Ok(())
     }
 }
 
@@ -266,7 +357,7 @@ async fn main() -> Result<()> {
         println!("Files in OneDrive root:");
         for item in items {
             let type_str = if item.folder.is_some() { "📁" } else { "📄" };
-            println!("{} {} ({})", type_str, item.name, item.last_modified);
+            println!("{} {} ({})", type_str, item.name.unwrap_or("Unknown".to_string()), item.last_modified.unwrap_or("Unknown".to_string()));
         }
         return Ok(());
     }
@@ -278,7 +369,7 @@ async fn main() -> Result<()> {
         println!("Files in OneDrive directory '{}':", list_dir);
         for item in items {
             let type_str = if item.folder.is_some() { "📁" } else { "📄" };
-            println!("{} {} ({})", type_str, item.name, item.last_modified);
+            println!("{} {} ({})", type_str, item.name.unwrap_or("Unknown".to_string()), item.last_modified.unwrap_or("Unknown".to_string()));
         }
         return Ok(());
     }
@@ -290,7 +381,7 @@ async fn main() -> Result<()> {
         let client = OneDriveClient::new()?;
         let item = client.get_item_by_path(remote_path).await?;
         if let Some(download_url) = &item.download_url {
-            client.download_file(download_url, std::path::Path::new(local_path)).await?;
+            client.download_file(download_url, std::path::Path::new(local_path), &item.id, item.name.as_ref().map_or("Unknown", |v| v)).await?;
             println!("Downloaded '{}' to '{}'", remote_path, local_path);
         } else {
             println!("No download URL found for '{}'. Is it a folder?", remote_path);
@@ -335,10 +426,10 @@ async fn main() -> Result<()> {
 
     let settings = Settings::load()?;
     if matches.get_flag("daemon") {
-        let daemon = SyncDaemon::new(config, settings)?;
+        let mut daemon = SyncDaemon::new(config, settings)?;
         daemon.run_daemon().await?;
     } else {
-        let daemon = SyncDaemon::new(config, settings)?;
+        let mut daemon = SyncDaemon::new(config, settings)?;
         daemon.ensure_authorized().await?;
         daemon.sync_cycle().await?;
         println!("Sync completed!");

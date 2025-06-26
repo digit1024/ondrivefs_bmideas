@@ -8,19 +8,23 @@ use log::info;
 
 use crate::onedrive_auth::OneDriveAuth;
 
+
+
 const GRAPH_API_BASE: &str = "https://graph.microsoft.com/v1.0";
 
 #[derive(Debug, Deserialize)]
 pub struct DriveItem {
     pub id: String,
-    pub name: String,
+    pub name: Option<String>,
     #[serde(rename = "lastModifiedDateTime")]
-    pub last_modified: String,
+    pub last_modified: Option<String>,
     pub size: Option<u64>,
     pub folder: Option<FolderFacet>,
     pub file: Option<FileFacet>,
     #[serde(rename = "@microsoft.graph.downloadUrl")]
     pub download_url: Option<String>,
+    /// Indicates if the item was deleted
+    pub deleted: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -32,7 +36,7 @@ pub struct FolderFacet {
 #[derive(Debug, Deserialize)]
 pub struct FileFacet {
     #[serde(rename = "mimeType")]
-    pub mime_type: String,
+    pub mime_type: Option<String>,  // Changed from String to Option<String>
 }
 
 #[derive(Debug, Deserialize)]
@@ -40,11 +44,14 @@ pub struct DriveItemCollection {
     pub value: Vec<DriveItem>,
     #[serde(rename = "@odata.nextLink")]
     pub next_link: Option<String>,
+    #[serde(rename = "@odata.deltaLink")]
+    pub delta_link: Option<String>,
 }
 
 pub struct OneDriveClient {
     client: Client,
     auth: OneDriveAuth,
+    metadata_manager: MetadataManager,
 }
 
 impl OneDriveClient {
@@ -52,6 +59,7 @@ impl OneDriveClient {
         Ok(Self {
             client: Client::new(),
             auth: OneDriveAuth::new()?,
+            metadata_manager: MetadataManager::new()?,
         })
     }
 
@@ -98,8 +106,35 @@ impl OneDriveClient {
         Ok(collection.value)
     }
 
-    /// Download a file by its download URL
-    pub async fn download_file(&self, download_url: &str, local_path: &Path) -> Result<()> {
+    /// Download a file by its download URL and store metadata
+    pub async fn download_file(&self, download_url: &str, local_path: &Path, onedrive_id: &str, name: &str) -> Result<()> {
+        let response = self.client
+            .get(download_url)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            return Err(anyhow!("Failed to download file: {}", response.status()));
+        }
+
+        let content = response.bytes().await?;
+        
+        // Create parent directory if it doesn't exist
+        if let Some(parent) = local_path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+
+        fs::write(local_path, content).await?;
+        
+        // Store metadata after successful download
+        self.metadata_manager.add_mapping(onedrive_id, local_path, name)?;
+        
+        info!("Downloaded file: {} (ID: {})", local_path.to_string_lossy(), onedrive_id);
+        Ok(())
+    }
+
+    /// Download a file by its download URL (legacy method without metadata)
+    pub async fn download_file_legacy(&self, download_url: &str, local_path: &Path) -> Result<()> {
         let response = self.client
             .get(download_url)
             .send()
@@ -222,5 +257,83 @@ impl OneDriveClient {
         let item: DriveItem = response.json().await?;
         info!("Created folder: {}", folder_name);
         Ok(item)
+    }
+
+    /// Get delta changes for a folder using delta token
+    pub async fn get_delta_changes(&self, folder: &str, delta_token: Option<&str>) -> Result<DriveItemCollection> {
+        let auth_header = self.auth_header().await?;
+        
+        let url = if let Some(token) = delta_token {
+            // Use existing delta token
+            format!("{}/me/drive/root:{}:/delta?token={}", GRAPH_API_BASE, folder, token)
+        } else {
+            // Initial delta query
+            format!("{}/me/drive/root:{}:/delta", GRAPH_API_BASE, folder)
+        };
+
+        let response = self.client
+            .get(&url)
+            .header("Authorization", auth_header)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(anyhow!("Failed to get delta changes: {}", error_text));
+        }
+
+        let collection: DriveItemCollection = response.json().await?;
+        Ok(collection)
+    }
+
+    /// Get initial delta state for a folder
+    pub async fn get_initial_delta(&self, folder: &str) -> Result<DriveItemCollection> {
+        self.get_delta_changes(folder, None).await
+    }
+
+    /// Get subsequent delta changes using a token
+    pub async fn get_delta_with_token(&self, folder: &str, delta_token: &str) -> Result<DriveItemCollection> {
+        self.get_delta_changes(folder, Some(delta_token)).await
+    }
+
+    /// Get metadata manager reference
+    pub fn metadata_manager(&self) -> &MetadataManager {
+        &self.metadata_manager
+    }
+
+    /// Handle delta changes with metadata tracking
+    pub async fn handle_delta_changes(&self, delta_collection: &DriveItemCollection, local_root: &Path) -> Result<()> {
+        for item in &delta_collection.value {
+            if item.deleted.is_some() {
+                // Handle deleted item
+                if let Some(local_path_str) = self.metadata_manager.get_local_path(&item.id)? {
+                    let local_path = Path::new(&local_path_str);
+                    if local_path.exists() {
+                        fs::remove_file(local_path).await?;
+                        info!("Deleted local file: {}", local_path_str);
+                    }
+                    // Mark as deleted in metadata (soft delete)
+                    self.metadata_manager.mark_as_deleted(&item.id)?;
+                }
+            } else {
+                // Handle created/modified item
+                if let Some(name) = &item.name {
+                    let local_path = local_root.join(name);
+                    
+                    if item.file.is_some() {
+                        // It's a file - download it
+                        if let Some(download_url) = &item.download_url {
+                            self.download_file(download_url, &local_path, &item.id, name).await?;
+                        }
+                    } else if item.folder.is_some() {
+                        // It's a folder - create it
+                        fs::create_dir_all(&local_path).await?;
+                        self.metadata_manager.add_mapping(&item.id, &local_path, name)?;
+                        info!("Created folder: {} (ID: {})", name, item.id);
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }

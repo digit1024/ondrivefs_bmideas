@@ -3,7 +3,7 @@
 use anyhow::{Result, anyhow};
 use serde::{Serialize, Deserialize};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -37,6 +37,12 @@ impl Default for SyncConfig {
 pub struct ChangedQueue {
     /// List of files that have been changed locally and need to be synced
     pub changed_files: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct MetaConfig {
+    /// Delta tokens for each sync folder
+    pub delta_tokens: std::collections::HashMap<String, String>,
 }
 
 impl Settings {
@@ -124,6 +130,48 @@ impl ChangedQueue {
     /// Clear all changed files
     pub fn clear(&mut self) -> Result<()> {
         self.changed_files.clear();
+        self.save()?;
+        Ok(())
+    }
+}
+
+impl MetaConfig {
+    pub fn meta_path() -> Result<PathBuf> {
+        let mut path = dirs::home_dir().ok_or_else(|| anyhow!("Could not determine home directory"))?;
+        path.push(".onedrive");
+        fs::create_dir_all(&path)?;
+        path.push("meta.json");
+        Ok(path)
+    }
+
+    pub fn load() -> Result<Self> {
+        let path = Self::meta_path()?;
+        if !path.exists() {
+            // Create default meta file if it doesn't exist
+            let default = Self::default();
+            default.save()?;
+            return Ok(default);
+        }
+        let data = fs::read_to_string(&path)?;
+        let meta: Self = serde_json::from_str(&data)?;
+        Ok(meta)
+    }
+
+    pub fn save(&self) -> Result<()> {
+        let path = Self::meta_path()?;
+        let data = serde_json::to_string_pretty(self)?;
+        fs::write(path, data)?;
+        Ok(())
+    }
+
+    /// Get delta token for a specific folder
+    pub fn get_delta_token(&self, folder: &str) -> Option<&String> {
+        self.delta_tokens.get(folder)
+    }
+
+    /// Set delta token for a specific folder
+    pub fn set_delta_token(&mut self, folder: &str, token: String) -> Result<()> {
+        self.delta_tokens.insert(folder.to_string(), token);
         self.save()?;
         Ok(())
     }
