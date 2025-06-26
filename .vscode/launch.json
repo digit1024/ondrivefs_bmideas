@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Rust (LLDB, WSL2)",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/onedrive-sync",
+            "args": ["--settings-list-folders-to-sync"],
+            "cwd": "${workspaceFolder}",
+            "sourceLanguages": ["rust"],
+            "env": {},
+            "terminal": "integrated",
+            "preLaunchTask": "cargo build"
+        }
+    ]
+} 

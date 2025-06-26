@@ -240,6 +240,7 @@ async fn main() -> Result<()> {
             Arg::new("settings-list-folders-to-sync")
                 .long("settings-list-folders-to-sync")
                 .help("List all folders currently set to sync in settings.json")
+                .action(clap::ArgAction::SetTrue)
         )
         .get_matches();
 
@@ -263,6 +264,14 @@ async fn main() -> Result<()> {
         let auth = OneDriveAuth::new()?;
         auth.authorize().await?;
         println!("Authorization completed!");
+        return Ok(());
+    }
+    if matches.get_flag("settings-list-folders-to-sync") {
+        let settings = Settings::load()?;
+        println!("Folders set to sync:");
+        for folder in &settings.sync_folders {
+            println!("- {}", folder);
+        }
         return Ok(());
     }
 
@@ -339,14 +348,7 @@ async fn main() -> Result<()> {
         }
         return Ok(());
     }
-    if matches.get_flag("settings-list-folders-to-sync") {
-        let settings = Settings::load()?;
-        println!("Folders set to sync:");
-        for folder in &settings.sync_folders {
-            println!("- {}", folder);
-        }
-        return Ok(());
-    }
+
 
     let settings = Settings::load()?;
     if matches.get_flag("daemon") {
