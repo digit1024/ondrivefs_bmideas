@@ -8,10 +8,12 @@ use tokio::time::sleep;
 mod onedrive_auth;
 mod onedrive_client;
 mod token_store;
+mod config;
 
 use onedrive_auth::OneDriveAuth;
 use onedrive_client::OneDriveClient;
 use token_store::AuthConfig;
+use config::Settings;
 
 #[derive(Debug)]
 struct SyncConfig {
@@ -33,13 +35,15 @@ impl Default for SyncConfig {
 struct SyncDaemon {
     client: OneDriveClient,
     config: SyncConfig,
+    settings: Settings,
 }
 
 impl SyncDaemon {
-    fn new(config: SyncConfig) -> Result<Self> {
+    fn new(config: SyncConfig, settings: Settings) -> Result<Self> {
         Ok(Self {
             client: OneDriveClient::new()?,
             config,
+            settings,
         })
     }
 
@@ -64,69 +68,53 @@ impl SyncDaemon {
     /// Sync files from OneDrive to local directory
     async fn sync_from_remote(&self) -> Result<()> {
         info!("Starting sync from remote...");
-        
-        // Ensure local directory exists
         tokio::fs::create_dir_all(&self.config.local_dir).await?;
-
-        // List remote files
-        let items = match self.client.list_folder_by_path(&self.config.remote_dir).await {
-            Ok(items) => items,
-            Err(e) => {
-                warn!("Remote directory might not exist: {}", e);
-                // Try to create it
-                self.client.create_folder("/", "sync").await?;
-                Vec::new()
-            }
-        };
-
-        for item in items {
-            if item.file.is_some() {
-                let local_path = self.config.local_dir.join(&item.name);
-                
-                // Check if local file exists and is newer
-                if let Ok(metadata) = tokio::fs::metadata(&local_path).await {
-                    // Simple timestamp comparison (you might want more sophisticated logic)
-                    let local_modified = metadata.modified()?;
-                    // Parse remote timestamp and compare
-                    // For now, we'll always download (you can improve this)
+        for folder in &self.settings.sync_folders {
+            let items = match self.client.list_folder_by_path(folder).await {
+                Ok(items) => items,
+                Err(e) => {
+                    warn!("Remote directory '{}' might not exist: {}", folder, e);
+                    self.client.create_folder("/", folder.trim_start_matches('/')).await?;
+                    Vec::new()
                 }
-
-                if let Some(download_url) = &item.download_url {
-                    match self.client.download_file(download_url, &local_path).await {
-                        Ok(_) => info!("Downloaded: {}", item.name),
-                        Err(e) => error!("Failed to download {}: {}", item.name, e),
+            };
+            for item in items {
+                if item.file.is_some() {
+                    let local_path = self.config.local_dir.join(&item.name);
+                    if let Some(download_url) = &item.download_url {
+                        match self.client.download_file(download_url, &local_path).await {
+                            Ok(_) => info!("Downloaded: {}", item.name),
+                            Err(e) => error!("Failed to download {}: {}", item.name, e),
+                        }
                     }
                 }
             }
         }
-
         Ok(())
     }
 
     /// Sync files from local directory to OneDrive
     async fn sync_to_remote(&self) -> Result<()> {
         info!("Starting sync to remote...");
-
-        let mut entries = tokio::fs::read_dir(&self.config.local_dir).await?;
-        
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-            
-            if path.is_file() {
-                if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                    let remote_path = format!("{}/{}", self.config.remote_dir, file_name);
-                    
-                    // Check if remote file exists and compare timestamps
-                    // For now, we'll always upload (you can improve this)
-                    
-                    match self.client.upload_file(&path, &remote_path).await {
-                        Ok(_) => info!("Uploaded: {}", file_name),
-                        Err(e) => error!("Failed to upload {}: {}", file_name, e),
+        for folder in &self.settings.sync_folders {
+            let local_folder = self.config.local_dir.join(folder.trim_start_matches('/'));
+            let mut entries = match tokio::fs::read_dir(&local_folder).await {
+                Ok(e) => e,
+                Err(_) => continue, // Skip if local folder doesn't exist
+            };
+            while let Some(entry) = entries.next_entry().await? {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                        let remote_path = format!("{}/{}", folder, file_name);
+                        match self.client.upload_file(&path, &remote_path).await {
+                            Ok(_) => info!("Uploaded: {}", file_name),
+                            Err(e) => error!("Failed to upload {}: {}", file_name, e),
+                        }
                     }
                 }
             }
         }
-
         Ok(())
     }
 
@@ -236,6 +224,23 @@ async fn main() -> Result<()> {
                 .value_names(["LOCAL_PATH", "REMOTE_PATH"])
                 .help("Upload a local file to a OneDrive directory")
         )
+        .arg(
+            Arg::new("settings-add-folder-to-sync")
+                .long("settings-add-folder-to-sync")
+                .value_name("FOLDER")
+                .help("Add a folder to the sync list in settings.json")
+        )
+        .arg(
+            Arg::new("settings-remove-folder-to-sync")
+                .long("settings-remove-folder-to-sync")
+                .value_name("FOLDER")
+                .help("Remove a folder from the sync list in settings.json")
+        )
+        .arg(
+            Arg::new("settings-list-folders-to-sync")
+                .long("settings-list-folders-to-sync")
+                .help("List all folders currently set to sync in settings.json")
+        )
         .get_matches();
 
     let mut config = SyncConfig::default();
@@ -311,13 +316,44 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    // Handle settings management options
+    if let Some(folder) = matches.get_one::<String>("settings-add-folder-to-sync") {
+        let mut settings = Settings::load()?;
+        if !settings.sync_folders.contains(folder) {
+            settings.sync_folders.push(folder.clone());
+            settings.save()?;
+            println!("Added '{}' to sync folders.", folder);
+        } else {
+            println!("'{}' is already in the sync folders list.", folder);
+        }
+        return Ok(());
+    }
+    if let Some(folder) = matches.get_one::<String>("settings-remove-folder-to-sync") {
+        let mut settings = Settings::load()?;
+        if let Some(pos) = settings.sync_folders.iter().position(|f| f == folder) {
+            settings.sync_folders.remove(pos);
+            settings.save()?;
+            println!("Removed '{}' from sync folders.", folder);
+        } else {
+            println!("'{}' was not found in the sync folders list.", folder);
+        }
+        return Ok(());
+    }
+    if matches.get_flag("settings-list-folders-to-sync") {
+        let settings = Settings::load()?;
+        println!("Folders set to sync:");
+        for folder in &settings.sync_folders {
+            println!("- {}", folder);
+        }
+        return Ok(());
+    }
+
+    let settings = Settings::load()?;
     if matches.get_flag("daemon") {
-        // Run daemon
-        let daemon = SyncDaemon::new(config)?;
+        let daemon = SyncDaemon::new(config, settings)?;
         daemon.run_daemon().await?;
     } else {
-        // Single sync
-        let daemon = SyncDaemon::new(config)?;
+        let daemon = SyncDaemon::new(config, settings)?;
         daemon.ensure_authorized().await?;
         daemon.sync_cycle().await?;
         println!("Sync completed!");
