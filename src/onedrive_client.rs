@@ -7,7 +7,7 @@ use urlencoding;
 use log::info;
 
 use crate::onedrive_auth::OneDriveAuth;
-
+use crate::metadata_manager_for_files::MetadataManagerForFiles;
 
 
 const GRAPH_API_BASE: &str = "https://graph.microsoft.com/v1.0";
@@ -51,7 +51,7 @@ pub struct DriveItemCollection {
 pub struct OneDriveClient {
     client: Client,
     auth: OneDriveAuth,
-    metadata_manager: MetadataManager,
+    metadata_manager: MetadataManagerForFiles,
 }
 
 impl OneDriveClient {
@@ -59,7 +59,7 @@ impl OneDriveClient {
         Ok(Self {
             client: Client::new(),
             auth: OneDriveAuth::new()?,
-            metadata_manager: MetadataManager::new()?,
+            metadata_manager: MetadataManagerForFiles::new()?,
         })
     }
 
@@ -297,7 +297,7 @@ impl OneDriveClient {
     }
 
     /// Get metadata manager reference
-    pub fn metadata_manager(&self) -> &MetadataManager {
+    pub fn metadata_manager(&self) -> &MetadataManagerForFiles {
         &self.metadata_manager
     }
 

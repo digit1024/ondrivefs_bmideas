@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::{Arg, Command};
 use log::{info, error, warn};
-use std::path::PathBuf;
+use std::{path::PathBuf, str::FromStr};
 use std::time::Duration;
 use tokio::time::sleep;
 use tokio::signal;
@@ -10,6 +10,8 @@ mod onedrive_auth;
 mod onedrive_client;
 mod token_store;
 mod config;
+mod metadata_manager_for_files;
+use log::debug;
 
 use onedrive_auth::OneDriveAuth;
 use onedrive_client::OneDriveClient;
@@ -83,7 +85,9 @@ impl SyncDaemon {
             for item in &changes.value {
                 if item.deleted.is_some() {
                     // Handle deleted files
-                    let local_path = self.get_local_path_for_item(folder, item);
+                    let stored_local_path = self.client.metadata_manager().get_local_path(&item.id).unwrap().unwrap();
+                    let local_path = PathBuf::from_str(&stored_local_path).unwrap();
+                    
                     if local_path.exists() {
                         if let Err(e) = std::fs::remove_file(&local_path) {
                             error!("Failed to delete local file {:?}: {}", local_path, e);
@@ -145,7 +149,7 @@ impl SyncDaemon {
             local_path.push(folder_path);
         }
         if item.name.is_none() {
-            panic!("Item name is missing for item with ID: {}", item.id);
+            panic!("Item name is missing for item with ID: {}", item.id)
         }else{
         // Add the item name
             local_path.push(item.clone().name.as_ref().unwrap());

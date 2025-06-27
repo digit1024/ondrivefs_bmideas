@@ -15,11 +15,11 @@ pub struct MetadataRecord {
     pub updated_at: i64,
 }
 
-pub struct MetadataManager {
+pub struct MetadataManagerForFiles {
     db_path: PathBuf,
 }
 
-impl MetadataManager {
+impl MetadataManagerForFiles {
     pub fn new() -> Result<Self> {
         let home_dir = std::env::var("HOME")
             .map(PathBuf::from)
