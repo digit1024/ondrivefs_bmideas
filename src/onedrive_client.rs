@@ -107,7 +107,7 @@ impl OneDriveClient {
     }
 
     /// Download a file by its download URL and store metadata
-    pub async fn download_file(&self, download_url: &str, local_path: &Path, onedrive_id: &str, name: &str) -> Result<()> {
+    pub async fn download_file(&self, download_url: &str, local_path: &Path, onedrive_id: &str, _name: &str) -> Result<()> {
         let response = self.client
             .get(download_url)
             .send()
@@ -127,7 +127,7 @@ impl OneDriveClient {
         fs::write(local_path, content).await?;
         
         // Store metadata after successful download
-        self.metadata_manager.add_mapping(onedrive_id, local_path, name)?;
+        self.metadata_manager.add_metadata_for_file(onedrive_id, local_path)?;
         
         info!("Downloaded file: {} (ID: {})", local_path.to_string_lossy(), onedrive_id);
         Ok(())
@@ -157,18 +157,36 @@ impl OneDriveClient {
     }
 
     /// Upload a file to OneDrive
-    pub async fn upload_file(&self, local_path: &Path, remote_path: &str) -> Result<DriveItem> {
+    pub async fn upload_file(&self, local_path: &Path, remote_path: &str) -> Result<()> {
         let auth_header = self.auth_header().await?;
-        let file_content = fs::read(local_path).await?;
         
-        let encoded_path = urlencoding::encode(remote_path);
-        let url = format!("{}/me/drive/root:{}:/content", GRAPH_API_BASE, encoded_path);
+        // Read file content
+        let content = fs::read(local_path).await?;
+        
+        // Get file name from local path
+        let file_name = local_path.file_name()
+            .ok_or_else(|| anyhow!("Invalid file path"))?
+            .to_string_lossy();
+        
+        // Determine parent path
+        let parent_path = if remote_path == "/" {
+            "/".to_string()
+        } else {
+            remote_path.to_string()
+        };
+        
+        let url = if parent_path == "/" {
+            format!("{}/me/drive/root:/{}:/content", GRAPH_API_BASE, file_name)
+        } else {
+            let encoded_path = urlencoding::encode(&parent_path);
+            format!("{}/me/drive/root:{}:/{}:/content", GRAPH_API_BASE, encoded_path, file_name)
+        };
 
         let response = self.client
             .put(&url)
             .header("Authorization", auth_header)
             .header("Content-Type", "application/octet-stream")
-            .body(file_content)
+            .body(content)
             .send()
             .await?;
 
@@ -177,12 +195,11 @@ impl OneDriveClient {
             return Err(anyhow!("Failed to upload file: {}", error_text));
         }
 
-        let item: DriveItem = response.json().await?;
-        info!("Uploaded file: {}", remote_path);
-        Ok(item)
+        info!("Uploaded file: {} -> {}", local_path.display(), remote_path);
+        Ok(())
     }
 
-    /// Get file metadata by path
+    /// Get item by path
     pub async fn get_item_by_path(&self, path: &str) -> Result<DriveItem> {
         let auth_header = self.auth_header().await?;
         let encoded_path = urlencoding::encode(path);
@@ -203,7 +220,7 @@ impl OneDriveClient {
         Ok(item)
     }
 
-    /// Delete a file or folder by path
+    /// Delete an item by path
     pub async fn delete_item(&self, path: &str) -> Result<()> {
         let auth_header = self.auth_header().await?;
         let encoded_path = urlencoding::encode(path);
@@ -306,14 +323,14 @@ impl OneDriveClient {
         for item in &delta_collection.value {
             if item.deleted.is_some() {
                 // Handle deleted item
-                if let Some(local_path_str) = self.metadata_manager.get_local_path(&item.id)? {
+                if let Some(local_path_str) = self.metadata_manager.get_local_path_from_one_drive_id(&item.id)? {
                     let local_path = Path::new(&local_path_str);
                     if local_path.exists() {
                         fs::remove_file(local_path).await?;
                         info!("Deleted local file: {}", local_path_str);
                     }
-                    // Mark as deleted in metadata (soft delete)
-                    self.metadata_manager.mark_as_deleted(&item.id)?;
+                    // Delete metadata
+                    self.metadata_manager.delete_metadata_for_file(&item.id)?;
                 }
             } else {
                 // Handle created/modified item
@@ -328,12 +345,22 @@ impl OneDriveClient {
                     } else if item.folder.is_some() {
                         // It's a folder - create it
                         fs::create_dir_all(&local_path).await?;
-                        self.metadata_manager.add_mapping(&item.id, &local_path, name)?;
+                        self.metadata_manager.add_metadata_for_file(&item.id, &local_path)?;
                         info!("Created folder: {} (ID: {})", name, item.id);
                     }
                 }
             }
         }
         Ok(())
+    }
+
+    /// Extract delta token from delta link URL
+    pub fn extract_delta_token(delta_link: &str) -> Option<String> {
+        if let Some(token_start) = delta_link.find("token=") {
+            let token = &delta_link[token_start + 6..];
+            Some(token.to_string())
+        } else {
+            None
+        }
     }
 }

@@ -33,18 +33,6 @@ impl Default for SyncConfig {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
-pub struct ChangedQueue {
-    /// List of files that have been changed locally and need to be synced
-    pub changed_files: Vec<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Default)]
-pub struct MetaConfig {
-    /// Delta tokens for each sync folder
-    pub delta_tokens: std::collections::HashMap<String, String>,
-}
-
 impl Settings {
     pub fn config_path() -> Result<PathBuf> {
         let mut path = dirs::home_dir().ok_or_else(|| anyhow!("Could not determine home directory"))?;
@@ -75,108 +63,6 @@ impl Settings {
     }
 }
 
-impl ChangedQueue {
-    pub fn queue_path() -> Result<PathBuf> {
-        let mut path = dirs::home_dir().ok_or_else(|| anyhow!("Could not determine home directory"))?;
-        path.push(".onedrive");
-        fs::create_dir_all(&path)?;
-        path.push("changedqueue.json");
-        Ok(path)
-    }
-
-    pub fn load() -> Result<Self> {
-        let path = Self::queue_path()?;
-        if !path.exists() {
-            // Create default changed queue file if it doesn't exist
-            let default = Self::default();
-            default.save()?;
-            return Ok(default);
-        }
-        let data = fs::read_to_string(&path)?;
-        let queue: Self = serde_json::from_str(&data)?;
-        Ok(queue)
-    }
-
-    pub fn save(&self) -> Result<()> {
-        let path = Self::queue_path()?;
-        let data = serde_json::to_string_pretty(self)?;
-        fs::write(path, data)?;
-        Ok(())
-    }
-
-    /// Add a file to the changed queue
-    pub fn add_file(&mut self, file_path: &str) -> Result<()> {
-        if !self.changed_files.contains(&file_path.to_string()) {
-            self.changed_files.push(file_path.to_string());
-            self.save()?;
-        }
-        Ok(())
-    }
-
-    /// Remove a file from the changed queue
-    pub fn remove_file(&mut self, file_path: &str) -> Result<()> {
-        if let Some(pos) = self.changed_files.iter().position(|f| f == file_path) {
-            self.changed_files.remove(pos);
-            self.save()?;
-        }
-        Ok(())
-    }
-
-    /// Get all changed files
-    pub fn get_changed_files(&self) -> &Vec<String> {
-        &self.changed_files
-    }
-
-    /// Clear all changed files
-    pub fn clear(&mut self) -> Result<()> {
-        self.changed_files.clear();
-        self.save()?;
-        Ok(())
-    }
-}
-
-impl MetaConfig {
-    pub fn meta_path() -> Result<PathBuf> {
-        let mut path = dirs::home_dir().ok_or_else(|| anyhow!("Could not determine home directory"))?;
-        path.push(".onedrive");
-        fs::create_dir_all(&path)?;
-        path.push("meta.json");
-        Ok(path)
-    }
-
-    pub fn load() -> Result<Self> {
-        let path = Self::meta_path()?;
-        if !path.exists() {
-            // Create default meta file if it doesn't exist
-            let default = Self::default();
-            default.save()?;
-            return Ok(default);
-        }
-        let data = fs::read_to_string(&path)?;
-        let meta: Self = serde_json::from_str(&data)?;
-        Ok(meta)
-    }
-
-    pub fn save(&self) -> Result<()> {
-        let path = Self::meta_path()?;
-        let data = serde_json::to_string_pretty(self)?;
-        fs::write(path, data)?;
-        Ok(())
-    }
-
-    /// Get delta token for a specific folder
-    pub fn get_delta_token(&self, folder: &str) -> Option<&String> {
-        self.delta_tokens.get(folder)
-    }
-
-    /// Set delta token for a specific folder
-    pub fn set_delta_token(&mut self, folder: &str, token: String) -> Result<()> {
-        self.delta_tokens.insert(folder.to_string(), token);
-        self.save()?;
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,21 +81,6 @@ mod tests {
         let config = SyncConfig::default();
         assert!(config.local_dir.to_string_lossy().contains("OneDrive"));
         assert_eq!(config.remote_dir, "/");
-        assert_eq!(config.sync_interval, Duration::from_secs(15));
-    }
-
-    #[test]
-    fn test_changed_queue_operations() {
-        let mut queue = ChangedQueue::default();
-        queue.add_file("/test/file1.txt").unwrap();
-        queue.add_file("/test/file2.txt").unwrap();
-        assert_eq!(queue.get_changed_files().len(), 2);
-        
-        queue.remove_file("/test/file1.txt").unwrap();
-        assert_eq!(queue.get_changed_files().len(), 1);
-        assert_eq!(queue.get_changed_files()[0], "/test/file2.txt");
-        
-        queue.clear().unwrap();
-        assert_eq!(queue.get_changed_files().len(), 0);
+        assert_eq!(config.sync_interval, Duration::from_secs(120));
     }
 } 

@@ -15,14 +15,13 @@ use log::debug;
 
 use onedrive_auth::OneDriveAuth;
 use onedrive_client::OneDriveClient;
-use config::{Settings, SyncConfig, MetaConfig};
+use config::{Settings, SyncConfig};
 
 
 struct SyncDaemon {
     client: OneDriveClient,
     config: SyncConfig,
     settings: Settings,
-    meta: MetaConfig,
 }
 
 impl SyncDaemon {
@@ -31,7 +30,6 @@ impl SyncDaemon {
             client: OneDriveClient::new()?,
             config,
             settings,
-            meta: MetaConfig::load()?,
         })
     }
 
@@ -70,14 +68,16 @@ impl SyncDaemon {
         for folder in &self.settings.sync_folders {
             info!("Processing folder: {}", folder);
             
-            // Get delta token for this folder
-            let delta_token = self.meta.get_delta_token(folder);
+            // Get delta token for this folder from metadata manager
+            let delta_token = self.client.metadata_manager().get_folder_delta(folder)?;
             
             // Get changes using delta query
-            let changes = if let Some(token) = delta_token {
-                self.client.get_delta_with_token(folder, token).await?
+            let changes = if let Some(delta) = delta_token {
+                info!("Delta token found for folder: {}", folder);
+                self.client.get_delta_with_token(folder, &delta.delta_token).await?
             } else {
                 // Initial sync - get all files
+                info!("Initial sync for folder: {}", folder);
                 self.client.get_initial_delta(folder).await?
             };
 
@@ -85,7 +85,7 @@ impl SyncDaemon {
             for item in &changes.value {
                 if item.deleted.is_some() {
                     // Handle deleted files
-                    let stored_local_path = self.client.metadata_manager().get_local_path(&item.id).unwrap().unwrap();
+                    let stored_local_path = self.client.metadata_manager().get_local_path_from_one_drive_id(&item.id).unwrap().unwrap();
                     let local_path = PathBuf::from_str(&stored_local_path).unwrap();
                     
                     if local_path.exists() {
@@ -96,7 +96,6 @@ impl SyncDaemon {
                         }
                     }
                 } else if item.file.is_some() {
-                    
                     // Handle new/updated files
                     let local_path = self.get_local_path_for_item(folder, item);
                     
@@ -130,12 +129,12 @@ impl SyncDaemon {
             // Save delta token for next sync
             if let Some(delta_link) = &changes.delta_link {
                 if let Some(token) = Self::extract_delta_token(delta_link) {
-                    self.meta.set_delta_token(folder, token)?;
+                    self.client.metadata_manager().store_folder_delta(folder, &token)?;
                     info!("Saved delta token for folder: {}", folder);
                 }
             }
         }
-        
+        self.client.metadata_manager().flush()?;
         Ok(())
     }
 
