@@ -12,11 +12,13 @@ mod onedrive_service;
 
 mod config;
 mod metadata_manager_for_files;
+mod file_manager;
 
 
 use auth::onedrive_auth::OneDriveAuth;
 use onedrive_service::onedrive_client::OneDriveClient;
 use config::{Settings, SyncConfig};
+use file_manager::FileManager;
 
 mod sync_service;
 use sync_service::SyncService;
@@ -172,7 +174,13 @@ async fn main() -> Result<()> {
         let client = OneDriveClient::new()?;
         let item = client.get_item_by_path(remote_path).await?;
         if let Some(download_url) = &item.download_url {
-            client.download_file(download_url, std::path::Path::new(local_path), &item.id, item.name.as_ref().map_or("Unknown", |v| v), None).await?;
+            let download_result = client.download_file(download_url, &item.id, item.name.as_ref().map_or("Unknown", |v| v)).await?;
+            
+            // Create file manager to handle the file save
+            let metadata_manager = crate::metadata_manager_for_files::MetadataManagerForFiles::new()?;
+            let file_manager = crate::file_manager::DefaultFileManager::new(metadata_manager).await?;
+            file_manager.save_downloaded_file(&download_result, std::path::Path::new(local_path)).await?;
+            
             println!("Downloaded '{}' to '{}'", remote_path, local_path);
         } else {
             println!("No download URL found for '{}'. Is it a folder?", remote_path);
@@ -185,8 +193,16 @@ async fn main() -> Result<()> {
         let local_path = &args[0];
         let remote_path = &args[1];
         let client = OneDriveClient::new()?;
-        client.upload_file(std::path::Path::new(local_path), remote_path).await?;
-        println!("Uploaded '{}' to '{}'", local_path, remote_path);
+        
+        // Read file data
+        let file_data = tokio::fs::read(local_path).await?;
+        let file_name = std::path::Path::new(local_path)
+            .file_name()
+            .ok_or_else(|| anyhow::anyhow!("Invalid file path"))?
+            .to_string_lossy();
+        
+        let upload_result = client.upload_file(&file_data, &file_name, remote_path).await?;
+        println!("Uploaded '{}' to '{}' (ID: {})", local_path, remote_path, upload_result.onedrive_id);
         return Ok(());
     }
 
@@ -219,10 +235,10 @@ async fn main() -> Result<()> {
     
 
     if matches.get_flag("daemon") {
-        let mut daemon = SyncService::new(client, config.clone(), settings.clone());
+        let mut daemon = SyncService::new(client, config.clone(), settings.clone()).await?;
         daemon.run_daemon().await?;
     } else {
-        let mut daemon = SyncService::new(client, config.clone(), settings.clone());
+        let mut daemon = SyncService::new(client, config.clone(), settings.clone()).await?;
         daemon.ensure_authorized().await?;
         daemon.sync_cycle().await?;
         println!("Sync completed!");

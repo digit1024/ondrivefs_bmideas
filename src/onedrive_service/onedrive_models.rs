@@ -1,7 +1,5 @@
 use serde::Deserialize;
 
-
-
 /// ParentReference: Represents the parent reference of a drive item. 
 /// Used to get the  actual path of the item.
 #[derive(Debug, Deserialize)]
@@ -30,8 +28,6 @@ pub struct DriveItem {
     pub parent_reference: Option<ParentReference>,
 }
 
-
-
 /// FolderFacet: Represents the folder facet of a drive item.
 #[derive(Debug, Deserialize)]
 pub struct FolderFacet {
@@ -55,5 +51,42 @@ pub struct DriveItemCollection {
     pub next_link: Option<String>,
     #[serde(rename = "@odata.deltaLink")]
     pub delta_link: Option<String>,
+}
+
+/// Represents the result of a file download operation
+#[derive(Debug, Clone)]
+pub struct DownloadResult {
+    pub file_data: Vec<u8>,
+    pub file_name: String,
+    pub onedrive_id: String,
+    pub etag: Option<String>,
+    pub mime_type: Option<String>,
+    pub size: Option<u64>,
+    pub last_modified: Option<String>,
+}
+
+/// Represents the result of a file upload operation
+#[derive(Debug, Clone)]
+pub struct UploadResult {
+    pub onedrive_id: String,
+    pub etag: Option<String>,
+    pub web_url: Option<String>,
+    pub size: Option<u64>,
+}
+
+/// Represents the result of a folder creation operation
+#[derive(Debug, Clone)]
+pub struct CreateFolderResult {
+    pub onedrive_id: String,
+    pub folder_name: String,
+    pub web_url: Option<String>,
+}
+
+/// Represents the result of a delete operation
+#[derive(Debug, Clone)]
+pub struct DeleteResult {
+    pub success: bool,
+    pub item_id: String,
+    pub item_path: String,
 }
 

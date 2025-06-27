@@ -2,160 +2,231 @@
 
 use crate::onedrive_service::onedrive_client::OneDriveClient;
 use crate::config::{Settings, SyncConfig};
-use crate::metadata_manager_for_files::OnedriveFileMeta;
+use crate::metadata_manager_for_files::MetadataManagerForFiles;
+use crate::file_manager::{FileManager, DefaultFileManager};
 use anyhow::Result;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::time::sleep;
 use tokio::signal;
-use log::{info, error, warn};
+use log::{info, error};
+use log::warn;
 use std::str::FromStr;
-
 
 /// Service responsible for synchronizing files between OneDrive and local storage.
 pub struct SyncService {
     pub client: OneDriveClient,
+    pub file_manager: DefaultFileManager,
     pub config: SyncConfig,
     pub settings: Settings,
 }
 
 impl SyncService {
-    pub fn new(client: OneDriveClient, config: SyncConfig, settings: Settings) -> Self {
-        Self { client, config, settings }
+    pub async fn new(client: OneDriveClient, config: SyncConfig, settings: Settings) -> Result<Self> {
+        let metadata_manager = MetadataManagerForFiles::new()?;
+        let file_manager = DefaultFileManager::new(metadata_manager).await?;
+        
+        Ok(Self { 
+            client, 
+            file_manager,
+            config, 
+            settings 
+        })
     }
 
     /// Sync files from OneDrive to local directory using delta queries
     pub async fn sync_from_remote(&mut self) -> Result<()> {
         info!("Starting sync from remote using delta queries...");
-        for folder in &self.settings.sync_folders {
+        
+        // Collect folders to avoid borrow checker issues
+        let folders: Vec<String> = self.settings.sync_folders.clone();
+
+        for folder in folders {
             info!("Processing folder: {}", folder);
-            let delta_token = self.client.metadata_manager().get_folder_delta(folder)?;
-            let initial_sync = delta_token.is_none();
-            if initial_sync {
-                let local_folder = if folder == "/" {
-                    self.config.local_dir.clone()
-                } else {
-                    let mut p = self.config.local_dir.clone();
-                    p.push(folder.trim_start_matches('/'));
-                    p
-                };
-                if local_folder.exists() {
-                    for entry in std::fs::read_dir(&local_folder)? {
-                        let entry = entry?;
-                        let path = entry.path();
-                        if path.is_file() {
-                            std::fs::remove_file(&path)?;
-                            info!("Removed local file on initial sync: {:?}", path);
-                        }
-                    }
-                }
-            }
-            let changes = if let Some(delta) = delta_token {
-                info!("Delta token found for folder: {}", folder);
-                self.client.get_delta_with_token(folder, &delta.delta_token).await?
-            } else {
-                info!("Initial sync for folder: {}", folder);
-                self.client.get_initial_delta(folder).await?
-            };
-            for item in &changes.value {
-                // Create local directory if it doesn't exist
-                if item.folder.is_some() && item.deleted.is_none() {
-                    
-                    let local_path = self.get_local_path_for_item(folder, item);
-                    info!("Creating local directory: {:?}", local_path);
-                    if !local_path.exists() {
-                        if let Err(e) = tokio::fs::create_dir_all(&local_path).await {
-                            error!("Failed to create directory {:?}: {}", local_path, e);
-                        } else {
-                            info!("Created local directory: {:?}", local_path);
-                        }
-                    }
-                }
-
-                
-                if item.deleted.is_some() {
-                    let stored_local_path = self.client.metadata_manager().get_local_path_from_one_drive_id(&item.id).unwrap().unwrap();
-                    let local_path = PathBuf::from_str(&stored_local_path).unwrap();
-                    if local_path.exists() {
-                        if let Err(e) = std::fs::remove_file(&local_path) {
-                            error!("Failed to delete local file {:?}: {}", local_path, e);
-                        } else {
-                            info!("Deleted local file: {:?}", local_path);
-                        }
-                    }
-                } 
-                if item.file.is_some() {
-                    let local_path = self.get_local_path_for_item(folder, item);
-                    let skip = if let Some(etag) = &item.etag {
-                        if let Ok(Some(meta)) = self.client.metadata_manager().get_onedrive_file_meta(&local_path.to_string_lossy()) {
-                            meta.etag == *etag
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    };
-                    if skip {
-                        info!("Skipping download for {:?} (etag matches)", local_path);
-                        continue;
-                    }
-                    if let Some(parent) = local_path.parent() {
-                        if let Err(e) = tokio::fs::create_dir_all(parent).await {
-                            error!("Failed to create directory {:?}: {}", parent, e);
-                            continue;
-                        }
-                    }
-                    
-                 
-                    let remote_path_from_parent = item.parent_reference.as_ref().unwrap().path.as_ref().unwrap();
-                    // Now I need to remove /drive/root: from the remote_path_from_parent
-                    let remote_path_from_parent = remote_path_from_parent.trim_start_matches("/drive/root:");
-                    
-                    let remote_path = format!("{}/{}", remote_path_from_parent, item.name.as_ref().map_or("Unknown", |v| v));
-                    
-                    let local_root_path = self.get_local_root_path();
-                    info!("local_root_path: {:?}", local_root_path);
-                    let local_path = local_root_path.join(remote_path.clone().trim_start_matches("/"));
-                    info!("local_path: {:?}", local_path);
-                    info!("----------------------------------");
-
-                    match self.client.get_item_by_path(&remote_path).await {
-                        Ok(full_item) => {
-                            if let Some(download_url) = &full_item.download_url {
-                                let etag = full_item.etag.as_ref();
-                                match self.client.download_file(download_url, &local_path, &item.id, item.name.as_ref().map_or("Unknown", |v| v), etag).await {
-                                    Ok(_) => info!("Downloaded: {} -> {:?}", item.name.as_ref().map_or("Unknown", |v| v), local_path),
-                                    Err(e) => error!("Failed to download {}: {}", item.name.as_ref().map_or("Unknown", |v| v), e),
-                                }
-                            } else {
-                                error!("No download URL available for file: {}", item.name.as_ref().map_or("Unknown", |v| v));
-                            }
-                        }
-                        Err(e) => {
-                            error!("Failed to get download URL for {}: {}", item.name.as_ref().map_or("Unknown", |v| v), e);
-                        }
-                    }
-                    if let Some(etag) = &item.etag {
-                        let meta = OnedriveFileMeta {
-                            etag: etag.clone(),
-                            id: item.id.clone(),
-                        };
-                        self.client.metadata_manager().set_onedrive_file_meta(&local_path.to_string_lossy(), &meta)?;
-                    }
-                }
-                
-            }
+            
+            // Step 1: Get changes (delta or initial sync)
+            let changes = self.get_folder_changes(&folder).await?;
+            
+            // Step 2: Process changes in order (maintaining delta order is crucial)
+            self.process_delta_changes(&folder, &changes).await?;
+            
+            // Store delta token for next sync
             if let Some(delta_link) = &changes.delta_link {
                 if let Some(token) = Self::extract_delta_token(delta_link) {
-                    self.client.metadata_manager().store_folder_delta(folder, &token)?;
+                    self.file_manager.metadata_manager().store_folder_delta(&folder, &token)?;
                     info!("Saved delta token for folder: {}", folder);
                 }
             }
         }
-        self.client.metadata_manager().flush()?;
+        
+        self.file_manager.metadata_manager().flush()?;
         Ok(())
     }
 
-    
+    /// Step 1: Get folder changes (delta or initial sync)
+    async fn get_folder_changes(&self, folder: &str) -> Result<crate::onedrive_service::onedrive_models::DriveItemCollection> {
+        let delta_token = self.file_manager.metadata_manager().get_folder_delta(folder)?;
+        
+        if let Some(delta) = delta_token {
+            info!("Delta token found for folder: {}", folder);
+            self.client.get_delta_with_token(folder, &delta.delta_token).await
+        } else {
+            info!("Initial sync for folder: {}", folder);
+            // Clean up local directory for initial sync
+            self.clean_local_directory_for_initial_sync(folder).await?;
+            self.client.get_initial_delta(folder).await
+        }
+    }
+
+    /// Clean local directory for initial sync
+    async fn clean_local_directory_for_initial_sync(&self, folder: &str) -> Result<()> {
+        let local_folder = if folder == "/" {
+            self.config.local_dir.clone()
+        } else {
+            let mut p = self.config.local_dir.clone();
+            p.push(folder.trim_start_matches('/'));
+            p
+        };
+        
+        if local_folder.exists() {
+            for entry in std::fs::read_dir(&local_folder)? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.is_file() {
+                    std::fs::remove_file(&path)?;
+                    info!("Removed local file on initial sync: {:?}", path);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Step 2: Process delta changes in order
+    async fn process_delta_changes(&mut self, folder: &str, changes: &crate::onedrive_service::onedrive_models::DriveItemCollection) -> Result<()> {
+        for item in &changes.value {
+            // a) Get remote path from parent
+            let remote_path = self.get_remote_path_from_item(folder, item)?;
+            
+            // b) Construct corresponding local path
+            let local_path = self.get_local_path_for_item( item);
+            
+            // c) Check if deleted
+            if item.deleted.is_some() {
+                self.handle_deleted_item(&item.id, &local_path).await?;
+                continue;
+            }
+            
+            // d) Check if etag matches (skip if no change needed)
+            if self.should_skip_item(item, &local_path)? {
+                info!("Skipping unchanged item: {}", item.name.as_ref().unwrap_or(&"Unknown".to_string()));
+                continue;
+            }
+            
+            // e) Perform appropriate action
+            if item.folder.is_some() {
+                self.handle_folder_item(item, &local_path).await?;
+            } else if item.file.is_some() {
+                self.handle_file_item(item, &remote_path, &local_path).await?;
+            }
+            
+            // f) Update metadata
+            self.update_item_metadata(item, &local_path).await?;
+        }
+        Ok(())
+    }
+
+    /// Get remote path from item's parent reference
+    fn get_remote_path_from_item(&self, _folder: &str, item: &crate::onedrive_service::onedrive_models::DriveItem) -> Result<String> {
+        let remote_path_from_parent = item.parent_reference.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No parent reference for item"))?
+            .path.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No path in parent reference"))?;
+        
+        // Remove /drive/root: prefix
+        let remote_path_from_parent = remote_path_from_parent.trim_start_matches("/drive/root:");
+        
+        let remote_path = format!("{}/{}", remote_path_from_parent, item.name.as_ref().map_or("Unknown", |v| v));
+        Ok(remote_path)
+    }
+
+    /// Check if item should be skipped (etag matches)
+    fn should_skip_item(&self, item: &crate::onedrive_service::onedrive_models::DriveItem, local_path: &Path) -> Result<bool> {
+        if let Some(etag) = &item.etag {
+            if let Ok(Some(meta)) = self.file_manager.metadata_manager().get_onedrive_file_meta(&local_path.to_string_lossy()) {
+                return Ok(meta.etag == *etag);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Handle deleted item
+    async fn handle_deleted_item(&self, item_id: &str, local_path: &Path) -> Result<()> {
+        if let Some(stored_local_path) = self.file_manager.metadata_manager().get_local_path_from_one_drive_id(item_id)? {
+            let stored_path = PathBuf::from_str(&stored_local_path)?;
+            if stored_path.exists() {
+                if let Err(e) = self.file_manager.delete_file(&stored_path).await {
+                    error!("Failed to delete local file {:?}: {}", stored_path, e);
+                } else {
+                    info!("Deleted local file: {:?}", stored_path);
+                }
+            }
+        }
+        // Delete metadata
+        self.file_manager.metadata_manager().delete_metadata_for_file(item_id)?;
+        Ok(())
+    }
+
+    /// Handle folder item (create directory)
+    async fn handle_folder_item(&self, item: &crate::onedrive_service::onedrive_models::DriveItem, local_path: &Path) -> Result<()> {
+        if let Some(name) = &item.name {
+            info!("Creating local directory: {:?}", local_path);
+            if !local_path.exists() {
+                if let Err(e) = self.file_manager.create_directory(local_path).await {
+                    error!("Failed to create directory {:?}: {}", local_path, e);
+                } else {
+                    info!("Created local directory: {:?}", local_path);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Handle file item (download file)
+    async fn handle_file_item(&self, item: &crate::onedrive_service::onedrive_models::DriveItem, remote_path: &str, local_path: &Path) -> Result<()> {
+        let file_name = item.name.as_ref().map_or("Unknown", |v| v);
+        
+        // Get full item details to get download URL
+        match self.client.get_item_by_path(remote_path).await {
+            Ok(full_item) => {
+                if let Some(download_url) = &full_item.download_url {
+                    match self.client.download_file(download_url, &item.id, file_name).await {
+                        Ok(download_result) => {
+                            match self.file_manager.save_downloaded_file(&download_result, local_path).await {
+                                Ok(_) => info!("Downloaded: {} -> {:?}", file_name, local_path),
+                                Err(e) => error!("Failed to save downloaded file {}: {}", file_name, e),
+                            }
+                        },
+                        Err(e) => error!("Failed to download {}: {}", file_name, e),
+                    }
+                } else {
+                    error!("No download URL available for file: {}", file_name);
+                }
+            }
+            Err(e) => {
+                error!("Failed to get download URL for {}: {}", file_name, e);
+            }
+        }
+        Ok(())
+    }
+
+    /// Update metadata for item
+    async fn update_item_metadata(&self, item: &crate::onedrive_service::onedrive_models::DriveItem, local_path: &Path) -> Result<()> {
+        // Metadata is already updated in save_downloaded_file for files
+        // For folders, we need to add metadata
+        if item.folder.is_some() {
+            self.file_manager.metadata_manager().add_metadata_for_file(&item.id, local_path)?;
+        }
+        Ok(())
+    }
 
     /// Run a single sync cycle
     pub async fn sync_cycle(&mut self) -> Result<()> {
@@ -172,22 +243,23 @@ impl SyncService {
     }
 
     /// Helper: Get local path for a OneDrive item
-    pub fn get_local_path_for_item(&self, folder: &str, item: &crate::onedrive_service::onedrive_models::DriveItem) -> PathBuf {
-        let mut local_path = self.config.local_dir.clone();
-        if folder != "/" {
-            let folder_path = folder.trim_start_matches('/');
-            local_path.push(folder_path);
-        }
-        if item.name.is_none() {
-            panic!("Item name is missing for item with ID: {}", item.id)
-        } else {
-            local_path.push(item.name.as_ref().unwrap().clone());
-        }
-        local_path
+    pub fn get_local_path_for_item(&self, item: &crate::onedrive_service::onedrive_models::DriveItem) -> PathBuf {
+ 
+        // Get the remote path from the parent reference
+        let remote_path_from_parent = item.parent_reference.as_ref().unwrap().path.as_ref().unwrap();
+        // Remove the /drive/root:/ prefix - for joining the path
+        let remote_path_from_parent = remote_path_from_parent.trim_start_matches("/drive/root:/").to_string();
+        // Get the synchronization root
+        let synchronization_root  : PathBuf = self.config.local_dir.clone();
+        // Get the folder path and join it with the item name
+        let file_path = synchronization_root.join(remote_path_from_parent).join(item.name.as_ref().unwrap());
+
+        // Return the file path (wow this is nicely encapsulated logic)
+        file_path
     }
+    
     pub fn get_local_root_path(&self) -> PathBuf {
         let local_path = self.config.local_dir.clone();
-    
         local_path
     }
 
@@ -207,48 +279,35 @@ impl SyncService {
         }
     }
 
+    /// Run the sync daemon
     pub async fn run_daemon(&mut self) -> Result<()> {
         info!("Starting OneDrive sync daemon");
-        info!("Local directory: {:?}", self.config.local_dir);
-        info!("Sync folders: {:?}", self.settings.sync_folders);
-        info!("Sync interval: {:?}", self.config.sync_interval);
-        info!("Press Ctrl+C or send SIGTERM to stop the daemon gracefully");
-
+        
+        // Ensure we're authorized
         self.ensure_authorized().await?;
-
+        
         loop {
+            if let Err(e) = self.sync_cycle().await {
+                error!("Sync cycle failed: {}", e);
+            }
+            
+            // Wait for next sync cycle or shutdown signal
             tokio::select! {
-                _ = Self::wait_for_shutdown() => {
-                    info!("Shutting down gracefully...");
+                _ = sleep(self.config.sync_interval) => {
+                    // Continue to next sync cycle
+                }
+                _ = signal::ctrl_c() => {
+                    info!("Received shutdown signal");
                     break;
                 }
-                _ = async {
-                    if let Err(e) = self.sync_cycle().await {
-                        error!("Sync cycle failed: {}", e);
-                    }
-                    sleep(self.config.sync_interval).await;
-                } => {}
             }
         }
-        info!("Daemon stopped gracefully");
+        
+        info!("OneDrive sync daemon stopped");
         Ok(())
     }
 
-    async fn wait_for_shutdown() {
-        tokio::select! {
-            _ = signal::ctrl_c() => {
-                info!("Received Ctrl+C");
-            }
-            _ = async {
-                let mut sigterm = signal::unix::signal(signal::unix::SignalKind::terminate())
-                    .expect("Failed to create SIGTERM signal handler");
-                sigterm.recv().await;
-            } => {
-                info!("Received SIGTERM");
-            }
-        }
-    }
-
+    /// Extract delta token from delta link URL
     pub fn extract_delta_token(delta_link: &str) -> Option<String> {
         if let Some(token_start) = delta_link.find("token=") {
             let token = &delta_link[token_start + 6..];
