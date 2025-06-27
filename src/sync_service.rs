@@ -1,6 +1,6 @@
 //! SyncService: Handles all OneDrive <-> local sync logic.
 
-use crate::onedrive_client::OneDriveClient;
+use crate::onedrive_service::onedrive_client::OneDriveClient;
 use crate::config::{Settings, SyncConfig};
 use crate::metadata_manager_for_files::OnedriveFileMeta;
 use anyhow::Result;
@@ -9,7 +9,7 @@ use tokio::time::sleep;
 use tokio::signal;
 use log::{info, error, warn};
 use std::str::FromStr;
-use log::debug;
+
 
 /// Service responsible for synchronizing files between OneDrive and local storage.
 pub struct SyncService {
@@ -155,12 +155,7 @@ impl SyncService {
         Ok(())
     }
 
-    /// Sync files from local directory to OneDrive
-    pub async fn sync_to_remote(&self) -> Result<()> {
-        info!("Starting sync to remote...");
-        // TODO: Implement proper local-to-remote sync using changed queue
-        Ok(())
-    }
+    
 
     /// Run a single sync cycle
     pub async fn sync_cycle(&mut self) -> Result<()> {
@@ -177,7 +172,7 @@ impl SyncService {
     }
 
     /// Helper: Get local path for a OneDrive item
-    pub fn get_local_path_for_item(&self, folder: &str, item: &crate::onedrive_client::DriveItem) -> PathBuf {
+    pub fn get_local_path_for_item(&self, folder: &str, item: &crate::onedrive_service::onedrive_models::DriveItem) -> PathBuf {
         let mut local_path = self.config.local_dir.clone();
         if folder != "/" {
             let folder_path = folder.trim_start_matches('/');
@@ -191,7 +186,7 @@ impl SyncService {
         local_path
     }
     pub fn get_local_root_path(&self) -> PathBuf {
-        let mut local_path = self.config.local_dir.clone();
+        let local_path = self.config.local_dir.clone();
     
         local_path
     }

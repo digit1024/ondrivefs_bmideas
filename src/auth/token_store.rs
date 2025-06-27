@@ -104,31 +104,7 @@ impl TokenStore {
         }
     }
 
-    /// Check if tokens exist in storage
-    pub fn has_tokens(&self) -> bool {
-        if self.is_keyring_available() {
-            if let Some(ref entry) = self.keyring_entry {
-                return entry.get_password().is_ok();
-            }
-        }
-        
-        self.file_path.exists()
-    }
 
-    /// Clear tokens from storage
-    pub fn clear_tokens(&self) -> Result<()> {
-        if self.is_keyring_available() {
-            if let Some(ref entry) = self.keyring_entry {
-                entry.delete_password().ok(); // Ignore errors if password doesn't exist
-            }
-        }
-        
-        if self.file_path.exists() {
-            fs::remove_file(&self.file_path)?;
-        }
-        
-        Ok(())
-    }
 
     /// Get storage method info for debugging
     pub fn get_storage_info(&self) -> String {

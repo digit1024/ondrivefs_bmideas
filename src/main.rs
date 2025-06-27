@@ -2,20 +2,20 @@ mod auth;
 
 use anyhow::Result;
 use clap::{Arg, Command};
-use log::{info, warn , debug };
+
 use std::{path::PathBuf};
 use std::time::Duration;
 
 
 
-mod onedrive_client;
+mod onedrive_service;
 
 mod config;
 mod metadata_manager_for_files;
 
 
 use auth::onedrive_auth::OneDriveAuth;
-use onedrive_client::OneDriveClient;
+use onedrive_service::onedrive_client::OneDriveClient;
 use config::{Settings, SyncConfig};
 
 mod sync_service;
@@ -132,7 +132,7 @@ async fn main() -> Result<()> {
         return Ok(());
     }
     if matches.get_flag("settings-list-folders-to-sync") {
-        let settings = Settings::load()?;
+        let settings = Settings::load_from_file()?;
         println!("Folders set to sync:");
         for folder in &settings.sync_folders {
             println!("- {}", folder);
@@ -192,10 +192,10 @@ async fn main() -> Result<()> {
 
     // Handle settings management options
     if let Some(folder) = matches.get_one::<String>("settings-add-folder-to-sync") {
-        let mut settings = Settings::load()?;
+        let mut settings = Settings::load_from_file()?;
         if !settings.sync_folders.contains(folder) {
             settings.sync_folders.push(folder.clone());
-            settings.save()?;
+            settings.save_to_file()?;
             println!("Added '{}' to sync folders.", folder);
         } else {
             println!("'{}' is already in the sync folders list.", folder);
@@ -203,10 +203,10 @@ async fn main() -> Result<()> {
         return Ok(());
     }
     if let Some(folder) = matches.get_one::<String>("settings-remove-folder-to-sync") {
-        let mut settings = Settings::load()?;
+        let mut settings = Settings::load_from_file()?;
         if let Some(pos) = settings.sync_folders.iter().position(|f| f == folder) {
             settings.sync_folders.remove(pos);
-            settings.save()?;
+            settings.save_to_file()?;
             println!("Removed '{}' from sync folders.", folder);
         } else {
             println!("'{}' was not found in the sync folders list.", folder);
@@ -214,7 +214,7 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    let settings = Settings::load()?;
+    let settings = Settings::load_from_file()?;
     let client = OneDriveClient::new()?;
     
 

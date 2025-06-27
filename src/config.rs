@@ -34,7 +34,7 @@ impl Default for SyncConfig {
 }
 
 impl Settings {
-    pub fn config_path() -> Result<PathBuf> {
+    pub fn get_settings_path() -> Result<PathBuf> {
         let mut path = dirs::home_dir().ok_or_else(|| anyhow!("Could not determine home directory"))?;
         println!("path: {:?}", path);
 
@@ -44,12 +44,12 @@ impl Settings {
         Ok(path)
     }
 
-    pub fn load() -> Result<Self> {
-        let path = Self::config_path()?;
+    pub fn load_from_file() -> Result<Self> {
+        let path = Self::get_settings_path()?;
         if !path.exists() {
             // Create default settings file if it doesn't exist
             let default = Self::default();
-            default.save()?;
+            default.save_to_file()?;
             return Ok(default);
         }
         let data = fs::read_to_string(&path)?;
@@ -57,8 +57,8 @@ impl Settings {
         Ok(settings)
     }
 
-    pub fn save(&self) -> Result<()> {
-        let path = Self::config_path()?;
+    pub fn save_to_file(&self) -> Result<()> {
+        let path = Self::get_settings_path()?;
         let data = serde_json::to_string_pretty(self)?;
         fs::write(path, data)?;
         Ok(())
@@ -88,8 +88,8 @@ mod tests {
         let mut settings = Settings::default();
         settings.sync_folders = vec!["/Documents".to_string(), "/Pictures".to_string()];
         
-        settings.save().unwrap();
-        let loaded = Settings::load().unwrap();
+        settings.save_to_file().unwrap();
+        let loaded = Settings::load_from_file().unwrap();
         assert_eq!(loaded.sync_folders, settings.sync_folders);
     }
 

@@ -1,10 +1,11 @@
 use anyhow::{anyhow, Result};
 use reqwest::Client;
-use serde::Deserialize;
+
 use std::path::Path;
 use tokio::fs;
 use urlencoding;
 use log::info;
+use crate::onedrive_service::onedrive_models::{DriveItem, DriveItemCollection };
 
 use crate::auth::onedrive_auth::OneDriveAuth;
 use crate::metadata_manager_for_files::MetadataManagerForFiles;
@@ -12,58 +13,13 @@ use crate::metadata_manager_for_files::MetadataManagerForFiles;
 
 const GRAPH_API_BASE: &str = "https://graph.microsoft.com/v1.0";
 
-#[derive(Debug, Deserialize)]
-pub struct ParentReference {
-    pub id: String,
-    pub path: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct DriveItem {
-    pub id: String,
-    pub name: Option<String>,
-    #[serde(rename = "eTag")]
-    pub etag: Option<String>,
-    #[serde(rename = "lastModifiedDateTime")]
-    pub last_modified: Option<String>,
-    pub size: Option<u64>,
-    pub folder: Option<FolderFacet>,
-    pub file: Option<FileFacet>,
-    #[serde(rename = "@microsoft.graph.downloadUrl")]
-    pub download_url: Option<String>,
-    /// Indicates if the item was deleted
-    pub deleted: Option<serde_json::Value>,
-    #[serde(rename = "parentReference")]
-    pub parent_reference: Option<ParentReference>,
-}
-
-
-#[derive(Debug, Deserialize)]
-pub struct FolderFacet {
-    #[serde(rename = "childCount")]
-    pub child_count: u32,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct FileFacet {
-    #[serde(rename = "mimeType")]
-    pub mime_type: Option<String>,  // Changed from String to Option<String>
-}
-
-#[derive(Debug, Deserialize)]
-pub struct DriveItemCollection {
-    pub value: Vec<DriveItem>,
-    #[serde(rename = "@odata.nextLink")]
-    pub next_link: Option<String>,
-    #[serde(rename = "@odata.deltaLink")]
-    pub delta_link: Option<String>,
-}
 
 pub struct OneDriveClient {
     client: Client,
     auth: OneDriveAuth,
     metadata_manager: MetadataManagerForFiles,
 }
+
 
 impl OneDriveClient {
     pub fn new() -> Result<Self> {
@@ -82,18 +38,18 @@ impl OneDriveClient {
 
     /// List items in root directory
     pub async fn list_root(&self) -> Result<Vec<DriveItem>> {
-        self.list_folder("/me/drive/root/children").await
+        self.list_folder_by_url("/me/drive/root/children").await
     }
 
     /// List items in a specific folder by path
     pub async fn list_folder_by_path(&self, path: &str) -> Result<Vec<DriveItem>> {
         let encoded_path = urlencoding::encode(path);
         let url = format!("{}/me/drive/root:{}:/children", GRAPH_API_BASE, encoded_path);
-        self.list_folder(&url).await
+        self.list_folder_by_url(&url).await
     }
 
-    /// List items in a folder (generic)
-    async fn list_folder(&self, url: &str) -> Result<Vec<DriveItem>> {
+    /// List items in a folder 
+    async fn list_folder_by_url(&self, url: &str) -> Result<Vec<DriveItem>> {
         let auth_header = self.auth_header().await?;
         
         let full_url = if url.starts_with("http") {
@@ -118,7 +74,7 @@ impl OneDriveClient {
     }
 
     /// Download a file by its download URL and store metadata
-    pub async fn download_file(&self, download_url: &str, local_path: &Path, onedrive_id: &str, name: &str, etag: Option<&String>) -> Result<()> {
+    pub async fn download_file(&self, download_url: &str, local_path: &Path, onedrive_id: &str, _name: &str, etag: Option<&String>) -> Result<()> {
         let response = self.client
             .get(download_url)
             .send()
