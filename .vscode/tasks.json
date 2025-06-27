@@ -2,13 +2,32 @@
     "version": "2.0.0",
     "tasks": [
         {
+            "label": "Print PATH",
+            "type": "shell",
+            "command": "echo $PATH",
+            "options": {
+                "shell": {
+                    "executable": "zsh",
+                    "args": [
+                        "-c"
+                    ]
+                }
+            },
+            "problemMatcher": []
+        },
+        {
             "label": "cargo build",
             "type": "shell",
             "command": "cargo",
-            "args": ["build"],
+            "args": [
+                "build"
+            ],
             "options": {
                 "shell": {
-                    "executable": "zsh"
+                    "executable": "zsh",
+                    "args": [
+                        "-c"
+                    ]
                 }
             },
             "group": {
@@ -31,10 +50,15 @@
             "label": "cargo run",
             "type": "shell",
             "command": "cargo",
-            "args": ["run"],
+            "args": [
+                "run"
+            ],
             "options": {
                 "shell": {
-                    "executable": "zsh"
+                    "executable": "zsh",
+                    "args": [
+                        "-c"
+                    ]
                 }
             },
             "group": "test",
@@ -51,10 +75,15 @@
             "label": "cargo test",
             "type": "shell",
             "command": "cargo",
-            "args": ["test"],
+            "args": [
+                "test"
+            ],
             "options": {
                 "shell": {
-                    "executable": "zsh"
+                    "executable": "zsh",
+                    "args": [
+                        "-c"
+                    ]
                 }
             },
             "group": "test",
@@ -74,10 +103,15 @@
             "label": "cargo check",
             "type": "shell",
             "command": "cargo",
-            "args": ["check"],
+            "args": [
+                "check"
+            ],
             "options": {
                 "shell": {
-                    "executable": "zsh"
+                    "executable": "zsh",
+                    "args": [
+                        "-c"
+                    ]
                 }
             },
             "group": "build",
@@ -97,10 +131,15 @@
             "label": "cargo clippy",
             "type": "shell",
             "command": "cargo",
-            "args": ["clippy"],
+            "args": [
+                "clippy"
+            ],
             "options": {
                 "shell": {
-                    "executable": "zsh"
+                    "executable": "zsh",
+                    "args": [
+                        "-c"
+                    ]
                 }
             },
             "group": "build",
@@ -120,10 +159,15 @@
             "label": "cargo clean",
             "type": "shell",
             "command": "cargo",
-            "args": ["clean"],
+            "args": [
+                "clean"
+            ],
             "options": {
                 "shell": {
-                    "executable": "zsh"
+                    "executable": "zsh",
+                    "args": [
+                        "-c"
+                    ]
                 }
             },
             "group": "build",

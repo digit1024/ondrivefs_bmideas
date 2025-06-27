@@ -55,6 +55,7 @@ impl MetadataManagerForFiles {
         };
         
         info!("Initialized metadata manager with sled database at {:?}", db_path);
+        manager.flush().unwrap();
         Ok(manager)
     }
 
@@ -244,6 +245,7 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
     use std::env;
+    use serial_test::serial;
 
     fn setup_test_env() {
         let temp_dir = tempdir().unwrap();
@@ -253,6 +255,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_file_metadata_operations() {
         setup_test_env();
         
@@ -278,6 +281,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_folder_delta_operations() {
         setup_test_env();
         
@@ -297,6 +301,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_changed_queue_operations() {
         setup_test_env();
         
@@ -325,6 +330,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_all_mappings() {
         setup_test_env();
         
@@ -341,6 +347,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_stats() {
         setup_test_env();
         

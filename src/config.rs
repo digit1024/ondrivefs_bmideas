@@ -21,7 +21,7 @@ pub struct SyncConfig {
 }
 
 impl Default for SyncConfig {
-    fn default() -> Self {
+    fn  default() -> Self {
         let mut local_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
         local_dir.push("OneDrive");
         
@@ -36,6 +36,8 @@ impl Default for SyncConfig {
 impl Settings {
     pub fn config_path() -> Result<PathBuf> {
         let mut path = dirs::home_dir().ok_or_else(|| anyhow!("Could not determine home directory"))?;
+        println!("path: {:?}", path);
+
         path.push(".onedrive");
         fs::create_dir_all(&path)?;
         path.push("settings.json");
@@ -66,19 +68,38 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
+    use std::env;
+    use serial_test::serial;
+
+    
+
+    fn setup_test_env() {
+        let temp_dir = tempdir().unwrap();
+        unsafe {
+            env::set_var("HOME", temp_dir.path());
+        }
+    }
 
     #[test]
+    #[serial]
     fn test_settings_load_and_save() {
+        setup_test_env();
         let mut settings = Settings::default();
         settings.sync_folders = vec!["/Documents".to_string(), "/Pictures".to_string()];
+        
         settings.save().unwrap();
         let loaded = Settings::load().unwrap();
         assert_eq!(loaded.sync_folders, settings.sync_folders);
     }
 
     #[test]
+    #[serial]
     fn test_sync_config_default() {
+        println!("test_sync_config_default");
+        setup_test_env();
         let config = SyncConfig::default();
+        println!("config: {:?}", config);
         assert!(config.local_dir.to_string_lossy().contains("OneDrive"));
         assert_eq!(config.remote_dir, "/");
         assert_eq!(config.sync_interval, Duration::from_secs(120));

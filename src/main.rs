@@ -441,15 +441,3 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_sync_config_default() {
-        let config = SyncConfig::default();
-        assert_eq!(config.local_dir, PathBuf::from("./sync"));
-        assert_eq!(config.remote_dir, "/sync");
-        assert_eq!(config.sync_interval, Duration::from_secs(300));
-    }
-}
