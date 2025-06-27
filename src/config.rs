@@ -6,14 +6,14 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct Settings {
     /// List of OneDrive folders to sync
     pub sync_folders: Vec<String>,
     // Add more settings as needed
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SyncConfig {
     pub local_dir: PathBuf,
     pub remote_dir: String,

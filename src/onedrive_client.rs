@@ -6,16 +6,24 @@ use tokio::fs;
 use urlencoding;
 use log::info;
 
-use crate::onedrive_auth::OneDriveAuth;
+use crate::auth::onedrive_auth::OneDriveAuth;
 use crate::metadata_manager_for_files::MetadataManagerForFiles;
 
 
 const GRAPH_API_BASE: &str = "https://graph.microsoft.com/v1.0";
 
 #[derive(Debug, Deserialize)]
+pub struct ParentReference {
+    pub id: String,
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct DriveItem {
     pub id: String,
     pub name: Option<String>,
+    #[serde(rename = "eTag")]
+    pub etag: Option<String>,
     #[serde(rename = "lastModifiedDateTime")]
     pub last_modified: Option<String>,
     pub size: Option<u64>,
@@ -25,7 +33,10 @@ pub struct DriveItem {
     pub download_url: Option<String>,
     /// Indicates if the item was deleted
     pub deleted: Option<serde_json::Value>,
+    #[serde(rename = "parentReference")]
+    pub parent_reference: Option<ParentReference>,
 }
+
 
 #[derive(Debug, Deserialize)]
 pub struct FolderFacet {
@@ -107,7 +118,7 @@ impl OneDriveClient {
     }
 
     /// Download a file by its download URL and store metadata
-    pub async fn download_file(&self, download_url: &str, local_path: &Path, onedrive_id: &str, _name: &str) -> Result<()> {
+    pub async fn download_file(&self, download_url: &str, local_path: &Path, onedrive_id: &str, name: &str, etag: Option<&String>) -> Result<()> {
         let response = self.client
             .get(download_url)
             .send()
@@ -128,6 +139,14 @@ impl OneDriveClient {
         
         // Store metadata after successful download
         self.metadata_manager.add_metadata_for_file(onedrive_id, local_path)?;
+        // Store etag/id in path_to_onedrive_metadata
+        if let Some(etag) = etag {
+            let meta = crate::metadata_manager_for_files::OnedriveFileMeta {
+                etag: etag.to_string(),
+                id: onedrive_id.to_string(),
+            };
+            self.metadata_manager.set_onedrive_file_meta(&local_path.to_string_lossy(), &meta)?;
+        }
         
         info!("Downloaded file: {} (ID: {})", local_path.to_string_lossy(), onedrive_id);
         Ok(())
@@ -340,7 +359,7 @@ impl OneDriveClient {
                     if item.file.is_some() {
                         // It's a file - download it
                         if let Some(download_url) = &item.download_url {
-                            self.download_file(download_url, &local_path, &item.id, name).await?;
+                            self.download_file(download_url, &local_path, &item.id, name, None).await?;
                         }
                     } else if item.folder.is_some() {
                         // It's a folder - create it

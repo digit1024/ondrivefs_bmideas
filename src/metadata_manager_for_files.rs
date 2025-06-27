@@ -18,10 +18,18 @@ pub struct FolderDelta {
     pub last_sync: i64,
 }
 
+/// Onedrive file metadata
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OnedriveFileMeta {
+    pub etag: String,
+    pub id: String,
+}
+
 /// Metadata manager using sled key-value storage
 pub struct MetadataManagerForFiles {
     db: Db,
     files_mapping: Tree,
+    path_to_onedrive_metadata: Tree,
     folder_deltas: Tree,
     changed_queue: Tree,
 }
@@ -46,12 +54,14 @@ impl MetadataManagerForFiles {
         let files_mapping = db.open_tree("files_mapping")?;
         let folder_deltas = db.open_tree("folder_deltas")?;
         let changed_queue = db.open_tree("changed_queue")?;
+        let path_to_onedrive_metadata = db.open_tree("path_to_onedrive_metadata")?;
         
         let manager = Self {
             db,
             files_mapping,
             folder_deltas,
             changed_queue,
+            path_to_onedrive_metadata,
         };
         
         info!("Initialized metadata manager with sled database at {:?}", db_path);
@@ -229,6 +239,30 @@ impl MetadataManagerForFiles {
         stats.insert("changed_queue_count".to_string(), self.changed_queue.len());
         
         Ok(stats)
+    }
+
+    /// Set OneDrive file metadata (etag, id) for a local path
+    pub fn set_onedrive_file_meta(&self, path: &str, meta: &OnedriveFileMeta) -> Result<()> {
+        let json_value = serde_json::to_string(meta)?;
+        self.path_to_onedrive_metadata.insert(path.as_bytes(), json_value.as_bytes())?;
+        Ok(())
+    }
+
+    /// Get OneDrive file metadata (etag, id) for a local path
+    pub fn get_onedrive_file_meta(&self, path: &str) -> Result<Option<OnedriveFileMeta>> {
+        if let Some(value) = self.path_to_onedrive_metadata.get(path.as_bytes())? {
+            let json_str = String::from_utf8(value.to_vec())?;
+            let meta: OnedriveFileMeta = serde_json::from_str(&json_str)?;
+            Ok(Some(meta))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Remove OneDrive file metadata for a local path
+    pub fn remove_onedrive_file_meta(&self, path: &str) -> Result<()> {
+        self.path_to_onedrive_metadata.remove(path.as_bytes())?;
+        Ok(())
     }
 }
 

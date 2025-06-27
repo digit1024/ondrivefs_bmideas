@@ -1,3 +1,5 @@
+
+
 use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rand::Rng;
@@ -9,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tiny_http::{Server, Response, Header};
 use url::Url;
 
-use crate::token_store::{TokenStore, AuthConfig};
+use crate::auth::token_store::{TokenStore, AuthConfig};
 
 const CLIENT_ID: &str = "95367b4f-624c-452c-b099-bfc9c27b69b9"; // Replace with your Azure app ID
 const REDIRECT_URI: &str = "http://localhost:8080/callback";
