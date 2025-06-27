@@ -24,6 +24,10 @@ if [ -f "$METADATA_FILE" ]; then
 else
     	echo "No metadata file found at $METADATA_FILE"
 fi
+cd ~/OneDrive
+rm -rf *
+echo "OneDrive directory cleaned (~/OneDrive)"
+
 
 # Optionally, remove settings file if you want a full reset
 # Uncomment the following lines if you want to remove settings as well
