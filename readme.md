@@ -98,3 +98,6 @@ nohup cargo run -- --mount > onedrive-mount.log 2>&1 &
 ---
 
 *Work in progress.*
+
+Build requirements POP OS 24.04 (Aplha 7)
+sudo apt install build-essential pkg-config libssl-dev libfuse-dev fuse keyutils ca-certificates curl

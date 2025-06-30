@@ -37,10 +37,11 @@ impl SyncService {
     pub async fn init(&mut self) -> Result<()> {
         //if delta already exists in metadata manager then we can skip the initial sync
         let delta_token = self.file_manager.metadata_manager().get_folder_delta(&"".to_string())?;
-        if delta_token.is_none() {
+        if delta_token.is_none()   {
             info!("No delta token found, getting initial directory cache");
-            //self.get_initial_directory_cache(None).await?;
+            self.get_initial_directory_cache(None).await?;
         }
+        
         
         info!("Delta token found, skipping initial sync");
         info!("Delta token: {}", delta_token.unwrap().delta_token);

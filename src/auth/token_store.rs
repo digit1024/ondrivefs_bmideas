@@ -52,16 +52,18 @@ impl TokenStore {
 
     /// Check if keyring is available and working
     fn is_keyring_available(&self) -> bool {
-        if let Some(ref entry) = self.keyring_entry {
-            // Try to get a password for a dummy entry to test keyring availability
-            match entry.get_password() {
-                Ok(_) => true, // Key exists (unexpected, but keyring works)
-                Err(keyring::Error::NoEntry) => true, // Keyring works, key doesn't exist
-                Err(_) => false, // Keyring backend not available
-            }
-        } else {
-            false // No keyring entry created
-        }
+        //TODO: ON POP OS ALPHA 7 KEYRING IS NOT WORKING - NEED TO FIX THIS
+        return false;       
+        // if let Some(ref entry) = self.keyring_entry {
+        //     // Try to get a password for a dummy entry to test keyring availability
+        //     match entry.get_password() {
+        //         Ok(_) => true, // Key exists (unexpected, but keyring works)
+        //         Err(keyring::Error::NoEntry) => true, // Keyring works, key doesn't exist
+        //         Err(_) => false, // Keyring backend not available
+        //     }
+        // } else {
+        //     false // No keyring entry created
+        // }
     }
 
     /// Save tokens to storage (keyring if available, file otherwise)

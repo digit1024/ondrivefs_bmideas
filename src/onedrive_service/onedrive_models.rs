@@ -18,6 +18,7 @@ pub struct DeltaResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DeltaResponseApi{    
+    #[serde(default)]
     pub value: Vec<DriveItem>,
     #[serde(rename = "@odata.nextLink")]
     pub next_link: Option<String>,
