@@ -28,8 +28,8 @@ pub struct OnedriveFileMeta {
 /// Metadata manager using sled key-value storage
 pub struct MetadataManagerForFiles {
     db: Db,
-    files_mapping: Tree,
-    path_to_onedrive_metadata: Tree,
+    
+    
     folder_deltas: Tree,
     changed_queue: Tree,
 }
@@ -58,10 +58,10 @@ impl MetadataManagerForFiles {
         
         let manager = Self {
             db,
-            files_mapping,
+            
             folder_deltas,
             changed_queue,
-            path_to_onedrive_metadata,
+            
         };
         
         info!("Initialized metadata manager with sled database at {:?}", db_path);
@@ -69,61 +69,9 @@ impl MetadataManagerForFiles {
         Ok(manager)
     }
 
-    /// Add metadata for a file (OneDrive ID -> local path mapping)
-    pub fn add_metadata_for_file(&self, onedrive_id: &str, local_path: &Path) -> Result<()> {
-        let metadata = FileMetadata {
-            local_path: local_path.to_string_lossy().to_string(),
-        };
-        
-        let json_value = serde_json::to_string(&metadata)?;
-        self.files_mapping.insert(onedrive_id.as_bytes(), json_value.as_bytes())?;
-        
-        info!("Added file metadata: {} -> {}", onedrive_id, local_path.display());
-        Ok(())
-    }
 
-    /// Delete metadata for a file
-    pub fn delete_metadata_for_file(&self, onedrive_id: &str) -> Result<()> {
-        let removed = self.files_mapping.remove(onedrive_id.as_bytes())?;
-        
-        if removed.is_some() {
-            info!("Deleted file metadata: {}", onedrive_id);
-        } else {
-            warn!("No file metadata found to delete: {}", onedrive_id);
-        }
-        
-        Ok(())
-    }
 
-    /// Get local path from OneDrive ID
-    pub fn get_local_path_from_one_drive_id(&self, onedrive_id: &str) -> Result<Option<String>> {
-        if let Some(value) = self.files_mapping.get(onedrive_id.as_bytes())? {
-            let json_str = String::from_utf8(value.to_vec())?;
-            let metadata: FileMetadata = serde_json::from_str(&json_str)?;
-            Ok(Some(metadata.local_path))
-        } else {
-            Ok(None)
-        }
-    }
 
-    /// Get OneDrive ID from local path (reverse lookup)
-    pub fn get_one_drive_id_from_local_path(&self, local_path: &Path) -> Result<Option<String>> {
-        let path_str = local_path.to_string_lossy();
-        
-        // Scan through all entries to find matching local path
-        for result in self.files_mapping.iter() {
-            let (key, value) = result?;
-            let json_str = String::from_utf8(value.to_vec())?;
-            let metadata: FileMetadata = serde_json::from_str(&json_str)?;
-            
-            if metadata.local_path == path_str {
-                let onedrive_id = String::from_utf8(key.to_vec())?;
-                return Ok(Some(onedrive_id));
-            }
-        }
-        
-        Ok(None)
-    }
 
     /// Store delta token for a folder
     pub fn store_folder_delta(&self, folder_path: &str, delta_token: &str) -> Result<()> {
@@ -192,21 +140,7 @@ impl MetadataManagerForFiles {
         Ok(())
     }
 
-    /// Get all file mappings
-    pub fn get_all_file_mappings(&self) -> Result<HashMap<String, String>> {
-        let mut mappings = HashMap::new();
-        
-        for result in self.files_mapping.iter() {
-            let (key, value) = result?;
-            let onedrive_id = String::from_utf8(key.to_vec())?;
-            let json_str = String::from_utf8(value.to_vec())?;
-            let metadata: FileMetadata = serde_json::from_str(&json_str)?;
-            
-            mappings.insert(onedrive_id, metadata.local_path);
-        }
-        
-        Ok(mappings)
-    }
+
 
     /// Get all folder deltas
     pub fn get_all_folder_deltas(&self) -> Result<HashMap<String, FolderDelta>> {
@@ -230,40 +164,12 @@ impl MetadataManagerForFiles {
         Ok(())
     }
 
-    /// Get database statistics
-    pub fn get_stats(&self) -> Result<HashMap<String, usize>> {
-        let mut stats = HashMap::new();
-        
-        stats.insert("files_mapping_count".to_string(), self.files_mapping.len());
-        stats.insert("folder_deltas_count".to_string(), self.folder_deltas.len());
-        stats.insert("changed_queue_count".to_string(), self.changed_queue.len());
-        
-        Ok(stats)
-    }
 
-    /// Set OneDrive file metadata (etag, id) for a local path
-    pub fn set_onedrive_file_meta(&self, path: &str, meta: &OnedriveFileMeta) -> Result<()> {
-        let json_value = serde_json::to_string(meta)?;
-        self.path_to_onedrive_metadata.insert(path.as_bytes(), json_value.as_bytes())?;
-        Ok(())
-    }
 
-    /// Get OneDrive file metadata (etag, id) for a local path
-    pub fn get_onedrive_file_meta(&self, path: &str) -> Result<Option<OnedriveFileMeta>> {
-        if let Some(value) = self.path_to_onedrive_metadata.get(path.as_bytes())? {
-            let json_str = String::from_utf8(value.to_vec())?;
-            let meta: OnedriveFileMeta = serde_json::from_str(&json_str)?;
-            Ok(Some(meta))
-        } else {
-            Ok(None)
-        }
-    }
 
-    /// Remove OneDrive file metadata for a local path
-    pub fn remove_onedrive_file_meta(&self, path: &str) -> Result<()> {
-        self.path_to_onedrive_metadata.remove(path.as_bytes())?;
-        Ok(())
-    }
+
+
+    
 }
 
 impl Drop for MetadataManagerForFiles {
@@ -288,31 +194,7 @@ mod tests {
         }
     }
 
-    #[test]
-    #[serial]
-    fn test_file_metadata_operations() {
-        setup_test_env();
-        
-        let manager = MetadataManagerForFiles::new().unwrap();
-        let test_id = "test_onedrive_id_123";
-        let test_path = Path::new("/home/user/test_file.txt");
-        
-        // Test adding metadata
-        manager.add_metadata_for_file(test_id, test_path).unwrap();
-        
-        // Test retrieving metadata
-        let retrieved_path = manager.get_local_path_from_one_drive_id(test_id).unwrap();
-        assert_eq!(retrieved_path, Some(test_path.to_string_lossy().to_string()));
-        
-        // Test reverse lookup
-        let retrieved_id = manager.get_one_drive_id_from_local_path(test_path).unwrap();
-        assert_eq!(retrieved_id, Some(test_id.to_string()));
-        
-        // Test deleting metadata
-        manager.delete_metadata_for_file(test_id).unwrap();
-        let deleted_path = manager.get_local_path_from_one_drive_id(test_id).unwrap();
-        assert_eq!(deleted_path, None);
-    }
+  
 
     #[test]
     #[serial]
@@ -363,38 +245,5 @@ mod tests {
         assert_eq!(files.len(), 0);
     }
 
-    #[test]
-    #[serial]
-    fn test_get_all_mappings() {
-        setup_test_env();
-        
-        let manager = MetadataManagerForFiles::new().unwrap();
-        
-        // Add multiple mappings
-        manager.add_metadata_for_file("id1", Path::new("/file1.txt")).unwrap();
-        manager.add_metadata_for_file("id2", Path::new("/file2.txt")).unwrap();
-        
-        let mappings = manager.get_all_file_mappings().unwrap();
-        assert_eq!(mappings.len(), 2);
-        assert_eq!(mappings.get("id1"), Some(&"/file1.txt".to_string()));
-        assert_eq!(mappings.get("id2"), Some(&"/file2.txt".to_string()));
-    }
-
-    #[test]
-    #[serial]
-    fn test_get_stats() {
-        setup_test_env();
-        
-        let manager = MetadataManagerForFiles::new().unwrap();
-        
-        // Add some data
-        manager.add_metadata_for_file("id1", Path::new("/file1.txt")).unwrap();
-        manager.store_folder_delta("/docs", "token1").unwrap();
-        manager.add_to_changed_queue("/file1.txt").unwrap();
-        
-        let stats = manager.get_stats().unwrap();
-        assert_eq!(stats.get("files_mapping_count"), Some(&1));
-        assert_eq!(stats.get("folder_deltas_count"), Some(&1));
-        assert_eq!(stats.get("changed_queue_count"), Some(&1));
-    }
+   
 } 

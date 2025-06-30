@@ -2,25 +2,13 @@
     "version": "0.2.0",
     "configurations": [
         
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Cargo test",
-            "cargo": {
-                "args": [
-                    "test",
-                    "--no-run",
-                    "--lib"
-                ]
-            },
-            "args": []
-        },
+
         {
             "name": "Debug Rust (LLDB, WSL2)",
             "type": "lldb",
             "request": "launch",
             "program": "${workspaceFolder}/target/debug/onedrive-sync",
-            "args": ["--daemon"],
+            "args": ["--fuse"],
             "cwd": "${workspaceFolder}",
             "sourceLanguages": ["rust"],
             "env": {

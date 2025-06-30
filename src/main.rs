@@ -30,35 +30,15 @@ async fn main() -> Result<()> {
     let matches = Command::new("OneDrive Sync")
         .version("1.0")
         .about("OneDrive synchronization daemon for Linux")
+        
         .arg(
-            Arg::new("daemon")
-                .short('d')
-                .long("daemon")
+            Arg::new("fuse")
+                .short('f')
+                .long("fuse")
                 .action(clap::ArgAction::SetTrue)
-                .help("Run in daemon mode")
+                .help("Fuse the local directory with the OneDrive directory")
         )
-        .arg(
-            Arg::new("local-dir")
-                .short('l')
-                .long("local-dir")
-                .value_name("PATH")
-                .help("Local directory to sync")
-        )
-        .arg(
-            Arg::new("remote-dir")
-                .short('r')
-                .long("remote-dir")
-                .value_name("PATH")
-                .help("Remote directory to sync")
-        )
-        .arg(
-            Arg::new("interval")
-                .short('i')
-                .long("interval")
-                .value_name("SECONDS")
-                .help("Sync interval in seconds")
-                .default_value("15")
-        )
+        
         .arg(
             Arg::new("auth")
                 .long("auth")
@@ -113,17 +93,11 @@ async fn main() -> Result<()> {
 
     let mut config = SyncConfig::default();
 
-    if let Some(local_dir) = matches.get_one::<String>("local-dir") {
-        config.local_dir = PathBuf::from(local_dir);
-    }
 
-    if let Some(remote_dir) = matches.get_one::<String>("remote-dir") {
-        config.remote_dir = remote_dir.clone();
-    }
 
-    if let Some(interval) = matches.get_one::<String>("interval") {
-        config.sync_interval = Duration::from_secs(interval.parse()?);
-    }
+
+
+
 
     // Handle different modes
     if matches.get_flag("auth") {
@@ -133,12 +107,14 @@ async fn main() -> Result<()> {
         println!("Authorization completed!");
         return Ok(());
     }
-    if matches.get_flag("settings-list-folders-to-sync") {
+    
+
+    if matches.get_flag("fuse") {
+        let client = OneDriveClient::new()?;
         let settings = Settings::load_from_file()?;
-        println!("Folders set to sync:");
-        for folder in &settings.sync_folders {
-            println!("- {}", folder);
-        }
+        let mut daemon = SyncService::new(client, config.clone(), settings.clone()).await?;
+        daemon.init().await?;
+        
         return Ok(());
     }
 
@@ -234,15 +210,7 @@ async fn main() -> Result<()> {
     let client = OneDriveClient::new()?;
     
 
-    if matches.get_flag("daemon") {
-        let mut daemon = SyncService::new(client, config.clone(), settings.clone()).await?;
-        daemon.run_daemon().await?;
-    } else {
-        let mut daemon = SyncService::new(client, config.clone(), settings.clone()).await?;
-        daemon.ensure_authorized().await?;
-        daemon.sync_cycle().await?;
-        println!("Sync completed!");
-    }
+    
 
     Ok(())
 }

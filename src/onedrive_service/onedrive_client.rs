@@ -3,12 +3,7 @@ use reqwest::Client;
 use urlencoding;
 use log::info;
 use crate::onedrive_service::onedrive_models::{
-    DriveItem, 
-    DriveItemCollection,
-    DownloadResult,
-    UploadResult,
-    CreateFolderResult,
-    DeleteResult
+    CreateFolderResult, DeleteResult, DeltaResponse, DeltaResponseApi, DownloadResult, DriveItem, DriveItemCollection, UploadResult
 };
 use crate::auth::onedrive_auth::OneDriveAuth;
 
@@ -43,7 +38,14 @@ impl OneDriveClient {
     /// List items in a specific folder by path
     pub async fn list_folder_by_path(&self, path: &str) -> Result<Vec<DriveItem>> {
         let encoded_path = urlencoding::encode(path);
-        let url = format!("{}/me/drive/root:{}:/children", GRAPH_API_BASE, encoded_path);
+        //if root "/" or empty then use /me/drive/root/children
+        
+        let url = if path == "/" || path.is_empty() {
+            "/me/drive/root/children".to_string()
+        } else {
+            format!("{}/me/drive/root:{}:/children", GRAPH_API_BASE, encoded_path)
+        };
+        info!("Listing folder by path: {}", url);
         self.list_folder_by_url(&url).await
     }
 
@@ -253,6 +255,35 @@ impl OneDriveClient {
         info!("Created folder: {}", folder_name);
         Ok(result)
     }
+
+
+    pub async fn get_delta_by_url(&self, next_link: &str) -> Result<DeltaResponseApi> {
+        let auth_header = self.auth_header().await?;
+        let url = next_link.to_string();
+        let response = self.client
+            .get(&url)
+            .header("Authorization", auth_header)
+            .send()
+            .await?;
+        let delta_response: DeltaResponseApi = response.json().await?;
+        Ok(delta_response)
+    }
+
+    pub async fn get_delta_for_root(&self) -> Result<DeltaResponseApi> {
+        let auth_header = self.auth_header().await?;
+        let url = format!("{}/me/drive/root/delta?select=id,name,eTag,lastModifiedDateTime,size,folder,file,@microsoft.graph.downloadUrl,deleted,parentReference", GRAPH_API_BASE);
+        let response = self.client
+            .get(&url)
+            .header("Authorization", auth_header)
+            .send()
+            .await?;
+        
+        let delta_response: DeltaResponseApi = response.json().await?;
+        
+
+        Ok(delta_response)
+    }
+
 
     /// Get delta changes for a folder using delta token
     pub async fn get_delta_changes(&self, folder: &str, delta_token: Option<&str>) -> Result<DriveItemCollection> {

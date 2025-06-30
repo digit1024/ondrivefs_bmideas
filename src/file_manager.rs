@@ -5,6 +5,14 @@ use log::info;
 use crate::onedrive_service::onedrive_models::DownloadResult;
 use crate::metadata_manager_for_files::{MetadataManagerForFiles, OnedriveFileMeta};
 
+
+
+
+
+
+
+
+
 /// Trait for handling file system operations
 pub trait FileManager {
     /// Save a downloaded file to the local file system
@@ -27,12 +35,19 @@ pub trait FileManager {
     
     /// Get the temporary download directory
     fn get_temp_download_dir(&self) -> PathBuf;
+
+    /// Get the cache directory
+    fn get_cache_dir(&self) -> PathBuf;
+
+
+    
 }
 
 /// Default implementation of FileManager
 pub struct DefaultFileManager {
     metadata_manager: MetadataManagerForFiles,
     temp_dir: PathBuf,
+    cache_dir: PathBuf,
 }
 
 impl DefaultFileManager {
@@ -42,15 +57,20 @@ impl DefaultFileManager {
             .unwrap_or_else(|_| PathBuf::from("/tmp"));
         
         let temp_dir = home_dir.join(".onedrive").join("tmp").join("downloads");
-        
+        let cache_dir = home_dir.join(".onedrive").join("cache");
+
         // Create temp directory if it doesn't exist
         if !temp_dir.exists() {
             fs::create_dir_all(&temp_dir).await?;
+        }
+        if !cache_dir.exists() {
+            fs::create_dir_all(&cache_dir).await?;
         }
         
         Ok(Self {
             metadata_manager,
             temp_dir,
+            cache_dir,
         })
     }
     
@@ -70,8 +90,8 @@ impl FileManager for DefaultFileManager {
         // Write file data
         fs::write(target_path, &download_result.file_data).await?;
         
-        // Store metadata
-        self.metadata_manager.add_metadata_for_file(&download_result.onedrive_id, target_path)?;
+        
+        
         
         // Store etag if available
         if let Some(etag) = &download_result.etag {
@@ -79,7 +99,7 @@ impl FileManager for DefaultFileManager {
                 etag: etag.to_string(),
                 id: download_result.onedrive_id.clone(),
             };
-            self.metadata_manager.set_onedrive_file_meta(&target_path.to_string_lossy(), &meta)?;
+        
         }
         
         info!("Saved downloaded file: {} (ID: {})", target_path.display(), download_result.onedrive_id);
@@ -118,5 +138,8 @@ impl FileManager for DefaultFileManager {
     
     fn get_temp_download_dir(&self) -> PathBuf {
         self.temp_dir.clone()
+    }
+    fn get_cache_dir(&self) -> PathBuf {
+        self.cache_dir.clone()
     }
 } 

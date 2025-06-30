@@ -1,17 +1,37 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// ParentReference: Represents the parent reference of a drive item. 
 /// Used to get the  actual path of the item.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ParentReference {
+    #[serde(default)]
     pub id: String,
     pub path: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DeltaResponse {
+    pub next_link: Option<String>,
+    pub delta_link: Option<String>,
+    pub items: Option<Vec<DriveItem>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DeltaResponseApi{    
+    pub value: Vec<DriveItem>,
+    #[serde(rename = "@odata.nextLink")]
+    pub next_link: Option<String>,
+    #[serde(rename = "@odata.deltaLink")]
+    pub delta_link: Option<String>,
+}
+
+
+
 /// DriveItem: Represents a drive item.
 /// Used to get the metadata of the item.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct DriveItem {
+    #[serde(default)]
     pub id: String,
     pub name: Option<String>,
     #[serde(rename = "eTag")]
@@ -28,15 +48,17 @@ pub struct DriveItem {
     pub parent_reference: Option<ParentReference>,
 }
 
+
+
 /// FolderFacet: Represents the folder facet of a drive item.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct FolderFacet {
     #[serde(rename = "childCount")]
     pub child_count: u32,
 }
 
 /// FileFacet: Represents the file facet of a drive item.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct FileFacet {
     #[serde(rename = "mimeType")]
     pub mime_type: Option<String>,  
