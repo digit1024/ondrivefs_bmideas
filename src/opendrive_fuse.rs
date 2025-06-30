@@ -6,14 +6,55 @@ use fuser::{
 use libc::{ENOENT, ENOSYS, ENOTDIR};
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
+use std::time::{Duration, SystemTime, UNIX_EPOCH };
+use time::OffsetDateTime;
+use crate::onedrive_service::onedrive_models::DriveItem;
+ 
 const TTL: Duration = Duration::from_secs(1);
 
 /// Stub FUSE filesystem implementation
 pub struct OpenDriveFuse {
     next_inode: u64,
     inodes: HashMap<u64, FileAttr>,
+}
+
+pub trait to_fuse_attr {
+    fn to_fuse_attr(&self) -> FileAttr;
+}
+fn parse_time_string(time_string: &String) -> Result<SystemTime, time::error::Parse> {
+    // Parse RFC 3339 format (ISO 8601)
+    let datetime = OffsetDateTime::parse(time_string.as_str(),  &time::format_description::well_known::Rfc3339)?;
+    Ok(SystemTime::from(datetime))
+}
+
+impl to_fuse_attr for  DriveItem {
+     fn to_fuse_attr(&self) -> FileAttr {
+        let default_time_string = String::from("1960-01-01T01:00:0-Z");
+        let last_modified = self.last_modified.clone().unwrap_or(default_time_string.clone());
+        let created_date = self.created_date.clone().unwrap_or(default_time_string.clone());
+
+        let attr = FileAttr {
+            ino: self.id.parse::<u64>().unwrap(),
+            size: self.size.unwrap_or(0),
+            blocks: (self.size.unwrap_or(0) + 511) / 512,
+            // example date is 2014-10-22T09:36:06Z
+            atime: parse_time_string(&default_time_string.clone()).unwrap(),
+            mtime: parse_time_string(&last_modified).unwrap(),
+            ctime: parse_time_string(&last_modified).unwrap(),
+            crtime: parse_time_string(&created_date).unwrap(),
+            gid: 1000,
+            rdev: 0,
+            blksize: 512,
+            flags: 0,
+
+            kind: if self.file.is_some() { FileType::RegularFile } else { FileType::Directory },
+            perm: if self.file.is_some() { 0o644 } else { 0o755 },
+            nlink: 1,
+            uid: 1000,
+        };
+        attr
+     }
+ 
 }
 
 impl OpenDriveFuse {
