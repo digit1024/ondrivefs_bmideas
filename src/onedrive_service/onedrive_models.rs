@@ -39,6 +39,8 @@ pub struct DriveItem {
     pub etag: Option<String>,
     #[serde(rename = "lastModifiedDateTime")]
     pub last_modified: Option<String>,
+    #[serde(rename = "createdDateTime")]
+    pub created_date: Option<String>,
     pub size: Option<u64>,
     pub folder: Option<FolderFacet>,
     pub file: Option<FileFacet>,

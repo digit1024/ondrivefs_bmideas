@@ -24,7 +24,7 @@ dirs = "5.0"
 sled = "0.34"
 fuser = "0.12"
 uuid = { version = "1.0", features = ["v4"] }
-time = "0.3"
+time = { version = "0.3" , features = ["formatting", "parsing"] }
 libc = "0.2"
 ctrlc = "3.4"
 
