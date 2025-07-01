@@ -346,7 +346,10 @@ impl OneDriveClient {
 }
 
 #[cfg(test)]
+
 mod tests {
+    use serial_test::serial;
+
     use super::*;
     use std::collections::HashMap;
 
@@ -421,61 +424,90 @@ mod tests {
         assert_eq!(GRAPH_API_BASE, "https://graph.microsoft.com/v1.0");
     }
 
-    // Integration tests that would require network/auth (commented out but structured)
-    /*
-    #[tokio::test]
-    async fn test_get_delta_for_root_integration() {
-        // This would require valid auth and network access
-        // let client = OneDriveClient::new().unwrap();
-        // let result = client.get_delta_for_root().await;
-        // assert!(result.is_ok());
-    }
+  
+    //TODO tests are runnung with different HOME path, so I need to find a workaround this .
+    // #[tokio::test]
+    // #[cfg(feature = "integration-tests")]
+    // #[serial]
+    
+    // async fn test_get_delta_for_root_integration() {
+        
+    //     let client = OneDriveClient::new().unwrap();
+    //     let result = client.get_delta_for_root().await;
+    //     assert!(result.is_ok());
+    // }
 
-    #[tokio::test]
-    async fn test_upload_file_integration() {
-        // This would require valid auth and network access
-        // let client = OneDriveClient::new().unwrap();
-        // let file_data = b"test content";
-        // let result = client.upload_file(file_data, "test.txt", "/").await;
-        // assert!(result.is_ok());
-    }
+    // #[tokio::test]
+    // #[cfg(feature = "integration-tests")]
+    // #[serial]
+    
+    // async fn test_upload_file_integration() {
+    //     // This would require valid auth and network access
+    //     let client = OneDriveClient::new().unwrap();
+    //     let file_data = b"test content";
+    //     let result = client.upload_file(file_data, "test.txt", "/").await;
+    //     client.delete_item("/test.txt").await;
+    //     assert!(result.is_ok());
+    // }
 
-    #[tokio::test]
-    async fn test_download_file_integration() {
-        // This would require valid auth and network access
-        // let client = OneDriveClient::new().unwrap();
-        // let download_url = "https://example.com/download";
-        // let result = client.download_file(download_url, "test-id", "test.txt").await;
-        // assert!(result.is_ok());
-    }
+    // #[tokio::test]
+    // #[cfg(feature = "integration-tests")]
+    // #[serial]
+    
+    // async fn test_download_file_integration() {
+    //     // This would require valid auth and network access
+    //     let client = OneDriveClient::new().unwrap();
+    //     let file_data = b"test content";
+    //     let result = client.upload_file(file_data, "test.txt", "/").await;
+    //     let download_url = result.unwrap().web_url.unwrap();
 
-    #[tokio::test]
-    async fn test_create_folder_integration() {
-        // This would require valid auth and network access
-        // let client = OneDriveClient::new().unwrap();
-        // let result = client.create_folder("/", "TestFolder").await;
-        // assert!(result.is_ok());
-    }
+        
+    //     let result = client.download_file(download_url.as_str(), "test-id", "test.txt").await;
+    //     client.delete_item("/test.txt").await;
+    //     assert!(result.is_ok());
+    // }
 
-    #[tokio::test]
-    async fn test_delete_item_integration() {
-        // This would require valid auth and network access
-        // let client = OneDriveClient::new().unwrap();
-        // let result = client.delete_item("/test/path").await;
-        // assert!(result.is_ok());
-    }
+    // #[tokio::test]
+    // #[cfg(feature = "integration-tests")]
+    // #[serial]
+    
+    // async fn test_create_folder_integration() {
+    //     // This would require valid auth and network access
 
-    #[tokio::test]
-    async fn test_get_item_by_path_integration() {
-        // This would require valid auth and network access
-        // let client = OneDriveClient::new().unwrap();
-        // let result = client.get_item_by_path("/test/path").await;
-        // assert!(result.is_ok());
-    }
-    */
+    //     use log::debug;
+    //     let client = OneDriveClient::new().unwrap();
+    //     let result = client.create_folder("/", "TestFolder").await;
+    //     debug!("result: {:?}", result);
+    //     assert!(result.is_ok());
+    // }
+
+    // #[tokio::test]
+    // #[cfg(feature = "integration-tests")]
+    // #[serial]
+
+    // async fn test_delete_item_integration() {
+         
+    //      let client = OneDriveClient::new().unwrap();
+    //      client.create_folder("/", "TestFolder").await.unwrap();
+    //      let result = client.delete_item("/TestFolder").await;
+    //      assert!(result.is_ok());
+    // }
+
+    // #[tokio::test]
+    // #[cfg(feature = "integration-tests")]
+    // #[serial]
+    
+    // async fn test_get_item_by_path_integration() {
+    //     // This would require valid auth and network access
+    //     // let client = OneDriveClient::new().unwrap();
+    //     // let result = client.get_item_by_path("/test/path").await;
+    //     // assert!(result.is_ok());
+    // }
+    
 
     // Mock tests for URL construction in different scenarios
     #[test]
+    #[serial]
     fn test_upload_url_construction_root_path() {
         let file_name = "test.txt";
         let parent_path = "/";

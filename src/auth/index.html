@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Authorized</title>
+  <style>
+    /* Reset and full-height flex container */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    html, body {
+      height: 100%;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #6B73FF 0%, #000DFF 100%);
+    }
+
+    /* Message box styling */
+    .message-box {
+      text-align: center;
+      background: rgba(255, 255, 255, 0.15);
+      padding: 2rem 3rem;
+      border-radius: 12px;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+      color: #fff;
+      backdrop-filter: blur(8px);
+    }
+    .message-box svg {
+      width: 120px;
+      height: auto;
+      margin-bottom: 1rem;
+      filter: drop-shadow(0 4px 6px rgba(0,0,0,0.2));
+    }
+    .message-box h1 {
+      font-size: 2.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .message-box p {
+      font-size: 1.2rem;
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+  <div class="message-box">
+    <!-- Inline SVG Cloud Storage Icon -->
+    <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <linearGradient id="cloudGradient" x1="0%" y1="50%" x2="100%" y2="50%">
+          <stop offset="0%" stop-color="#FFFFFF" />
+          <stop offset="100%" stop-color="#E0E7FF" />
+        </linearGradient>
+      </defs>
+      <!-- Cloud shape -->
+      <path
+        d="M48 30a10 10 0 0 0-19.9-2A7 7 0 0 0 22 35h1a7 7 0 0 0 0 14h25a7 7 0 0 0 0-14h-1"
+        fill="url(#cloudGradient)"
+      />
+      <!-- Upload arrow -->
+      <polygon
+        points="32,44 32,24 28,28 26,26 32,20 38,26 36,28 32,24 32,44"
+        fill="#6B73FF"
+      />
+    </svg>
+
+    <h1>You can close this window now</h1>
+    <p>You are authorized.</p>
+  </div>
+</body>
+</html>
+

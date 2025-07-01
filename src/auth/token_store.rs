@@ -102,7 +102,7 @@ impl TokenStore {
             let config: AuthConfig = serde_json::from_str(&data)?;
             Ok(config)
         } else {
-            Err(anyhow!("No tokens found in keyring or file"))
+            Err(anyhow!("No tokens found in keyring or file {}" , self.file_path.display()))
         }
     }
 
