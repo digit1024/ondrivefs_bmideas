@@ -1,5 +1,5 @@
 mod auth;
-
+mod opendrive_fuse;
 use anyhow::Result;
 use clap::{Arg, Command};
 
@@ -114,7 +114,15 @@ async fn main() -> Result<()> {
         let settings = Settings::load_from_file()?;
         let mut daemon = SyncService::new(client, config.clone(), settings.clone()).await?;
         daemon.init().await?;
-        
+        tokio::task::spawn_blocking(move || {
+            //make sure the directory exists
+            let path = config.local_dir;
+            if !path.exists() {
+                std::fs::create_dir_all(path.clone()).unwrap();
+            }
+            opendrive_fuse::mount_filesystem(&path.display().to_string()).unwrap();
+        });
+
         return Ok(());
     }
 
