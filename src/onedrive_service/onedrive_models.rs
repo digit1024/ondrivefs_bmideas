@@ -67,7 +67,7 @@ pub struct FileFacet {
 
 /// DriveItemCollection: Represents a collection of drive items.
 /// Used to get the collection of drive items.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct DriveItemCollection {
     pub value: Vec<DriveItem>,
     #[serde(rename = "@odata.nextLink")]

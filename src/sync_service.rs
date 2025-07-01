@@ -19,24 +19,26 @@ pub struct SyncService {
     pub file_manager: DefaultFileManager,
     pub config: SyncConfig,
     pub settings: Settings,
+    pub metadata_manager: MetadataManagerForFiles,
 }
 
 impl SyncService {
     pub async fn new(client: OneDriveClient, config: SyncConfig, settings: Settings) -> Result<Self> {
         let metadata_manager = MetadataManagerForFiles::new()?;
-        let file_manager = DefaultFileManager::new(metadata_manager).await?;
+        let file_manager = DefaultFileManager::new().await?;
         
         Ok(Self { 
             client, 
             file_manager,
             config, 
-            settings 
+            settings , 
+            metadata_manager
         })
     }
 
     pub async fn init(&mut self) -> Result<()> {
         //if delta already exists in metadata manager then we can skip the initial sync
-        let delta_token = self.file_manager.metadata_manager().get_folder_delta(&"".to_string())?;
+        let delta_token = self.metadata_manager.get_folder_delta(&"".to_string())?;
         if delta_token.is_none()   {
             info!("No delta token found, getting initial directory cache");
             self.get_initial_directory_cache(None).await?;
@@ -52,7 +54,7 @@ impl SyncService {
 
     pub async fn update_cache(&mut self) -> Result<()> {    
         //get the delta token from the metadata manager
-        let delta_token = self.file_manager.metadata_manager().get_folder_delta(&"".to_string())?;
+        let delta_token = self.metadata_manager.get_folder_delta(&"".to_string())?;
         let mut delta_response = self.client.get_delta_by_url(delta_token.unwrap().delta_token.as_str()).await?;
         info!("Updatitng Delta Cache");
         loop {
@@ -112,8 +114,8 @@ impl SyncService {
             }
         }
         
-        self.file_manager.metadata_manager().store_folder_delta("", &delta_response.delta_link.as_ref().unwrap())?;
-        self.file_manager.metadata_manager().flush()?;//Remember to Save! 
+        self.metadata_manager.store_folder_delta("", &delta_response.delta_link.as_ref().unwrap())?;
+        self.metadata_manager.flush()?;//Remember to Save! 
         info!("Delta Cache Updated");
         info!("New Delta Token: {}", delta_response.delta_link.as_ref().unwrap());
         Ok(())
@@ -187,8 +189,8 @@ impl SyncService {
 
         //the loop is over so all the deltas has been fetched. 
         // we should store delta permamently in the metadata manager
-        self.file_manager.metadata_manager().store_folder_delta(&realpath, &delta_response.delta_link.as_ref().unwrap())?;
-        self.file_manager.metadata_manager().flush()?;//Remember to Save! 
+        self.metadata_manager.store_folder_delta(&realpath, &delta_response.delta_link.as_ref().unwrap())?;
+        self.metadata_manager.flush()?;//Remember to Save! 
 
         Ok(())
     }

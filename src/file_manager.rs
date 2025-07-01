@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use log::info;
@@ -16,10 +16,10 @@ use crate::metadata_manager_for_files::{MetadataManagerForFiles, OnedriveFileMet
 /// Trait for handling file system operations
 pub trait FileManager {
     /// Save a downloaded file to the local file system
-    async fn save_downloaded_file(&self, download_result: &DownloadResult, target_path: &Path) -> Result<()>;
+    async fn save_downloaded_file_r(&self, download_result: &DownloadResult, target_path: &Path) -> Result<()>;
     
     /// Create a directory
-    async fn create_directory(&self, path: &Path) -> Result<()>;
+    async fn create_directory_r(&self, path: &Path) -> Result<()>;
     
     /// Delete a file
     async fn delete_file(&self, path: &Path) -> Result<()>;
@@ -45,13 +45,13 @@ pub trait FileManager {
 
 /// Default implementation of FileManager
 pub struct DefaultFileManager {
-    metadata_manager: MetadataManagerForFiles,
-    temp_dir: PathBuf,
-    cache_dir: PathBuf,
+    
+    temp_dir: PathBuf,// Directory to store temporary files
+    cache_dir: PathBuf,// Directory to store metadata for files
 }
 
 impl DefaultFileManager {
-    pub async fn new(metadata_manager: MetadataManagerForFiles) -> Result<Self> {
+    pub async fn new() -> Result<Self> {
         let home_dir = std::env::var("HOME")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("/tmp"));
@@ -61,60 +61,49 @@ impl DefaultFileManager {
 
         // Create temp directory if it doesn't exist
         if !temp_dir.exists() {
-            fs::create_dir_all(&temp_dir).await?;
+            fs::create_dir_all(&temp_dir).await.context("Failed to create temp directory")?;
         }
         if !cache_dir.exists() {
-            fs::create_dir_all(&cache_dir).await?;
+            fs::create_dir_all(&cache_dir).await.context("Failed to create cache directory")?;
         }
         
         Ok(Self {
-            metadata_manager,
+            
             temp_dir,
             cache_dir,
         })
     }
     
-    /// Get a reference to the metadata manager
-    pub fn metadata_manager(&self) -> &MetadataManagerForFiles {
-        &self.metadata_manager
-    }
+    
 }
 
 impl FileManager for DefaultFileManager {
-    async fn save_downloaded_file(&self, download_result: &DownloadResult, target_path: &Path) -> Result<()> {
+    async fn save_downloaded_file_r(&self, download_result: &DownloadResult, target_path: &Path) -> Result<()> {
         // Create parent directory if it doesn't exist
         if let Some(parent) = target_path.parent() {
-            fs::create_dir_all(parent).await?;
+            fs::create_dir_all(parent).await.context("Failed to create parent directory")?;
         }
 
         // Write file data
-        fs::write(target_path, &download_result.file_data).await?;
+        fs::write(target_path, &download_result.file_data).await.context("Failed to write file")?;
         
         
         
         
-        // Store etag if available
-        if let Some(etag) = &download_result.etag {
-            let meta = OnedriveFileMeta {
-                etag: etag.to_string(),
-                id: download_result.onedrive_id.clone(),
-            };
-        
-        }
         
         info!("Saved downloaded file: {} (ID: {})", target_path.display(), download_result.onedrive_id);
         Ok(())
     }
     
-    async fn create_directory(&self, path: &Path) -> Result<()> {
-        fs::create_dir_all(path).await?;
+    async fn create_directory_r(&self, path: &Path) -> Result<()> {
+        fs::create_dir_all(path).await.context("Failed to create directory")?;
         info!("Created directory: {}", path.display());
         Ok(())
     }
     
     async fn delete_file(&self, path: &Path) -> Result<()> {
         if path.exists() {
-            fs::remove_file(path).await?;
+            fs::remove_file(path).await.context("Failed to delete file")?;
             info!("Deleted file: {}", path.display());
         }
         Ok(())
@@ -122,7 +111,7 @@ impl FileManager for DefaultFileManager {
     
     async fn delete_directory(&self, path: &Path) -> Result<()> {
         if path.exists() {
-            fs::remove_dir_all(path).await?;
+            fs::remove_dir_all(path).await.context("Failed to delete directory")?;
             info!("Deleted directory: {}", path.display());
         }
         Ok(())

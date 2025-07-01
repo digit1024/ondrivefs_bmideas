@@ -18,6 +18,7 @@ const REDIRECT_URI: &str = "http://localhost:8080/callback";
 const SCOPES: &str = "https://graph.microsoft.com/Files.ReadWrite offline_access";
 const AUTH_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
 const TOKEN_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
+const INDEX_HTML: &str = include_str!("./index.html");
 
 #[derive(Debug, Serialize, Deserialize)]
 struct TokenResponse {
@@ -89,7 +90,7 @@ impl OneDriveAuth {
                 .map(|(_, value)| value.to_string()) 
             {
                 // Send success response to browser
-                let response = Response::from_string("Authorization successful! You can close this window.")
+                let response = Response::from_string(INDEX_HTML)
                     .with_header(Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap());
                 let _ = request.respond(response);
                 

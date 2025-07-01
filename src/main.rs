@@ -118,30 +118,7 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    if matches.get_flag("list") {
-        // List files only
-        let client = OneDriveClient::new()?;
-        let items = client.list_root().await?;
-        
-        println!("Files in OneDrive root:");
-        for item in items {
-            let type_str = if item.folder.is_some() { "📁" } else { "📄" };
-            println!("{} {} ({})", type_str, item.name.unwrap_or("Unknown".to_string()), item.last_modified.unwrap_or("Unknown".to_string()));
-        }
-        return Ok(());
-    }
 
-    if let Some(list_dir) = matches.get_one::<String>("list-dir") {
-        // List files in a specific OneDrive directory
-        let client = OneDriveClient::new()?;
-        let items = client.list_folder_by_path(list_dir).await?;
-        println!("Files in OneDrive directory '{}':", list_dir);
-        for item in items {
-            let type_str = if item.folder.is_some() { "📁" } else { "📄" };
-            println!("{} {} ({})", type_str, item.name.unwrap_or("Unknown".to_string()), item.last_modified.unwrap_or("Unknown".to_string()));
-        }
-        return Ok(());
-    }
 
     if let Some(get_args) = matches.get_many::<String>("get-file") {
         let args: Vec<_> = get_args.collect();
@@ -154,8 +131,8 @@ async fn main() -> Result<()> {
             
             // Create file manager to handle the file save
             let metadata_manager = crate::metadata_manager_for_files::MetadataManagerForFiles::new()?;
-            let file_manager = crate::file_manager::DefaultFileManager::new(metadata_manager).await?;
-            file_manager.save_downloaded_file(&download_result, std::path::Path::new(local_path)).await?;
+            let file_manager = crate::file_manager::DefaultFileManager::new().await?;
+            file_manager.save_downloaded_file_r(&download_result, std::path::Path::new(local_path)).await?;
             
             println!("Downloaded '{}' to '{}'", remote_path, local_path);
         } else {
