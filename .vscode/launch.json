@@ -15,7 +15,7 @@
                 "RUST_LOG": "debug"
             },
             "terminal": "integrated",
-            "preLaunchTask": "cargo build"
+            
         }
     ]
 } 

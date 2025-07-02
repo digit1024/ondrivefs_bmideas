@@ -34,6 +34,10 @@ pub trait FileManager {
 
     /// Get the cache directory
     fn get_cache_dir(&self) -> PathBuf;
+    fn cache_path_to_virtual_path(&self, cache_path: &Path) -> PathBuf;
+    fn virtual_path_to_cache_path(&self, virtual_path: &Path) -> PathBuf;
+    fn virtual_path_to_downloaded_path(&self, virtual_path: &Path) -> PathBuf;
+
 }
 
 /// Default implementation of FileManager
@@ -138,4 +142,29 @@ impl FileManager for DefaultFileManager {
     fn get_cache_dir(&self) -> PathBuf {
         self.cache_dir.clone()
     }
+
+    fn cache_path_to_virtual_path(&self, cache_path: &Path) -> PathBuf {
+        let relative_path = cache_path.strip_prefix(&self.cache_dir).unwrap();
+        if relative_path == Path::new("") {
+            // Root directory case
+            PathBuf::from("/")
+        } else {
+            // Add leading slash to make it a proper virtual path
+            PathBuf::from("/").join(relative_path)
+        }
+    }
+
+    fn virtual_path_to_cache_path(&self, virtual_path: &Path) -> PathBuf {
+        //remove leading /
+        let virtual_path = virtual_path.strip_prefix("/").unwrap();
+        self.cache_dir.join(virtual_path)
+    }
+
+    fn virtual_path_to_downloaded_path(&self, virtual_path: &Path) -> PathBuf {
+        //remove leading /
+        let virtual_path = virtual_path.strip_prefix("/").unwrap();
+        self.temp_dir.join(virtual_path)
+    }
+
+
 }

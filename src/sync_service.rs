@@ -2,7 +2,8 @@
 
 use crate::config::{Settings, SyncConfig};
 use crate::file_manager::{DefaultFileManager, FileManager};
-use crate::metadata_manager_for_files::MetadataManagerForFiles;
+use crate::helpers::path_to_inode;
+use crate::metadata_manager_for_files::{get_metadata_manager_singleton, MetadataManagerForFiles};
 use crate::onedrive_service::onedrive_client::OneDriveClient;
 use crate::onedrive_service::onedrive_models::DriveItem;
 use anyhow::{Context, Ok, Result};
@@ -13,14 +14,13 @@ use std::str::FromStr;
 use tokio::signal;
 use tokio::time::sleep;
 
-
 /// Service responsible for synchronizing files between OneDrive and local storage.
 pub struct SyncService {
     pub client: OneDriveClient,
     pub file_manager: DefaultFileManager,
     pub config: SyncConfig,
     pub settings: Settings,
-    pub metadata_manager: MetadataManagerForFiles,
+    pub metadata_manager: &'static MetadataManagerForFiles,
 }
 
 impl SyncService {
@@ -29,7 +29,7 @@ impl SyncService {
         config: SyncConfig,
         settings: Settings,
     ) -> Result<Self> {
-        let metadata_manager = MetadataManagerForFiles::new()?;
+        let metadata_manager = get_metadata_manager_singleton();
         let file_manager = DefaultFileManager::new().await?;
 
         Ok(Self {
@@ -43,10 +43,7 @@ impl SyncService {
 
     pub async fn init(&mut self) -> Result<()> {
         //if delta already exists in metadata manager then we can skip the initial sync
-        
 
-        
-        
         self.update_cache().await?;
 
         Ok(())
@@ -63,7 +60,6 @@ impl SyncService {
             },
             None => "/me/drive/root/delta?select=id,name,eTag,lastModifiedDateTime,size,folder,file,@microsoft.graph.downloadUrl,deleted,parentReference".to_string(),
         };
-
 
         let mut delta_response = self
             .client
@@ -102,39 +98,54 @@ impl SyncService {
                         info!("Deleting object: {}", item.name.as_ref().unwrap());
                         //delete the folder
                         //TODO: item does not have a parent - so now we cannot know which folder or file to delete
-                        let local_path = self.metadata_manager.get_local_path_for_onedrive_id(&item.id).context("Failed to get local path for onedrive id")?;
+                        let local_path = self
+                            .metadata_manager
+                            .get_local_path_for_onedrive_id(&item.id)
+                            .context("Failed to get local path for onedrive id")?;
                         if local_path.is_some() {
-                            if item.folder.is_some() {  
-                                std::fs::remove_dir_all(&local_path.unwrap()).context("Failed to delete object")?;
+                            if item.folder.is_some() {
+                                std::fs::remove_dir_all(&local_path.unwrap())
+                                    .context("Failed to delete object")?;
                             } else {
-                                std::fs::remove_file(&local_path.unwrap()).context("Failed to delete object")?;
+                                std::fs::remove_file(&local_path.unwrap())
+                                    .context("Failed to delete object")?;
                             }
-                        }else{  
-                            warn!("Object not found in local cache: {}", item.name.as_ref().unwrap());
+                        } else {
+                            warn!(
+                                "Object not found in local cache: {}",
+                                item.name.as_ref().unwrap()
+                            );
                         }
                         //we should handle this case
-                        
+
                         //std::fs::remove_dir_all(&local_path)?;
                     } else {
                         //update or create the file or folder
                         info!("Updating or creating object: {}", local_path.display());
 
                         let object_json = serde_json::to_string(&item)?;
-                        self.metadata_manager.store_onedrive_id_to_local_path(&item.id, &local_path.display().to_string())?;
+                        self.metadata_manager.store_onedrive_id_to_local_path(
+                            &item.id,
+                            &local_path.display().to_string(),
+                        )?;
 
                         if item.folder.is_some() {
                             std::fs::create_dir_all(&local_path)
                                 .context("Failed to create directory")?;
                             std::fs::write(local_path.join(".dir.json"), object_json)
                                 .context("Failed to write dir.json")?;
-                            
                         } else {
                             //there is always parent for file
-                            std::fs::create_dir_all(&local_path.parent().unwrap())
+                            std::fs::create_dir_all(&local_path.parent().unwrap().clone())
                                 .context("Failed to create directory for file")?;
-                            std::fs::write(local_path, object_json)
+                            std::fs::write(&local_path, object_json)
                                 .context("Failed to write file")?;
                         }
+                        let inode = path_to_inode(&local_path.as_path());
+                        self.metadata_manager.store_inode_to_local_path(
+                            inode,
+                            local_path.display().to_string().as_str(),
+                        )?;
                     }
                 }
             }
@@ -228,7 +239,7 @@ impl SyncService {
     //     // we should store delta permamently in the metadata manager
     //     self.metadata_manager
     //         .store_folder_delta(&realpath, &delta_response.delta_link.as_ref().unwrap())?;
-    //     self.metadata_manager.flush()?; //Remember to Save! 
+    //     self.metadata_manager.flush()?; //Remember to Save!
 
     //     Ok(())
     // }

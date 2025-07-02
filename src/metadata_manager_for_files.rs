@@ -1,9 +1,10 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use sled::{Db, Tree};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 /// Simplified metadata record that only stores local path as value
 #[derive(Debug, Serialize, Deserialize)]
@@ -32,9 +33,15 @@ pub struct MetadataManagerForFiles {
     folder_deltas: Tree,
     changed_queue: Tree,
     onedrive_id_to_local_path: Tree,
+    inode_to_local_path: Tree,
 }
+static MATADATAMANAGER: OnceLock<MetadataManagerForFiles> = OnceLock::new();
 
-
+pub fn get_metadata_manager_singleton() -> &'static MetadataManagerForFiles {
+    MATADATAMANAGER.get_or_init(|| {
+        MetadataManagerForFiles::new().unwrap()
+    })
+}
 
 impl MetadataManagerForFiles {
     /// Create a new metadata manager instance
@@ -56,12 +63,14 @@ impl MetadataManagerForFiles {
         let onedrive_id_to_local_path = db.open_tree("onedrive_id_to_local_path")?;
         let folder_deltas = db.open_tree("folder_deltas")?;
         let changed_queue = db.open_tree("changed_queue")?;
+        let inode_to_local_path = db.open_tree("inode_to_local_path")?;
 
         let manager = Self {
             db,
             folder_deltas,
             changed_queue,
             onedrive_id_to_local_path,
+            inode_to_local_path,
         };
 
         info!(
@@ -140,15 +149,19 @@ impl MetadataManagerForFiles {
         Ok(())
     }
 
-
     /// Flush all pending writes to disk
     pub fn flush(&self) -> Result<()> {
         self.db.flush()?;
         Ok(())
     }
 
-    pub fn store_onedrive_id_to_local_path(&self, onedrive_id: &str, local_path: &str) -> Result<()> {
-        self.onedrive_id_to_local_path.insert(onedrive_id.as_bytes(), local_path.as_bytes())?;
+    pub fn store_onedrive_id_to_local_path(
+        &self,
+        onedrive_id: &str,
+        local_path: &str,
+    ) -> Result<()> {
+        self.onedrive_id_to_local_path
+            .insert(onedrive_id.as_bytes(), local_path.as_bytes())?;
         Ok(())
     }
 
@@ -161,11 +174,33 @@ impl MetadataManagerForFiles {
     }
 
     pub fn remove_onedrive_id_to_local_path(&self, onedrive_id: &str) -> Result<()> {
-        self.onedrive_id_to_local_path.remove(onedrive_id.as_bytes())?;
+        self.onedrive_id_to_local_path
+            .remove(onedrive_id.as_bytes())?;
         Ok(())
     }
 
+    pub fn store_inode_to_local_path(&self, inode: u64, local_path: &str) -> Result<()> {
+        self.inode_to_local_path
+            .insert(inode.to_le_bytes().as_slice(), local_path.as_bytes())?;
+        Ok(())
+    }
 
+    pub fn get_local_path_for_inode(&self, inode: u64) -> Result<Option<String>> {
+        if let Some(value) = self
+            .inode_to_local_path
+            .get(inode.to_le_bytes().as_slice())?
+        {
+            let local_path = String::from_utf8(value.to_vec())?;
+            return Ok(Some(local_path));
+        }
+        return Ok(None);
+    }
+
+    pub fn remove_inode_to_local_path(&self, inode: u64) -> Result<()> {
+        self.inode_to_local_path
+            .remove(inode.to_le_bytes().as_slice())?;
+        Ok(())
+    }
 }
 
 impl Drop for MetadataManagerForFiles {

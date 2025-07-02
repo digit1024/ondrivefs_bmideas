@@ -56,21 +56,22 @@ impl OneDriveClient {
             .error_for_status()
             .context("Not a success status")?;
 
-        
         let auth_header = self.auth_header().await?;
         let r = self
-        .client
-        .get(&url)
-        .header("Authorization", auth_header)
-        .send()
-        .await
-        .context("Failed to get response")?
-        .error_for_status()
-        .context("Not a success status")?.text().await?;
-
+            .client
+            .get(&url)
+            .header("Authorization", auth_header)
+            .send()
+            .await
+            .context("Failed to get response")?
+            .error_for_status()
+            .context("Not a success status")?
+            .text()
+            .await?;
 
         info!("Response text: {}", r);
-        let response_json = response.json::<T>()
+        let response_json = response
+            .json::<T>()
             .await
             .context("Failed to Deserialize response to type T")?;
         Ok(response_json)
@@ -352,7 +353,7 @@ impl OneDriveClient {
     pub async fn get_delta_by_url(&self, next_link: &str) -> Result<DeltaResponseApi> {
         let url = next_link.to_string();
         let delta_response = self.get(&url).await.context("Failed to get delta by url")?;
-        
+
         Ok(delta_response)
     }
 

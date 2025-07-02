@@ -1,10 +1,9 @@
 mod auth;
-mod opendrive_fuse;
+mod helpers;
+mod openfs;
 use anyhow::Result;
 use clap::{Arg, Command};
-
-use std::path::PathBuf;
-use std::time::Duration;
+use openfs::opendrive_fuse;
 
 mod onedrive_service;
 
@@ -102,14 +101,15 @@ async fn main() -> Result<()> {
         let settings = Settings::load_from_file()?;
         let mut daemon = SyncService::new(client, config.clone(), settings.clone()).await?;
         daemon.init().await?;
-        tokio::task::spawn_blocking(move || {
-            //make sure the directory exists
-            let path = config.local_dir;
-            if !path.exists() {
-                std::fs::create_dir_all(path.clone()).unwrap();
-            }
-            opendrive_fuse::mount_filesystem(&path.display().to_string()).unwrap();
-        });
+
+        //make sure the directory exists
+        let path = config.local_dir;
+        if !path.exists() {
+            std::fs::create_dir_all(path.clone())?;
+        }
+
+        // Mount the filesystem - this is blocking so it will run until unmount
+        opendrive_fuse::mount_filesystem(&path.display().to_string()).await?;
 
         return Ok(());
     }
