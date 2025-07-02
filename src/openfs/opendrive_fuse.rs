@@ -10,7 +10,7 @@ use fuser::{
 use libc::{ENOENT, ENOSYS, ENOTDIR};
 
 use crate::helpers::path_to_inode;
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::ffi::OsStr;
@@ -129,9 +129,9 @@ impl OpenDriveFuse {
 
     /// Get FileAttr for a virtual path by reading from cache
     fn get_file_attr_from_cache(&self, virtual_path: &Path) -> Option<FileAttr> {
-        println!("DEBUG: get_file_attr_from_cache called with virtual_path: {:?}", virtual_path);
+        trace!("get_file_attr_from_cache called with virtual_path: {:?}", virtual_path);
         let cache_path = self.virtual_path_to_cache_path(virtual_path);
-        println!("DEBUG: get_file_attr_from_cache - cache_path: {:?}", cache_path);
+        trace!("get_file_attr_from_cache - cache_path: {:?}", cache_path);
 
         // Generate inode from virtual path
         let ino = if virtual_path == Path::new("/") {
@@ -139,41 +139,41 @@ impl OpenDriveFuse {
         } else {
             path_to_inode(&cache_path)
         };
-        println!("DEBUG: get_file_attr_from_cache - generated ino: {}", ino);
+        trace!("get_file_attr_from_cache - generated ino: {}", ino);
 
         // Try to read directory metadata first
         if virtual_path == Path::new("/") {
             // Root directory - check for .dir.json in cache root
             let dir_json_path = cache_path.join(".dir.json");
-            println!("DEBUG: get_file_attr_from_cache - checking root .dir.json at: {:?}", dir_json_path);
+            trace!("get_file_attr_from_cache - checking root .dir.json at: {:?}", dir_json_path);
             if let Some(drive_item) = self.read_drive_item_from_cache(&dir_json_path) {
                 let mut attr = drive_item.to_fuse_attr();
                 attr.ino = ino;
-                println!("DEBUG: get_file_attr_from_cache - found root .dir.json, returning attr");
+                trace!("get_file_attr_from_cache - found root .dir.json, returning attr");
                 return Some(attr);
             }
         } else if cache_path.is_dir() {
             // Directory - check for .dir.json
             let dir_json_path = cache_path.join(".dir.json");
-            println!("DEBUG: get_file_attr_from_cache - checking directory .dir.json at: {:?}", dir_json_path);
+            trace!("get_file_attr_from_cache - checking directory .dir.json at: {:?}", dir_json_path);
             if let Some(drive_item) = self.read_drive_item_from_cache(&dir_json_path) {
                 let mut attr = drive_item.to_fuse_attr();
                 attr.ino = ino;
-                println!("DEBUG: get_file_attr_from_cache - found directory .dir.json, returning attr");
+                trace!("get_file_attr_from_cache - found directory .dir.json, returning attr");
                 return Some(attr);
             }
         } else {
             // File - read metadata directly
-            println!("DEBUG: get_file_attr_from_cache - checking file at: {:?}", cache_path);
+            trace!("get_file_attr_from_cache - checking file at: {:?}", cache_path);
             if let Some(drive_item) = self.read_drive_item_from_cache(&cache_path) {
                 let mut attr = drive_item.to_fuse_attr();
                 attr.ino = ino;
-                println!("DEBUG: get_file_attr_from_cache - found file, returning attr");
+                trace!("get_file_attr_from_cache - found file, returning attr");
                 return Some(attr);
             }
         }
 
-        println!("DEBUG: get_file_attr_from_cache - no metadata found, returning None");
+        trace!("get_file_attr_from_cache - no metadata found, returning None");
         None
     }
 
@@ -260,16 +260,16 @@ impl Filesystem for OpenDriveFuse {
         _req: &Request<'_>,
         _config: &mut fuser::KernelConfig,
     ) -> Result<(), libc::c_int> {
-        println!("OpenDriveFuse: filesystem initialized");
+        info!("OpenDriveFuse: filesystem initialized");
         Ok(())
     }
 
     fn destroy(&mut self) {
-        println!("OpenDriveFuse: filesystem destroyed");
+        info!("OpenDriveFuse: filesystem destroyed");
     }
 
     fn lookup(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        println!("OpenDriveFuse: lookup parent={}, name={:?}", parent, name);
+        debug!("OpenDriveFuse: lookup parent={}, name={:?}", parent, name);
 
         let name_str = name.to_string_lossy();
         
@@ -277,58 +277,58 @@ impl Filesystem for OpenDriveFuse {
             PathBuf::from("/").join(name_str.as_ref())
         } else {
             let path = self.metadata_manager.get_local_path_for_inode(parent).unwrap().unwrap();
-            println!("DEBUG: lookup - cache path from inode {}: {}", parent, path);
+            trace!("lookup - cache path from inode {}: {}", parent, path);
             let virtual_path = self.file_manager.cache_path_to_virtual_path(Path::new(&path));
-            println!("DEBUG: lookup - virtual path: {:?}", virtual_path);
+            trace!("lookup - virtual path: {:?}", virtual_path);
             let child_path = virtual_path.join(name_str.as_ref());
-            println!("DEBUG: lookup - child_path: {:?}", child_path);
+            trace!("lookup - child_path: {:?}", child_path);
             child_path
         };
 
-        println!("DEBUG: lookup - final child_path: {:?}", child_path);
+        trace!("lookup - final child_path: {:?}", child_path);
         if let Some(attr) = self.get_file_attr_from_cache(&child_path) {
-            println!("DEBUG: lookup - found attr for child_path, ino: {}", attr.ino);
+            trace!("lookup - found attr for child_path, ino: {}", attr.ino);
             reply.entry(&TTL, &attr, 0);
             return;
         }
 
-        println!("DEBUG: lookup - no attr found for child_path");
+        trace!("lookup - no attr found for child_path");
         reply.error(ENOENT);
     }
 
     fn forget(&mut self, _req: &Request<'_>, ino: u64, nlookup: u64) {
-        println!("OpenDriveFuse: forget ino={}, nlookup={}", ino, nlookup);
+        debug!("OpenDriveFuse: forget ino={}, nlookup={}", ino, nlookup);
         // Stub implementation - no action needed
     }
 
     fn getattr(&mut self, _req: &Request<'_>, ino: u64, reply: ReplyAttr) {
-        println!("OpenDriveFuse: getattr ino={}", ino);
+        debug!("OpenDriveFuse: getattr ino={}", ino);
 
         // Try to load from file cache based on inode
         if ino == 1 {
             // Root directory
-            println!("DEBUG: getattr - handling root directory");
+            trace!("getattr - handling root directory");
             if let Some(attr) = self.get_file_attr_from_cache(&PathBuf::from("/")) {
                 reply.attr(&TTL, &attr);
                 return;
             }
         } else {
             // For other inodes, we'd need to resolve the inode to a path
-            println!("DEBUG: getattr - resolving inode {} to path", ino);
+            trace!("getattr - resolving inode {} to path", ino);
             if let Some(cache_path) = self.metadata_manager.get_local_path_for_inode(ino).unwrap() {
-                println!("DEBUG: getattr - cache path from inode: {}", cache_path);
+                trace!("getattr - cache path from inode: {}", cache_path);
                 let virtual_path = self.file_manager.cache_path_to_virtual_path(Path::new(&cache_path));
-                println!("DEBUG: getattr - virtual path: {:?}", virtual_path);
+                trace!("getattr - virtual path: {:?}", virtual_path);
                 if let Some(attr) = self.get_file_attr_from_cache(&virtual_path) {
                     reply.attr(&TTL, &attr);
                     return;
                 }
             } else {
-                println!("DEBUG: getattr - no cache path found for inode {}", ino);
+                trace!("getattr - no cache path found for inode {}", ino);
             }
         }
 
-        println!("DEBUG: getattr - returning ENOENT for ino {}", ino);
+        trace!("getattr - returning ENOENT for ino {}", ino);
         reply.error(ENOENT);
     }
 
@@ -350,7 +350,7 @@ impl Filesystem for OpenDriveFuse {
         flags: Option<u32>,
         reply: ReplyAttr,
     ) {
-        println!("OpenDriveFuse: setattr ino={}", ino);
+        debug!("OpenDriveFuse: setattr ino={}", ino);
 
         // For now, setattr is not fully implemented for cache-based file system
         // We would need to modify the cache files and OneDrive data
@@ -359,7 +359,7 @@ impl Filesystem for OpenDriveFuse {
     }
 
     fn readlink(&mut self, _req: &Request<'_>, ino: u64, reply: ReplyData) {
-        println!("OpenDriveFuse: readlink ino={}", ino);
+        debug!("OpenDriveFuse: readlink ino={}", ino);
         reply.error(ENOSYS);
     }
 
@@ -373,7 +373,7 @@ impl Filesystem for OpenDriveFuse {
         rdev: u32,
         reply: ReplyEntry,
     ) {
-        println!("OpenDriveFuse: mknod parent={}, name={:?}", parent, name);
+        debug!("OpenDriveFuse: mknod parent={}, name={:?}", parent, name);
         reply.error(ENOSYS);
     }
 
@@ -386,7 +386,7 @@ impl Filesystem for OpenDriveFuse {
         umask: u32,
         reply: ReplyEntry,
     ) {
-        println!("OpenDriveFuse: mkdir parent={}, name={:?}", parent, name);
+        debug!("OpenDriveFuse: mkdir parent={}, name={:?}", parent, name);
 
         // mkdir is not supported for read-only cache filesystem
         // In a full implementation, this would create a directory in OneDrive
@@ -394,12 +394,12 @@ impl Filesystem for OpenDriveFuse {
     }
 
     fn unlink(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEmpty) {
-        println!("OpenDriveFuse: unlink parent={}, name={:?}", parent, name);
+        debug!("OpenDriveFuse: unlink parent={}, name={:?}", parent, name);
         reply.ok();
     }
 
     fn rmdir(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEmpty) {
-        println!("OpenDriveFuse: rmdir parent={}, name={:?}", parent, name);
+        debug!("OpenDriveFuse: rmdir parent={}, name={:?}", parent, name);
         reply.ok();
     }
 
@@ -411,7 +411,7 @@ impl Filesystem for OpenDriveFuse {
         link: &std::path::Path,
         reply: ReplyEntry,
     ) {
-        println!(
+        debug!(
             "OpenDriveFuse: symlink parent={}, name={:?}, link={:?}",
             parent, name, link
         );
@@ -428,7 +428,7 @@ impl Filesystem for OpenDriveFuse {
         flags: u32,
         reply: ReplyEmpty,
     ) {
-        println!(
+        debug!(
             "OpenDriveFuse: rename parent={}, name={:?}, newparent={}, newname={:?}",
             parent, name, newparent, newname
         );
@@ -443,7 +443,7 @@ impl Filesystem for OpenDriveFuse {
         newname: &OsStr,
         reply: ReplyEntry,
     ) {
-        println!(
+        debug!(
             "OpenDriveFuse: link ino={}, newparent={}, newname={:?}",
             ino, newparent, newname
         );
@@ -451,7 +451,7 @@ impl Filesystem for OpenDriveFuse {
     }
 
     fn open(&mut self, _req: &Request<'_>, ino: u64, flags: i32, reply: ReplyOpen) {
-        println!("OpenDriveFuse: open ino={}, flags={}", ino, flags);
+        debug!("OpenDriveFuse: open ino={}, flags={}", ino, flags);
 
         // Check if file exists by trying to get its attributes from cache
         if ino == 1 {
@@ -490,7 +490,7 @@ impl Filesystem for OpenDriveFuse {
         lock_owner: Option<u64>,
         reply: ReplyData,
     ) {
-        println!(
+        debug!(
             "OpenDriveFuse: read ino={}, offset={}, size={}",
             ino, offset, size
         );
@@ -511,7 +511,7 @@ impl Filesystem for OpenDriveFuse {
         lock_owner: Option<u64>,
         reply: ReplyWrite,
     ) {
-        println!(
+        debug!(
             "OpenDriveFuse: write ino={}, offset={}, size={}",
             ino,
             offset,
@@ -523,7 +523,7 @@ impl Filesystem for OpenDriveFuse {
     }
 
     fn flush(&mut self, _req: &Request<'_>, ino: u64, fh: u64, lock_owner: u64, reply: ReplyEmpty) {
-        println!("OpenDriveFuse: flush ino={}", ino);
+        debug!("OpenDriveFuse: flush ino={}", ino);
         reply.ok();
     }
 
@@ -537,42 +537,42 @@ impl Filesystem for OpenDriveFuse {
         flush: bool,
         reply: ReplyEmpty,
     ) {
-        println!("OpenDriveFuse: release ino={}", ino);
+        debug!("OpenDriveFuse: release ino={}", ino);
         reply.ok();
     }
 
     fn fsync(&mut self, _req: &Request<'_>, ino: u64, fh: u64, datasync: bool, reply: ReplyEmpty) {
-        println!("OpenDriveFuse: fsync ino={}", ino);
+        debug!("OpenDriveFuse: fsync ino={}", ino);
         reply.ok();
     }
 
     fn opendir(&mut self, _req: &Request<'_>, ino: u64, flags: i32, reply: ReplyOpen) {
-        println!("DEBUG: opendir called with ino={}", ino);
+        trace!("opendir called with ino={}", ino);
         let dir_handle = self.dir_handle_manager.new_dir_handle();
         let entries = if ino == 1 {
-            println!("DEBUG: opendir - reading root directory");
+            trace!("opendir - reading root directory");
             self.read_directory_from_cache(&PathBuf::from("/"))
             
         } else {
             let path = self.metadata_manager.get_local_path_for_inode(ino).unwrap().unwrap();
-            println!("DEBUG: opendir - cache path from inode {}: {}", ino, path);
+            trace!("opendir - cache path from inode {}: {}", ino, path);
             let virtual_path = self.file_manager.cache_path_to_virtual_path(Path::new(&path));
-            println!("DEBUG: opendir - virtual path: {:?}", virtual_path);
+            trace!("opendir - virtual path: {:?}", virtual_path);
             let entries = self.read_directory_from_cache(&virtual_path);
-            println!("DEBUG: opendir - found {} entries", entries.len());
+            trace!("opendir - found {} entries", entries.len());
             entries
         };
 
-        println!("DEBUG: opendir - processing {} entries", entries.len());
+        trace!("opendir - processing {} entries", entries.len());
         let mut current_offset = 0;
         self.dir_handle_manager.append_to_handle(dir_handle, DirEntry::new(1, 0, FileType::Directory, ".".to_string()));
         self.dir_handle_manager.append_to_handle(dir_handle, DirEntry::new(1, 1, FileType::Directory, "..".to_string()));
         current_offset += 2;
         for (name, attr) in entries.iter() {
-            println!("DEBUG: opendir - adding entry: name={}, ino={}, kind={:?}", name, attr.ino, attr.kind);
+            trace!("opendir - adding entry: name={}, ino={}, kind={:?}", name, attr.ino, attr.kind);
             let entry = DirEntry::new(attr.ino, current_offset, attr.kind, name.clone());
             if attr.ino == 0 {
-                println!("DEBUG: opendir - skipping entry with ino=0: {}", name);
+                trace!("opendir - skipping entry with ino=0: {}", name);
                 continue;
             }
             self.dir_handle_manager.append_to_handle(dir_handle, entry);
@@ -591,7 +591,7 @@ impl Filesystem for OpenDriveFuse {
         offset: i64,
         mut reply: ReplyDirectory,
     ) {
-        println!("OpenDriveFuse: readdir ino={}, offset={}", ino, offset);
+        debug!("OpenDriveFuse: readdir ino={}, offset={}", ino, offset);
 
         
         let entries = self.dir_handle_manager.get_dir_handle(fh).unwrap();
@@ -620,12 +620,12 @@ impl Filesystem for OpenDriveFuse {
         datasync: bool,
         reply: ReplyEmpty,
     ) {
-        println!("OpenDriveFuse: fsyncdir ino={}", ino);
+        debug!("OpenDriveFuse: fsyncdir ino={}", ino);
         reply.ok();
     }
 
     fn statfs(&mut self, _req: &Request<'_>, ino: u64, reply: ReplyStatfs) {
-        println!("OpenDriveFuse: statfs ino={}", ino);
+        debug!("OpenDriveFuse: statfs ino={}", ino);
 
         // Stub implementation with dummy values
         reply.statfs(
@@ -650,7 +650,7 @@ impl Filesystem for OpenDriveFuse {
         position: u32,
         reply: ReplyEmpty,
     ) {
-        println!("OpenDriveFuse: setxattr ino={}, name={:?}", ino, name);
+        debug!("OpenDriveFuse: setxattr ino={}, name={:?}", ino, name);
         reply.error(ENOSYS);
     }
 
@@ -662,22 +662,22 @@ impl Filesystem for OpenDriveFuse {
         size: u32,
         reply: ReplyXattr,
     ) {
-        println!("OpenDriveFuse: getxattr ino={}, name={:?}", ino, name);
+        debug!("OpenDriveFuse: getxattr ino={}, name={:?}", ino, name);
         reply.error(ENOSYS);
     }
 
     fn listxattr(&mut self, _req: &Request<'_>, ino: u64, size: u32, reply: ReplyXattr) {
-        println!("OpenDriveFuse: listxattr ino={}", ino);
+        debug!("OpenDriveFuse: listxattr ino={}", ino);
         reply.error(ENOSYS);
     }
 
     fn removexattr(&mut self, _req: &Request<'_>, ino: u64, name: &OsStr, reply: ReplyEmpty) {
-        println!("OpenDriveFuse: removexattr ino={}, name={:?}", ino, name);
+        debug!("OpenDriveFuse: removexattr ino={}, name={:?}", ino, name);
         reply.error(ENOSYS);
     }
 
     fn access(&mut self, _req: &Request<'_>, ino: u64, mask: i32, reply: ReplyEmpty) {
-        println!("OpenDriveFuse: access ino={}, mask={}", ino, mask);
+        debug!("OpenDriveFuse: access ino={}, mask={}", ino, mask);
         reply.ok();
     }
 
@@ -691,7 +691,7 @@ impl Filesystem for OpenDriveFuse {
         flags: i32,
         reply: ReplyCreate,
     ) {
-        println!("OpenDriveFuse: create parent={}, name={:?}", parent, name);
+        debug!("OpenDriveFuse: create parent={}, name={:?}", parent, name);
 
         // create is not supported for read-only cache filesystem
         // In a full implementation, this would create a file in OneDrive
@@ -710,7 +710,7 @@ impl Filesystem for OpenDriveFuse {
         pid: u32,
         reply: ReplyLock,
     ) {
-        println!("OpenDriveFuse: getlk ino={}", ino);
+        debug!("OpenDriveFuse: getlk ino={}", ino);
         reply.error(ENOSYS);
     }
 
@@ -727,12 +727,12 @@ impl Filesystem for OpenDriveFuse {
         sleep: bool,
         reply: ReplyEmpty,
     ) {
-        println!("OpenDriveFuse: setlk ino={}", ino);
+        debug!("OpenDriveFuse: setlk ino={}", ino);
         reply.error(ENOSYS);
     }
 
     fn bmap(&mut self, _req: &Request<'_>, ino: u64, blocksize: u32, idx: u64, reply: ReplyBmap) {
-        println!("OpenDriveFuse: bmap ino={}", ino);
+        debug!("OpenDriveFuse: bmap ino={}", ino);
         reply.error(ENOSYS);
     }
 
@@ -747,7 +747,7 @@ impl Filesystem for OpenDriveFuse {
         out_size: u32,
         reply: fuser::ReplyIoctl,
     ) {
-        println!("OpenDriveFuse: ioctl ino={}", ino);
+        debug!("OpenDriveFuse: ioctl ino={}", ino);
         reply.error(ENOSYS);
     }
 
@@ -761,7 +761,7 @@ impl Filesystem for OpenDriveFuse {
         mode: i32,
         reply: ReplyEmpty,
     ) {
-        println!("OpenDriveFuse: fallocate ino={}", ino);
+        debug!("OpenDriveFuse: fallocate ino={}", ino);
         reply.error(ENOSYS);
     }
 
@@ -773,7 +773,7 @@ impl Filesystem for OpenDriveFuse {
         offset: i64,
         mut reply: fuser::ReplyDirectoryPlus,
     ) {
-        println!("OpenDriveFuse: readdirplus ino={}, offset={}", ino, offset);
+        debug!("OpenDriveFuse: readdirplus ino={}, offset={}", ino, offset);
 
         if ino == 1 {
             // Root directory
@@ -796,7 +796,7 @@ impl Filesystem for OpenDriveFuse {
         whence: i32,
         reply: fuser::ReplyLseek,
     ) {
-        println!(
+        debug!(
             "OpenDriveFuse: lseek ino={}, offset={}, whence={}",
             ino, offset, whence
         );
@@ -816,7 +816,7 @@ impl Filesystem for OpenDriveFuse {
         flags: u32,
         reply: ReplyWrite,
     ) {
-        println!(
+        debug!(
             "OpenDriveFuse: copy_file_range ino_in={}, ino_out={}",
             ino_in, ino_out
         );
@@ -834,7 +834,7 @@ pub async fn mount_filesystem(mountpoint: &str) -> anyhow::Result<()> {
         MountOption::FSName("opendrive".to_string()),
     ];
 
-    println!("Mounting OpenDrive FUSE filesystem at: {}", mountpoint);
+    info!("Mounting OpenDrive FUSE filesystem at: {}", mountpoint);
     fuser::mount2(fs, mountpoint, &options)
         .map_err(|e| anyhow::anyhow!("Failed to mount filesystem: {}", e))?;
     Ok(())
