@@ -1,7 +1,7 @@
-// Configuration management for OneDrive sync will go here. 
+// Configuration management for OneDrive sync will go here.
 
 use anyhow::{Result, anyhow};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -21,10 +21,10 @@ pub struct SyncConfig {
 }
 
 impl Default for SyncConfig {
-    fn  default() -> Self {
+    fn default() -> Self {
         let mut local_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
         local_dir.push("OneDrive");
-        
+
         Self {
             local_dir,
             remote_dir: "/".to_string(),
@@ -35,7 +35,8 @@ impl Default for SyncConfig {
 
 impl Settings {
     pub fn get_settings_path() -> Result<PathBuf> {
-        let mut path = dirs::home_dir().ok_or_else(|| anyhow!("Could not determine home directory"))?;
+        let mut path =
+            dirs::home_dir().ok_or_else(|| anyhow!("Could not determine home directory"))?;
         println!("path: {:?}", path);
 
         path.push(".onedrive");
@@ -68,11 +69,9 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
-    use std::env;
     use serial_test::serial;
-
-    
+    use std::env;
+    use tempfile::tempdir;
 
     fn setup_test_env() {
         let temp_dir = tempdir().unwrap();
@@ -87,7 +86,7 @@ mod tests {
         setup_test_env();
         let mut settings = Settings::default();
         settings.sync_folders = vec!["/Documents".to_string(), "/Pictures".to_string()];
-        
+
         settings.save_to_file().unwrap();
         let loaded = Settings::load_from_file().unwrap();
         assert_eq!(loaded.sync_folders, settings.sync_folders);
@@ -104,4 +103,4 @@ mod tests {
         assert_eq!(config.remote_dir, "/");
         assert_eq!(config.sync_interval, Duration::from_secs(120));
     }
-} 
+}

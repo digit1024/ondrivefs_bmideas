@@ -1,14 +1,13 @@
-use anyhow::{ anyhow, Result, Context};
-use reqwest::Client;
-use urlencoding;
-use log::info;
-use crate::onedrive_service::onedrive_models::{
-    CreateFolderResult, DeleteResult, DeltaResponseApi, DownloadResult, DriveItem, DriveItemCollection, UploadResult
-};
 use crate::auth::onedrive_auth::OneDriveAuth;
-use serde::{Serialize};
-
-
+use crate::onedrive_service::onedrive_models::{
+    CreateFolderResult, DeleteResult, DeltaResponseApi, DownloadResult, DriveItem,
+    DriveItemCollection, UploadResult,
+};
+use anyhow::{Context, Result, anyhow};
+use log::info;
+use reqwest::Client;
+use serde::Serialize;
+use urlencoding;
 
 const GRAPH_API_BASE: &str = "https://graph.microsoft.com/v1.0";
 
@@ -40,109 +39,149 @@ impl OneDriveClient {
         }
     }
 
-    async fn get<T>(&self, url: &str) -> Result<T> 
-    where 
-        T: Serialize + serde::de::DeserializeOwned + std::fmt::Debug
-        {
+    async fn get<T>(&self, url: &str) -> Result<T>
+    where
+        T: Serialize + serde::de::DeserializeOwned + std::fmt::Debug,
+    {
+        let url = self.get_full_url(url)?;
+        info!("Getting url: {}", url);
+        let auth_header = self.auth_header().await?;
+        let response = self
+            .client
+            .get(&url)
+            .header("Authorization", auth_header)
+            .send()
+            .await
+            .context("Failed to get response")?
+            .error_for_status()
+            .context("Not a success status")?;
+
+        
+        let auth_header = self.auth_header().await?;
+        let r = self
+        .client
+        .get(&url)
+        .header("Authorization", auth_header)
+        .send()
+        .await
+        .context("Failed to get response")?
+        .error_for_status()
+        .context("Not a success status")?.text().await?;
+
+
+        info!("Response text: {}", r);
+        let response_json = response.json::<T>()
+            .await
+            .context("Failed to Deserialize response to type T")?;
+        Ok(response_json)
+    }
+    async fn post<T>(&self, url: &str, body: &T) -> Result<T>
+    where
+        T: Serialize + serde::de::DeserializeOwned + std::fmt::Debug,
+    {
         let url = self.get_full_url(url)?;
         let auth_header = self.auth_header().await?;
-        let response = self.client
-            .get(url)
-            .header("Authorization", auth_header)
-            .send().await.context("Failed to get response")?
-            .error_for_status().context("Not a success status")?
-            .json::<T>().await.context("Failed to Deserialize response to type T")?;
-        Ok(response)
-    }
-    async fn post<T>(&self, url: &str, body: &T) -> Result<T> 
-    where 
-        T: Serialize + serde::de::DeserializeOwned + std::fmt::Debug
-        {
-            let url = self.get_full_url(url)?;
-        let auth_header = self.auth_header().await?;
-        let response = self.client
+        let response = self
+            .client
             .post(url)
             .header("Authorization", auth_header)
             .header("Content-Type", "application/json")
             .json(body)
-            .send().await.context("Failed to get response for post")?
-            .error_for_status().context("Not a success status")?
-            .json::<T>().await.context("Failed to Deserialize response to type T")?;    
+            .send()
+            .await
+            .context("Failed to get response for post")?
+            .error_for_status()
+            .context("Not a success status")?
+            .json::<T>()
+            .await
+            .context("Failed to Deserialize response to type T")?;
         Ok(response)
     }
-    async fn delete(&self, url: &str) -> Result<()> 
-        {   
-            let url = self.get_full_url(url)?;
+    async fn delete(&self, url: &str) -> Result<()> {
+        let url = self.get_full_url(url)?;
         let auth_header = self.auth_header().await?;
         self.client
             .delete(url)
             .header("Authorization", auth_header)
-            .send().await.context("Failed to get response for delete")?
-            .error_for_status().context("Not a success status")?;
+            .send()
+            .await
+            .context("Failed to get response for delete")?
+            .error_for_status()
+            .context("Not a success status")?;
         Ok(())
     }
-    async fn put<T>(&self, url: &str, body: &T) -> Result<T> 
-    where 
-        T: Serialize + serde::de::DeserializeOwned + std::fmt::Debug
-        {
-            let url = self.get_full_url(url)?;
+    async fn put<T>(&self, url: &str, body: &T) -> Result<T>
+    where
+        T: Serialize + serde::de::DeserializeOwned + std::fmt::Debug,
+    {
+        let url = self.get_full_url(url)?;
         let auth_header = self.auth_header().await?;
-        let response = self.client
+        let response = self
+            .client
             .put(url)
             .header("Authorization", auth_header)
             .header("Content-Type", "application/json")
             .json(body)
-            .send().await.context("Failed to get response for put")?
-            .error_for_status().context("Not a success status")?
-            .json::<T>().await.context("Failed to Deserialize response to type T")?;    
+            .send()
+            .await
+            .context("Failed to get response for put")?
+            .error_for_status()
+            .context("Not a success status")?
+            .json::<T>()
+            .await
+            .context("Failed to Deserialize response to type T")?;
         Ok(response)
     }
 
-
-
-
-
-
-
-
-
-
     /// Download a file by its download URL and return the file data and metadata
-    pub async fn download_file(&self, download_url: &str, onedrive_id: &str, file_name: &str) -> Result<DownloadResult> {
+    pub async fn download_file(
+        &self,
+        download_url: &str,
+        onedrive_id: &str,
+        file_name: &str,
+    ) -> Result<DownloadResult> {
         let auth_header = self.auth_header().await?;
-        let response = self.client
+        let response = self
+            .client
             .get(download_url)
             .header("Authorization", auth_header)
-            .send().await.context("Failed to get response for download")?
-            .error_for_status().context("Not a success status")?;
+            .send()
+            .await
+            .context("Failed to get response for download")?
+            .error_for_status()
+            .context("Not a success status")?;
 
         if !response.status().is_success() {
             return Err(anyhow!("Failed to download file: {}", response.status()));
         }
 
         // Extract headers before consuming the response
-        let etag = response.headers()
+        let etag = response
+            .headers()
             .get("etag")
             .and_then(|v| v.to_str().ok())
             .map(|s| s.trim_matches('"').to_string());
-        
-        let content_type = response.headers()
+
+        let content_type = response
+            .headers()
             .get("content-type")
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
-        
-        let content_length = response.headers()
+
+        let content_length = response
+            .headers()
             .get("content-length")
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.parse::<u64>().ok());
-        
-        let last_modified = response.headers()
+
+        let last_modified = response
+            .headers()
             .get("last-modified")
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
 
         let content = response.bytes().await?;
-        
+
         let result = DownloadResult {
             file_data: content.to_vec(),
             file_name: file_name.to_string(),
@@ -152,30 +191,39 @@ impl OneDriveClient {
             size: content_length,
             last_modified,
         };
-        
+
         info!("Downloaded file data: {} (ID: {})", file_name, onedrive_id);
         Ok(result)
     }
 
     /// Upload a file to OneDrive and return the upload result
-    pub async fn upload_file(&self, file_data: &[u8], file_name: &str, remote_path: &str) -> Result<UploadResult> {
+    pub async fn upload_file(
+        &self,
+        file_data: &[u8],
+        file_name: &str,
+        remote_path: &str,
+    ) -> Result<UploadResult> {
         let auth_header = self.auth_header().await?;
-        
+
         // Determine parent path
         let parent_path = if remote_path == "/" {
             "/".to_string()
         } else {
             remote_path.to_string()
         };
-        
+
         let url = if parent_path == "/" {
             format!("{}/me/drive/root:/{}:/content", GRAPH_API_BASE, file_name)
         } else {
             let encoded_path = urlencoding::encode(&parent_path);
-            format!("{}/me/drive/root:{}:/{}:/content", GRAPH_API_BASE, encoded_path, file_name)
+            format!(
+                "{}/me/drive/root:{}:/{}:/content",
+                GRAPH_API_BASE, encoded_path, file_name
+            )
         };
 
-        let response = self.client
+        let response = self
+            .client
             .put(&url)
             .header("Authorization", auth_header)
             .header("Content-Type", "application/octet-stream")
@@ -189,7 +237,7 @@ impl OneDriveClient {
         }
 
         let item: DriveItem = response.json().await?;
-        
+
         let result = UploadResult {
             onedrive_id: item.id,
             etag: item.etag,
@@ -207,7 +255,8 @@ impl OneDriveClient {
         let encoded_path = urlencoding::encode(path);
         let url = format!("{}/me/drive/root:{}", GRAPH_API_BASE, encoded_path);
 
-        let response = self.client
+        let response = self
+            .client
             .get(&url)
             .header("Authorization", auth_header)
             .send()
@@ -228,7 +277,8 @@ impl OneDriveClient {
         let encoded_path = urlencoding::encode(path);
         let url = format!("{}/me/drive/root:{}", GRAPH_API_BASE, encoded_path);
 
-        let response = self.client
+        let response = self
+            .client
             .delete(&url)
             .header("Authorization", auth_header)
             .send()
@@ -250,14 +300,21 @@ impl OneDriveClient {
     }
 
     /// Create a folder and return the creation result
-    pub async fn create_folder(&self, parent_path: &str, folder_name: &str) -> Result<CreateFolderResult> {
+    pub async fn create_folder(
+        &self,
+        parent_path: &str,
+        folder_name: &str,
+    ) -> Result<CreateFolderResult> {
         let auth_header = self.auth_header().await?;
-        
+
         let url = if parent_path == "/" {
             format!("{}/me/drive/root/children", GRAPH_API_BASE)
         } else {
             let encoded_path = urlencoding::encode(parent_path);
-            format!("{}/me/drive/root:{}:/children", GRAPH_API_BASE, encoded_path)
+            format!(
+                "{}/me/drive/root:{}:/children",
+                GRAPH_API_BASE, encoded_path
+            )
         };
 
         let body = serde_json::json!({
@@ -266,7 +323,8 @@ impl OneDriveClient {
             "@microsoft.graph.conflictBehavior": "rename"
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", auth_header)
             .header("Content-Type", "application/json")
@@ -280,7 +338,7 @@ impl OneDriveClient {
         }
 
         let item: DriveItem = response.json().await?;
-        
+
         let result = CreateFolderResult {
             onedrive_id: item.id,
             folder_name: folder_name.to_string(),
@@ -291,36 +349,48 @@ impl OneDriveClient {
         Ok(result)
     }
 
-
     pub async fn get_delta_by_url(&self, next_link: &str) -> Result<DeltaResponseApi> {
-        
         let url = next_link.to_string();
         let delta_response = self.get(&url).await.context("Failed to get delta by url")?;
+        
         Ok(delta_response)
     }
 
     pub async fn get_delta_for_root(&self) -> Result<DeltaResponseApi> {
-        let url = format!("{}/me/drive/root/delta?select=id,name,eTag,lastModifiedDateTime,size,folder,file,@microsoft.graph.downloadUrl,deleted,parentReference", GRAPH_API_BASE);
-        let delta_response: DeltaResponseApi = self.get(&url).await.context("Failed to get delta for root")?;
+        let url = format!(
+            "{}/me/drive/root/delta?select=id,name,eTag,lastModifiedDateTime,size,folder,file,@microsoft.graph.downloadUrl,deleted,parentReference",
+            GRAPH_API_BASE
+        );
+        let delta_response: DeltaResponseApi = self
+            .get(&url)
+            .await
+            .context("Failed to get delta for root")?;
         Ok(delta_response)
     }
 
-
-
-
     /// Get delta changes for a folder using delta token
-    pub async fn get_delta_changes(&self, folder: &str, delta_token: Option<&str>) -> Result<DriveItemCollection> {
+    pub async fn get_delta_changes(
+        &self,
+        folder: &str,
+        delta_token: Option<&str>,
+    ) -> Result<DriveItemCollection> {
         let auth_header = self.auth_header().await?;
-        
+
         let url = if let Some(token) = delta_token {
             // Use existing delta token
-            format!("{}/me/drive/root:{}:/delta?token={}", GRAPH_API_BASE, folder, token)
+            format!(
+                "{}/me/drive/root:{}:/delta?token={}",
+                GRAPH_API_BASE, folder, token
+            )
         } else {
             // Initial delta query
             format!("{}/me/drive/root:{}:/delta", GRAPH_API_BASE, folder)
         };
 
-        let collection: DriveItemCollection = self.get(&url).await.context("Failed to get delta changes")?;
+        let collection: DriveItemCollection = self
+            .get(&url)
+            .await
+            .context("Failed to get delta changes")?;
         Ok(collection)
     }
 
@@ -330,7 +400,11 @@ impl OneDriveClient {
     }
 
     /// Get subsequent delta changes using a token
-    pub async fn get_delta_with_token(&self, folder: &str, delta_token: &str) -> Result<DriveItemCollection> {
+    pub async fn get_delta_with_token(
+        &self,
+        folder: &str,
+        delta_token: &str,
+    ) -> Result<DriveItemCollection> {
         self.get_delta_changes(folder, Some(delta_token)).await
     }
 
@@ -415,23 +489,19 @@ mod tests {
         }
     }
 
-
-
-
     // Test constants
     #[test]
     fn test_graph_api_base_constant() {
         assert_eq!(GRAPH_API_BASE, "https://graph.microsoft.com/v1.0");
     }
 
-  
     //TODO tests are runnung with different HOME path, so I need to find a workaround this .
     // #[tokio::test]
     // #[cfg(feature = "integration-tests")]
     // #[serial]
-    
+
     // async fn test_get_delta_for_root_integration() {
-        
+
     //     let client = OneDriveClient::new().unwrap();
     //     let result = client.get_delta_for_root().await;
     //     assert!(result.is_ok());
@@ -440,7 +510,7 @@ mod tests {
     // #[tokio::test]
     // #[cfg(feature = "integration-tests")]
     // #[serial]
-    
+
     // async fn test_upload_file_integration() {
     //     // This would require valid auth and network access
     //     let client = OneDriveClient::new().unwrap();
@@ -453,7 +523,7 @@ mod tests {
     // #[tokio::test]
     // #[cfg(feature = "integration-tests")]
     // #[serial]
-    
+
     // async fn test_download_file_integration() {
     //     // This would require valid auth and network access
     //     let client = OneDriveClient::new().unwrap();
@@ -461,7 +531,6 @@ mod tests {
     //     let result = client.upload_file(file_data, "test.txt", "/").await;
     //     let download_url = result.unwrap().web_url.unwrap();
 
-        
     //     let result = client.download_file(download_url.as_str(), "test-id", "test.txt").await;
     //     client.delete_item("/test.txt").await;
     //     assert!(result.is_ok());
@@ -470,7 +539,7 @@ mod tests {
     // #[tokio::test]
     // #[cfg(feature = "integration-tests")]
     // #[serial]
-    
+
     // async fn test_create_folder_integration() {
     //     // This would require valid auth and network access
 
@@ -486,7 +555,7 @@ mod tests {
     // #[serial]
 
     // async fn test_delete_item_integration() {
-         
+
     //      let client = OneDriveClient::new().unwrap();
     //      client.create_folder("/", "TestFolder").await.unwrap();
     //      let result = client.delete_item("/TestFolder").await;
@@ -496,14 +565,13 @@ mod tests {
     // #[tokio::test]
     // #[cfg(feature = "integration-tests")]
     // #[serial]
-    
+
     // async fn test_get_item_by_path_integration() {
     //     // This would require valid auth and network access
     //     // let client = OneDriveClient::new().unwrap();
     //     // let result = client.get_item_by_path("/test/path").await;
     //     // assert!(result.is_ok());
     // }
-    
 
     // Mock tests for URL construction in different scenarios
     #[test]
@@ -511,17 +579,20 @@ mod tests {
     fn test_upload_url_construction_root_path() {
         let file_name = "test.txt";
         let parent_path = "/";
-        
+
         let expected_url = format!("{}/me/drive/root:/{}:/content", GRAPH_API_BASE, file_name);
-        
+
         // This tests the URL logic that would be used in upload_file
         let actual_url = if parent_path == "/" {
             format!("{}/me/drive/root:/{}:/content", GRAPH_API_BASE, file_name)
         } else {
             let encoded_path = urlencoding::encode(parent_path);
-            format!("{}/me/drive/root:{}:/{}:/content", GRAPH_API_BASE, encoded_path, file_name)
+            format!(
+                "{}/me/drive/root:{}:/{}:/content",
+                GRAPH_API_BASE, encoded_path, file_name
+            )
         };
-        
+
         assert_eq!(actual_url, expected_url);
     }
 
@@ -529,63 +600,84 @@ mod tests {
     fn test_upload_url_construction_nested_path() {
         let file_name = "test.txt";
         let parent_path = "/Documents/Projects";
-        
+
         let encoded_path = urlencoding::encode(parent_path);
-        let expected_url = format!("{}/me/drive/root:{}:/{}:/content", GRAPH_API_BASE, encoded_path, file_name);
-        
+        let expected_url = format!(
+            "{}/me/drive/root:{}:/{}:/content",
+            GRAPH_API_BASE, encoded_path, file_name
+        );
+
         // This tests the URL logic that would be used in upload_file
         let actual_url = if parent_path == "/" {
             format!("{}/me/drive/root:/{}:/content", GRAPH_API_BASE, file_name)
         } else {
             let encoded_path = urlencoding::encode(parent_path);
-            format!("{}/me/drive/root:{}:/{}:/content", GRAPH_API_BASE, encoded_path, file_name)
+            format!(
+                "{}/me/drive/root:{}:/{}:/content",
+                GRAPH_API_BASE, encoded_path, file_name
+            )
         };
-        
+
         assert_eq!(actual_url, expected_url);
     }
 
     #[test]
     fn test_create_folder_url_construction_root() {
         let parent_path = "/";
-        
+
         let expected_url = format!("{}/me/drive/root/children", GRAPH_API_BASE);
-        
+
         // This tests the URL logic that would be used in create_folder
         let actual_url = if parent_path == "/" {
             format!("{}/me/drive/root/children", GRAPH_API_BASE)
         } else {
             let encoded_path = urlencoding::encode(parent_path);
-            format!("{}/me/drive/root:{}:/children", GRAPH_API_BASE, encoded_path)
+            format!(
+                "{}/me/drive/root:{}:/children",
+                GRAPH_API_BASE, encoded_path
+            )
         };
-        
+
         assert_eq!(actual_url, expected_url);
     }
 
     #[test]
     fn test_create_folder_url_construction_nested() {
         let parent_path = "/Documents/Projects";
-        
+
         let encoded_path = urlencoding::encode(parent_path);
-        let expected_url = format!("{}/me/drive/root:{}:/children", GRAPH_API_BASE, encoded_path);
-        
+        let expected_url = format!(
+            "{}/me/drive/root:{}:/children",
+            GRAPH_API_BASE, encoded_path
+        );
+
         // This tests the URL logic that would be used in create_folder
         let actual_url = if parent_path == "/" {
             format!("{}/me/drive/root/children", GRAPH_API_BASE)
         } else {
             let encoded_path = urlencoding::encode(parent_path);
-            format!("{}/me/drive/root:{}:/children", GRAPH_API_BASE, encoded_path)
+            format!(
+                "{}/me/drive/root:{}:/children",
+                GRAPH_API_BASE, encoded_path
+            )
         };
-        
+
         assert_eq!(actual_url, expected_url);
     }
 
     #[test]
     fn test_delta_url_construction() {
-        let expected_base_url = format!("{}/me/drive/root/delta?select=id,name,eTag,lastModifiedDateTime,size,folder,file,@microsoft.graph.downloadUrl,deleted,parentReference", GRAPH_API_BASE);
-        
+        let expected_base_url = format!(
+            "{}/me/drive/root/delta?select=id,name,eTag,lastModifiedDateTime,size,folder,file,@microsoft.graph.downloadUrl,deleted,parentReference",
+            GRAPH_API_BASE
+        );
+
         // Test the URL that would be used in get_delta_for_root
-        let actual_url = format!("{}/me/drive/root/delta?select=id,name,eTag,lastModifiedDateTime,size,folder,file,@microsoft.graph.downloadUrl,deleted,parentReference", GRAPH_API_BASE);
-        
+        let actual_url = format!(
+            "{}/me/drive/root/delta?select=id,name,eTag,lastModifiedDateTime,size,folder,file,@microsoft.graph.downloadUrl,deleted,parentReference",
+            GRAPH_API_BASE
+        );
+
         assert_eq!(actual_url, expected_base_url);
         assert!(actual_url.contains("select="));
         assert!(actual_url.contains("@microsoft.graph.downloadUrl"));
@@ -596,8 +688,14 @@ mod tests {
     fn test_path_encoding() {
         let test_cases = vec![
             ("/Documents/My Files", "%2FDocuments%2FMy%20Files"),
-            ("/测试/文件夹", "%2F%E6%B5%8B%E8%AF%95%2F%E6%96%87%E4%BB%B6%E5%A4%B9"),
-            ("/Files with spaces & symbols", "%2FFiles%20with%20spaces%20%26%20symbols"),
+            (
+                "/测试/文件夹",
+                "%2F%E6%B5%8B%E8%AF%95%2F%E6%96%87%E4%BB%B6%E5%A4%B9",
+            ),
+            (
+                "/Files with spaces & symbols",
+                "%2FFiles%20with%20spaces%20%26%20symbols",
+            ),
         ];
 
         for (input, expected) in test_cases {

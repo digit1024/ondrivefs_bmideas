@@ -1,17 +1,15 @@
-
-
-use anyhow::{anyhow, Result};
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use anyhow::{Result, anyhow};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use rand::Rng;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tiny_http::{Server, Response, Header};
+use tiny_http::{Header, Response, Server};
 use url::Url;
 
-use crate::auth::token_store::{TokenStore, AuthConfig};
+use crate::auth::token_store::{AuthConfig, TokenStore};
 
 const CLIENT_ID: &str = "95367b4f-624c-452c-b099-bfc9c27b69b9"; // Replace with your Azure app ID
 const REDIRECT_URI: &str = "http://localhost:8080/callback";
@@ -60,10 +58,11 @@ impl OneDriveAuth {
     /// Start the OAuth flow
     pub async fn authorize(&self) -> Result<AuthConfig> {
         let (code_verifier, code_challenge) = Self::generate_pkce();
-        
+
         // Build authorization URL
         let mut auth_url = Url::parse(AUTH_URL)?;
-        auth_url.query_pairs_mut()
+        auth_url
+            .query_pairs_mut()
             .append_pair("client_id", CLIENT_ID)
             .append_pair("response_type", "code")
             .append_pair("redirect_uri", REDIRECT_URI)
@@ -78,41 +77,48 @@ impl OneDriveAuth {
         // Start local server to receive callback
         let server = Server::http("127.0.0.1:8080")
             .map_err(|e| anyhow!("Failed to start local server: {}", e))?;
-        
+
         println!("Waiting for authorization callback...");
-        
+
         for request in server.incoming_requests() {
             let url = format!("http://localhost:8080{}", request.url());
             let parsed_url = Url::parse(&url)?;
-            
-            if let Some(code) = parsed_url.query_pairs()
+
+            if let Some(code) = parsed_url
+                .query_pairs()
                 .find(|(key, _)| key == "code")
-                .map(|(_, value)| value.to_string()) 
+                .map(|(_, value)| value.to_string())
             {
                 // Send success response to browser
-                let response = Response::from_string(INDEX_HTML)
-                    .with_header(Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap());
+                let response = Response::from_string(INDEX_HTML).with_header(
+                    Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap(),
+                );
                 let _ = request.respond(response);
-                
+
                 // Exchange code for tokens
                 let tokens = self.exchange_code_for_tokens(&code, &code_verifier).await?;
                 let config = self.save_tokens(tokens)?;
                 return Ok(config);
             }
-            
+
             if parsed_url.query_pairs().any(|(key, _)| key == "error") {
-                let response = Response::from_string("Authorization failed!")
-                    .with_header(Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap());
+                let response = Response::from_string("Authorization failed!").with_header(
+                    Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap(),
+                );
                 let _ = request.respond(response);
                 return Err(anyhow!("Authorization was denied or failed"));
             }
         }
-        
+
         Err(anyhow!("Authorization flow incomplete"))
     }
 
     /// Exchange authorization code for tokens
-    async fn exchange_code_for_tokens(&self, code: &str, code_verifier: &str) -> Result<TokenResponse> {
+    async fn exchange_code_for_tokens(
+        &self,
+        code: &str,
+        code_verifier: &str,
+    ) -> Result<TokenResponse> {
         let mut params = HashMap::new();
         params.insert("client_id", CLIENT_ID);
         params.insert("code", code);
@@ -120,11 +126,7 @@ impl OneDriveAuth {
         params.insert("grant_type", "authorization_code");
         params.insert("code_verifier", code_verifier);
 
-        let response = self.client
-            .post(TOKEN_URL)
-            .form(&params)
-            .send()
-            .await?;
+        let response = self.client.post(TOKEN_URL).form(&params).send().await?;
 
         if !response.status().is_success() {
             let error_text = response.text().await?;
@@ -137,9 +139,8 @@ impl OneDriveAuth {
 
     /// Save tokens to storage
     fn save_tokens(&self, tokens: TokenResponse) -> Result<AuthConfig> {
-        let expires_at = SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_secs() + tokens.expires_in;
+        let expires_at =
+            SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + tokens.expires_in;
 
         let config = AuthConfig {
             access_token: tokens.access_token,
@@ -148,7 +149,10 @@ impl OneDriveAuth {
         };
 
         self.token_store.save_tokens(&config)?;
-        println!("Tokens saved successfully using: {}", self.token_store.get_storage_info());
+        println!(
+            "Tokens saved successfully using: {}",
+            self.token_store.get_storage_info()
+        );
         Ok(config)
     }
 
@@ -173,11 +177,7 @@ impl OneDriveAuth {
         params.insert("refresh_token", refresh_token);
         params.insert("grant_type", "refresh_token");
 
-        let response = self.client
-            .post(TOKEN_URL)
-            .form(&params)
-            .send()
-            .await?;
+        let response = self.client.post(TOKEN_URL).form(&params).send().await?;
 
         if !response.status().is_success() {
             let error_text = response.text().await?;
@@ -191,7 +191,7 @@ impl OneDriveAuth {
     /// Get valid access token (refresh if needed)
     pub async fn get_valid_token(&self) -> Result<String> {
         let config = self.load_tokens()?;
-        
+
         if self.is_token_expired(&config) {
             println!("Token expired, refreshing...");
             let new_config = self.refresh_token(&config.refresh_token).await?;
@@ -199,7 +199,6 @@ impl OneDriveAuth {
         } else {
             Ok(config.access_token)
         }
-        
     }
 }
 

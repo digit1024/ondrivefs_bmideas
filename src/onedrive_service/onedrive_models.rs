@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// ParentReference: Represents the parent reference of a drive item. 
+/// ParentReference: Represents the parent reference of a drive item.
 /// Used to get the  actual path of the item.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ParentReference {
@@ -16,8 +16,8 @@ pub struct DeltaResponse {
     pub items: Option<Vec<DriveItem>>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct DeltaResponseApi{    
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct DeltaResponseApi {
     #[serde(default)]
     pub value: Vec<DriveItem>,
     #[serde(rename = "@odata.nextLink")]
@@ -25,8 +25,6 @@ pub struct DeltaResponseApi{
     #[serde(rename = "@odata.deltaLink")]
     pub delta_link: Option<String>,
 }
-
-
 
 /// DriveItem: Represents a drive item.
 /// Used to get the metadata of the item.
@@ -51,8 +49,6 @@ pub struct DriveItem {
     pub parent_reference: Option<ParentReference>,
 }
 
-
-
 /// FolderFacet: Represents the folder facet of a drive item.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct FolderFacet {
@@ -64,7 +60,7 @@ pub struct FolderFacet {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct FileFacet {
     #[serde(rename = "mimeType")]
-    pub mime_type: Option<String>,  
+    pub mime_type: Option<String>,
 }
 
 /// DriveItemCollection: Represents a collection of drive items.
@@ -114,4 +110,3 @@ pub struct DeleteResult {
     pub item_id: String,
     pub item_path: String,
 }
-

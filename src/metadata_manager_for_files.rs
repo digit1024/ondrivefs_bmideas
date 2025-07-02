@@ -1,9 +1,9 @@
 use anyhow::Result;
+use log::{debug, info, warn};
+use serde::{Deserialize, Serialize};
 use sled::{Db, Tree};
-use std::path::{Path, PathBuf};
 use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
-use log::{info, warn, debug};
+use std::path::{Path, PathBuf};
 
 /// Simplified metadata record that only stores local path as value
 #[derive(Debug, Serialize, Deserialize)]
@@ -12,7 +12,7 @@ pub struct FileMetadata {
 }
 
 /// Delta record for folder synchronization
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct FolderDelta {
     pub delta_token: String,
     pub last_sync: i64,
@@ -28,11 +28,13 @@ pub struct OnedriveFileMeta {
 /// Metadata manager using sled key-value storage
 pub struct MetadataManagerForFiles {
     db: Db,
-    
-    
+
     folder_deltas: Tree,
     changed_queue: Tree,
+    onedrive_id_to_local_path: Tree,
 }
+
+
 
 impl MetadataManagerForFiles {
     /// Create a new metadata manager instance
@@ -40,38 +42,35 @@ impl MetadataManagerForFiles {
         let home_dir = std::env::var("HOME")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("/tmp"));
-        
+
         let onedrive_dir = home_dir.join(".onedrive");
         let db_path = onedrive_dir.join("metadata.sled");
-        
+
         // Create directory if it doesn't exist
         std::fs::create_dir_all(&onedrive_dir)?;
-        
+
         // Open sled database
         let db = sled::open(&db_path)?;
-        
+
         // Open trees for different data types
-        let files_mapping = db.open_tree("files_mapping")?;
+        let onedrive_id_to_local_path = db.open_tree("onedrive_id_to_local_path")?;
         let folder_deltas = db.open_tree("folder_deltas")?;
         let changed_queue = db.open_tree("changed_queue")?;
-        let path_to_onedrive_metadata = db.open_tree("path_to_onedrive_metadata")?;
-        
+
         let manager = Self {
             db,
-            
             folder_deltas,
             changed_queue,
-            
+            onedrive_id_to_local_path,
         };
-        
-        info!("Initialized metadata manager with sled database at {:?}", db_path);
+
+        info!(
+            "Initialized metadata manager with sled database at {:?}",
+            db_path
+        );
         manager.flush().unwrap();
         Ok(manager)
     }
-
-
-
-
 
     /// Store delta token for a folder
     pub fn store_folder_delta(&self, folder_path: &str, delta_token: &str) -> Result<()> {
@@ -82,10 +81,11 @@ impl MetadataManagerForFiles {
                 .unwrap()
                 .as_secs() as i64,
         };
-        
+
         let json_value = serde_json::to_string(&delta)?;
-        self.folder_deltas.insert(folder_path.as_bytes(), json_value.as_bytes())?;
-        
+        self.folder_deltas
+            .insert(folder_path.as_bytes(), json_value.as_bytes())?;
+
         debug!("Stored delta token for folder: {}", folder_path);
         Ok(())
     }
@@ -112,24 +112,24 @@ impl MetadataManagerForFiles {
     /// Remove a file from the changed queue
     pub fn remove_from_changed_queue(&self, full_path: &str) -> Result<()> {
         let removed = self.changed_queue.remove(full_path.as_bytes())?;
-        
+
         if removed.is_some() {
             debug!("Removed from changed queue: {}", full_path);
         }
-        
+
         Ok(())
     }
 
     /// Get all files in the changed queue
     pub fn get_changed_queue_files(&self) -> Result<Vec<String>> {
         let mut files = Vec::new();
-        
+
         for result in self.changed_queue.iter() {
             let (key, _) = result?;
             let file_path = String::from_utf8(key.to_vec())?;
             files.push(file_path);
         }
-        
+
         Ok(files)
     }
 
@@ -141,35 +141,31 @@ impl MetadataManagerForFiles {
     }
 
 
-
-    /// Get all folder deltas
-    pub fn get_all_folder_deltas(&self) -> Result<HashMap<String, FolderDelta>> {
-        let mut deltas = HashMap::new();
-        
-        for result in self.folder_deltas.iter() {
-            let (key, value) = result?;
-            let folder_path = String::from_utf8(key.to_vec())?;
-            let json_str = String::from_utf8(value.to_vec())?;
-            let delta: FolderDelta = serde_json::from_str(&json_str)?;
-            
-            deltas.insert(folder_path, delta);
-        }
-        
-        Ok(deltas)
-    }
-
     /// Flush all pending writes to disk
     pub fn flush(&self) -> Result<()> {
         self.db.flush()?;
         Ok(())
     }
 
+    pub fn store_onedrive_id_to_local_path(&self, onedrive_id: &str, local_path: &str) -> Result<()> {
+        self.onedrive_id_to_local_path.insert(onedrive_id.as_bytes(), local_path.as_bytes())?;
+        Ok(())
+    }
+
+    pub fn get_local_path_for_onedrive_id(&self, onedrive_id: &str) -> Result<Option<String>> {
+        if let Some(value) = self.onedrive_id_to_local_path.get(onedrive_id.as_bytes())? {
+            let local_path = String::from_utf8(value.to_vec())?;
+            return Ok(Some(local_path));
+        }
+        return Ok(None);
+    }
+
+    pub fn remove_onedrive_id_to_local_path(&self, onedrive_id: &str) -> Result<()> {
+        self.onedrive_id_to_local_path.remove(onedrive_id.as_bytes())?;
+        Ok(())
+    }
 
 
-
-
-
-    
 }
 
 impl Drop for MetadataManagerForFiles {
@@ -183,9 +179,9 @@ impl Drop for MetadataManagerForFiles {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
-    use std::env;
     use serial_test::serial;
+    use std::env;
+    use tempfile::tempdir;
 
     fn setup_test_env() {
         let temp_dir = tempdir().unwrap();
@@ -194,20 +190,20 @@ mod tests {
         }
     }
 
-  
-
     #[test]
     #[serial]
     fn test_folder_delta_operations() {
         setup_test_env();
-        
+
         let manager = MetadataManagerForFiles::new().unwrap();
         let folder_path = "/Documents";
         let delta_token = "test_delta_token_123";
-        
+
         // Test storing delta
-        manager.store_folder_delta(folder_path, delta_token).unwrap();
-        
+        manager
+            .store_folder_delta(folder_path, delta_token)
+            .unwrap();
+
         // Test retrieving delta
         let delta = manager.get_folder_delta(folder_path).unwrap();
         assert!(delta.is_some());
@@ -220,30 +216,30 @@ mod tests {
     #[serial]
     fn test_changed_queue_operations() {
         setup_test_env();
-        
+
         let manager = MetadataManagerForFiles::new().unwrap();
         let test_file = "/home/user/test_file.txt";
-        
+
         // Test adding to queue
         manager.add_to_changed_queue(test_file).unwrap();
-        
+
         // Test getting queue contents
         let files = manager.get_changed_queue_files().unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(files[0], test_file);
-        
+
         // Test removing from queue
         manager.remove_from_changed_queue(test_file).unwrap();
         let files = manager.get_changed_queue_files().unwrap();
         assert_eq!(files.len(), 0);
-        
+
         // Test clearing queue
         manager.add_to_changed_queue(test_file).unwrap();
-        manager.add_to_changed_queue("/home/user/another_file.txt").unwrap();
+        manager
+            .add_to_changed_queue("/home/user/another_file.txt")
+            .unwrap();
         manager.clear_changed_queue().unwrap();
         let files = manager.get_changed_queue_files().unwrap();
         assert_eq!(files.len(), 0);
     }
-
-   
-} 
+}

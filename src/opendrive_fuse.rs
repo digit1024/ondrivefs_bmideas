@@ -1,3 +1,4 @@
+use crate::onedrive_service::onedrive_models::DriveItem;
 use fuser::{
     FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyBmap, ReplyCreate, ReplyData,
     ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyLock, ReplyOpen, ReplyStatfs, ReplyWrite,
@@ -6,10 +7,9 @@ use fuser::{
 use libc::{ENOENT, ENOSYS, ENOTDIR};
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::time::{Duration, SystemTime, UNIX_EPOCH };
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use time::OffsetDateTime;
-use crate::onedrive_service::onedrive_models::DriveItem;
- 
+
 const TTL: Duration = Duration::from_secs(1);
 
 /// Stub FUSE filesystem implementation
@@ -23,15 +23,24 @@ pub trait to_fuse_attr {
 }
 fn parse_time_string(time_string: &String) -> Result<SystemTime, time::error::Parse> {
     // Parse RFC 3339 format (ISO 8601)
-    let datetime = OffsetDateTime::parse(time_string.as_str(),  &time::format_description::well_known::Rfc3339)?;
+    let datetime = OffsetDateTime::parse(
+        time_string.as_str(),
+        &time::format_description::well_known::Rfc3339,
+    )?;
     Ok(SystemTime::from(datetime))
 }
 
-impl to_fuse_attr for  DriveItem {
-     fn to_fuse_attr(&self) -> FileAttr {
+impl to_fuse_attr for DriveItem {
+    fn to_fuse_attr(&self) -> FileAttr {
         let default_time_string = String::from("1960-01-01T01:00:0-Z");
-        let last_modified = self.last_modified.clone().unwrap_or(default_time_string.clone());
-        let created_date = self.created_date.clone().unwrap_or(default_time_string.clone());
+        let last_modified = self
+            .last_modified
+            .clone()
+            .unwrap_or(default_time_string.clone());
+        let created_date = self
+            .created_date
+            .clone()
+            .unwrap_or(default_time_string.clone());
 
         let attr = FileAttr {
             ino: self.id.parse::<u64>().unwrap(),
@@ -47,14 +56,17 @@ impl to_fuse_attr for  DriveItem {
             blksize: 512,
             flags: 0,
 
-            kind: if self.file.is_some() { FileType::RegularFile } else { FileType::Directory },
+            kind: if self.file.is_some() {
+                FileType::RegularFile
+            } else {
+                FileType::Directory
+            },
             perm: if self.file.is_some() { 0o644 } else { 0o755 },
             nlink: 1,
             uid: 1000,
         };
         attr
-     }
- 
+    }
 }
 
 impl OpenDriveFuse {
@@ -130,7 +142,7 @@ impl Filesystem for OpenDriveFuse {
 
     fn lookup(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEntry) {
         println!("OpenDriveFuse: lookup parent={}, name={:?}", parent, name);
-        
+
         // Stub implementation - always return ENOENT
         reply.error(ENOENT);
     }
@@ -142,7 +154,7 @@ impl Filesystem for OpenDriveFuse {
 
     fn getattr(&mut self, _req: &Request<'_>, ino: u64, reply: ReplyAttr) {
         println!("OpenDriveFuse: getattr ino={}", ino);
-        
+
         if let Some(attr) = self.inodes.get(&ino) {
             reply.attr(&TTL, attr);
         } else {
@@ -169,7 +181,7 @@ impl Filesystem for OpenDriveFuse {
         reply: ReplyAttr,
     ) {
         println!("OpenDriveFuse: setattr ino={}", ino);
-        
+
         if let Some(mut attr) = self.inodes.get(&ino).cloned() {
             if let Some(mode) = mode {
                 attr.perm = mode as u16;
@@ -184,7 +196,7 @@ impl Filesystem for OpenDriveFuse {
                 attr.size = size;
                 attr.blocks = (size + 511) / 512;
             }
-            
+
             self.inodes.insert(ino, attr);
             reply.attr(&TTL, &attr);
         } else {
@@ -221,7 +233,7 @@ impl Filesystem for OpenDriveFuse {
         reply: ReplyEntry,
     ) {
         println!("OpenDriveFuse: mkdir parent={}, name={:?}", parent, name);
-        
+
         if !self.inodes.contains_key(&parent) {
             reply.error(ENOENT);
             return;
@@ -230,7 +242,7 @@ impl Filesystem for OpenDriveFuse {
         let ino = self.allocate_inode();
         let attr = self.create_file_attr(ino, FileType::Directory, 0, (mode & !umask) as u16);
         self.inodes.insert(ino, attr);
-        
+
         reply.entry(&TTL, &attr, 0);
     }
 
@@ -252,7 +264,10 @@ impl Filesystem for OpenDriveFuse {
         link: &std::path::Path,
         reply: ReplyEntry,
     ) {
-        println!("OpenDriveFuse: symlink parent={}, name={:?}, link={:?}", parent, name, link);
+        println!(
+            "OpenDriveFuse: symlink parent={}, name={:?}, link={:?}",
+            parent, name, link
+        );
         reply.error(ENOSYS);
     }
 
@@ -266,8 +281,10 @@ impl Filesystem for OpenDriveFuse {
         flags: u32,
         reply: ReplyEmpty,
     ) {
-        println!("OpenDriveFuse: rename parent={}, name={:?}, newparent={}, newname={:?}", 
-                 parent, name, newparent, newname);
+        println!(
+            "OpenDriveFuse: rename parent={}, name={:?}, newparent={}, newname={:?}",
+            parent, name, newparent, newname
+        );
         reply.ok();
     }
 
@@ -279,13 +296,16 @@ impl Filesystem for OpenDriveFuse {
         newname: &OsStr,
         reply: ReplyEntry,
     ) {
-        println!("OpenDriveFuse: link ino={}, newparent={}, newname={:?}", ino, newparent, newname);
+        println!(
+            "OpenDriveFuse: link ino={}, newparent={}, newname={:?}",
+            ino, newparent, newname
+        );
         reply.error(ENOSYS);
     }
 
     fn open(&mut self, _req: &Request<'_>, ino: u64, flags: i32, reply: ReplyOpen) {
         println!("OpenDriveFuse: open ino={}, flags={}", ino, flags);
-        
+
         if self.inodes.contains_key(&ino) {
             reply.opened(0, 0);
         } else {
@@ -304,8 +324,11 @@ impl Filesystem for OpenDriveFuse {
         lock_owner: Option<u64>,
         reply: ReplyData,
     ) {
-        println!("OpenDriveFuse: read ino={}, offset={}, size={}", ino, offset, size);
-        
+        println!(
+            "OpenDriveFuse: read ino={}, offset={}, size={}",
+            ino, offset, size
+        );
+
         // Stub implementation - return empty data
         reply.data(&[]);
     }
@@ -322,8 +345,13 @@ impl Filesystem for OpenDriveFuse {
         lock_owner: Option<u64>,
         reply: ReplyWrite,
     ) {
-        println!("OpenDriveFuse: write ino={}, offset={}, size={}", ino, offset, data.len());
-        
+        println!(
+            "OpenDriveFuse: write ino={}, offset={}, size={}",
+            ino,
+            offset,
+            data.len()
+        );
+
         // Stub implementation - pretend to write all data
         reply.written(data.len() as u32);
     }
@@ -354,7 +382,7 @@ impl Filesystem for OpenDriveFuse {
 
     fn opendir(&mut self, _req: &Request<'_>, ino: u64, flags: i32, reply: ReplyOpen) {
         println!("OpenDriveFuse: opendir ino={}", ino);
-        
+
         if let Some(attr) = self.inodes.get(&ino) {
             if attr.kind == FileType::Directory {
                 reply.opened(0, 0);
@@ -375,7 +403,7 @@ impl Filesystem for OpenDriveFuse {
         mut reply: ReplyDirectory,
     ) {
         println!("OpenDriveFuse: readdir ino={}, offset={}", ino, offset);
-        
+
         if ino == 1 {
             // Root directory
             if offset == 0 {
@@ -386,36 +414,36 @@ impl Filesystem for OpenDriveFuse {
         reply.ok();
     }
 
-    fn releasedir(
-        &mut self,
-        _req: &Request<'_>,
-        ino: u64,
-        fh: u64,
-        flags: i32,
-        reply: ReplyEmpty,
-    ) {
+    fn releasedir(&mut self, _req: &Request<'_>, ino: u64, fh: u64, flags: i32, reply: ReplyEmpty) {
         println!("OpenDriveFuse: releasedir ino={}", ino);
         reply.ok();
     }
 
-    fn fsyncdir(&mut self, _req: &Request<'_>, ino: u64, fh: u64, datasync: bool, reply: ReplyEmpty) {
+    fn fsyncdir(
+        &mut self,
+        _req: &Request<'_>,
+        ino: u64,
+        fh: u64,
+        datasync: bool,
+        reply: ReplyEmpty,
+    ) {
         println!("OpenDriveFuse: fsyncdir ino={}", ino);
         reply.ok();
     }
 
     fn statfs(&mut self, _req: &Request<'_>, ino: u64, reply: ReplyStatfs) {
         println!("OpenDriveFuse: statfs ino={}", ino);
-        
+
         // Stub implementation with dummy values
         reply.statfs(
-            1024 * 1024,  // blocks
-            1024 * 512,   // bfree
-            1024 * 512,   // bavail
-            1024,         // files
-            512,          // ffree
-            512,          // bsize
-            255,          // namelen
-            512,          // frsize
+            1024 * 1024, // blocks
+            1024 * 512,  // bfree
+            1024 * 512,  // bavail
+            1024,        // files
+            512,         // ffree
+            512,         // bsize
+            255,         // namelen
+            512,         // frsize
         );
     }
 
@@ -433,7 +461,14 @@ impl Filesystem for OpenDriveFuse {
         reply.error(ENOSYS);
     }
 
-    fn getxattr(&mut self, _req: &Request<'_>, ino: u64, name: &OsStr, size: u32, reply: ReplyXattr) {
+    fn getxattr(
+        &mut self,
+        _req: &Request<'_>,
+        ino: u64,
+        name: &OsStr,
+        size: u32,
+        reply: ReplyXattr,
+    ) {
         println!("OpenDriveFuse: getxattr ino={}, name={:?}", ino, name);
         reply.error(ENOSYS);
     }
@@ -464,7 +499,7 @@ impl Filesystem for OpenDriveFuse {
         reply: ReplyCreate,
     ) {
         println!("OpenDriveFuse: create parent={}, name={:?}", parent, name);
-        
+
         if !self.inodes.contains_key(&parent) {
             reply.error(ENOENT);
             return;
@@ -473,7 +508,7 @@ impl Filesystem for OpenDriveFuse {
         let ino = self.allocate_inode();
         let attr = self.create_file_attr(ino, FileType::RegularFile, 0, (mode & !umask) as u16);
         self.inodes.insert(ino, attr);
-        
+
         reply.created(&TTL, &attr, 0, 0, 0);
     }
 
@@ -553,7 +588,7 @@ impl Filesystem for OpenDriveFuse {
         mut reply: fuser::ReplyDirectoryPlus,
     ) {
         println!("OpenDriveFuse: readdirplus ino={}, offset={}", ino, offset);
-        
+
         if ino == 1 {
             // Root directory
             if offset == 0 {
@@ -566,8 +601,6 @@ impl Filesystem for OpenDriveFuse {
         reply.ok();
     }
 
-
-
     fn lseek(
         &mut self,
         _req: &Request<'_>,
@@ -577,7 +610,10 @@ impl Filesystem for OpenDriveFuse {
         whence: i32,
         reply: fuser::ReplyLseek,
     ) {
-        println!("OpenDriveFuse: lseek ino={}, offset={}, whence={}", ino, offset, whence);
+        println!(
+            "OpenDriveFuse: lseek ino={}, offset={}, whence={}",
+            ino, offset, whence
+        );
         reply.error(ENOSYS);
     }
 
@@ -594,7 +630,10 @@ impl Filesystem for OpenDriveFuse {
         flags: u32,
         reply: ReplyWrite,
     ) {
-        println!("OpenDriveFuse: copy_file_range ino_in={}, ino_out={}", ino_in, ino_out);
+        println!(
+            "OpenDriveFuse: copy_file_range ino_in={}, ino_out={}",
+            ino_in, ino_out
+        );
         reply.error(ENOSYS);
     }
 }
@@ -605,8 +644,6 @@ pub fn mount_filesystem(mountpoint: &str) -> Result<(), Box<dyn std::error::Erro
     let options = vec![
         MountOption::RW,
         MountOption::FSName("opendrive".to_string()),
-        
-        
     ];
 
     println!("Mounting OpenDrive FUSE filesystem at: {}", mountpoint);

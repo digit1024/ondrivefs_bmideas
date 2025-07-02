@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -20,7 +20,7 @@ impl TokenStore {
     pub fn new() -> Result<Self> {
         let keyring_entry = Self::create_keyring_entry();
         let file_path = Self::get_file_path()?;
-        
+
         // Ensure the directory exists for file fallback
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent)?;
@@ -42,8 +42,8 @@ impl TokenStore {
 
     /// Get the file path for fallback storage
     fn get_file_path() -> Result<PathBuf> {
-        let mut path = dirs::home_dir()
-            .ok_or_else(|| anyhow!("Could not determine home directory"))?;
+        let mut path =
+            dirs::home_dir().ok_or_else(|| anyhow!("Could not determine home directory"))?;
         path.push(".onedrive");
         path.push("auth");
         path.push("secrets.json");
@@ -53,7 +53,7 @@ impl TokenStore {
     /// Check if keyring is available and working
     fn is_keyring_available(&self) -> bool {
         //TODO: ON POP OS ALPHA 7 KEYRING IS NOT WORKING - NEED TO FIX THIS
-        return false;       
+        return false;
         // if let Some(ref entry) = self.keyring_entry {
         //     // Try to get a password for a dummy entry to test keyring availability
         //     match entry.get_password() {
@@ -69,7 +69,7 @@ impl TokenStore {
     /// Save tokens to storage (keyring if available, file otherwise)
     pub fn save_tokens(&self, tokens: &AuthConfig) -> Result<()> {
         let serialized = serde_json::to_string(tokens)?;
-        
+
         if self.is_keyring_available() {
             // Save to keyring
             if let Some(ref entry) = self.keyring_entry {
@@ -81,7 +81,7 @@ impl TokenStore {
             fs::write(&self.file_path, serialized)?;
             println!("Tokens saved to file: {:?}", self.file_path);
         }
-        
+
         Ok(())
     }
 
@@ -95,18 +95,19 @@ impl TokenStore {
                 return Ok(config);
             }
         }
-        
+
         // Load from file
         if self.file_path.exists() {
             let data = fs::read_to_string(&self.file_path)?;
             let config: AuthConfig = serde_json::from_str(&data)?;
             Ok(config)
         } else {
-            Err(anyhow!("No tokens found in keyring or file {}" , self.file_path.display()))
+            Err(anyhow!(
+                "No tokens found in keyring or file {}",
+                self.file_path.display()
+            ))
         }
     }
-
-
 
     /// Get storage method info for debugging
     pub fn get_storage_info(&self) -> String {
@@ -133,6 +134,9 @@ mod tests {
         let path = TokenStore::get_file_path();
         assert!(path.is_ok());
         let path = path.unwrap();
-        assert!(path.to_string_lossy().contains(".onedrive/auth/secrets.json"));
+        assert!(
+            path.to_string_lossy()
+                .contains(".onedrive/auth/secrets.json")
+        );
     }
-} 
+}
