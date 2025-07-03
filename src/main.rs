@@ -3,6 +3,7 @@ mod helpers;
 mod openfs;
 use anyhow::Result;
 use clap::{Arg, Command};
+use log::{error, info, warn};
 use openfs::opendrive_fuse;
 
 mod onedrive_service;
@@ -19,6 +20,7 @@ use onedrive_service::onedrive_client::OneDriveClient;
 mod sync_service;
 use sync_service::SyncService;
 
+
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
@@ -32,6 +34,13 @@ async fn main() -> Result<()> {
                 .long("fuse")
                 .action(clap::ArgAction::SetTrue)
                 .help("Fuse the local directory with the OneDrive directory"),
+        )
+        .arg(
+            Arg::new("sync-daemon")
+                .short('d')
+                .long("sync-daemon")
+                .action(clap::ArgAction::SetTrue)
+                .help("Run sync daemon in background without FUSE mount"),
         )
         .arg(
             Arg::new("auth")
@@ -100,16 +109,122 @@ async fn main() -> Result<()> {
         let client = OneDriveClient::new()?;
         let settings = Settings::load_from_file()?;
         let mut daemon = SyncService::new(client, config.clone(), settings.clone()).await?;
+        
+        // Initial sync
         daemon.init().await?;
 
         //make sure the directory exists
-        let path = config.local_dir;
+        let path = config.local_dir.clone();
         if !path.exists() {
             std::fs::create_dir_all(path.clone())?;
         }
 
-        // Mount the filesystem - this is blocking so it will run until unmount
-        opendrive_fuse::mount_filesystem(&path.display().to_string()).await?;
+        // Start background sync task
+        let sync_interval = config.sync_interval;
+        let mut sync_daemon = daemon;
+        let sync_handle = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(sync_interval);
+            interval.tick().await; // Skip first tick since we just did init()
+            
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        info!("Starting periodic sync...");
+                        if let Err(e) = sync_daemon.update_cache().await {
+                            error!("Sync error: {}", e);
+                        } else {
+                            info!("Periodic sync completed successfully");
+                        }
+                    }
+                    _ = tokio::signal::ctrl_c() => {
+                        warn!("Sync daemon received shutdown signal, stopping...");
+                        break;
+                    }
+                }
+            }
+        });
+
+        // Setup signal handler for graceful shutdown
+        let mountpoint = path.display().to_string();
+        let mountpoint_for_signal = mountpoint.clone();
+        
+        // Start FUSE mount in a separate blocking task
+        let fuse_handle = tokio::task::spawn_blocking(move || {
+            opendrive_fuse::mount_filesystem(&mountpoint)
+        });
+        
+        // Wait for Ctrl+C and handle shutdown
+        tokio::select! {
+            result = fuse_handle => {
+                info!("FUSE filesystem has been unmounted");
+                if let Err(e) = result? {
+                    error!("FUSE mount failed: {}", e);
+                }
+            }
+            _ = tokio::signal::ctrl_c() => {
+                warn!("Received shutdown signal, stopping sync daemon and unmounting...");
+                
+                // Stop the sync daemon
+                sync_handle.abort();
+                
+                // Unmount the filesystem
+                info!("Attempting to unmount filesystem at: {}", mountpoint_for_signal);
+                match std::process::Command::new("fusermount")
+                    .arg("-u")
+                    .arg(&mountpoint_for_signal)
+                    .output() 
+                {
+                    Ok(output) => {
+                        if output.status.success() {
+                            info!("Successfully unmounted filesystem");
+                        } else {
+                            error!("Failed to unmount filesystem: {}", 
+                                   String::from_utf8_lossy(&output.stderr));
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to execute fusermount command: {}", e);
+                    }
+                }
+                
+                info!("Shutdown complete");
+            }
+        }
+
+        info!("Sync daemon shutdown complete");
+        return Ok(());
+    }
+
+    if matches.get_flag("sync-daemon") {
+        let client = OneDriveClient::new()?;
+        let settings = Settings::load_from_file()?;
+        let mut daemon = SyncService::new(client, config.clone(), settings.clone()).await?;
+        
+        // Initial sync
+        daemon.init().await?;
+        info!("Initial sync completed. Starting periodic sync daemon...");
+        info!("Sync interval: {:?}", config.sync_interval);
+
+        // Run sync daemon in foreground
+        let mut interval = tokio::time::interval(config.sync_interval);
+        interval.tick().await; // Skip first tick since we just did init()
+        
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    info!("Starting periodic sync...");
+                    if let Err(e) = daemon.update_cache().await {
+                        error!("Sync error: {}", e);
+                    } else {
+                        info!("Periodic sync completed successfully");
+                    }
+                }
+                _ = tokio::signal::ctrl_c() => {
+                    warn!("Received shutdown signal, stopping sync daemon...");
+                    break;
+                }
+            }
+        }
 
         return Ok(());
     }

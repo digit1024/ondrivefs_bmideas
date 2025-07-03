@@ -825,8 +825,8 @@ impl Filesystem for OpenDriveFuse {
 }
 
 /// Mount the FUSE filesystem
-pub async fn mount_filesystem(mountpoint: &str) -> anyhow::Result<()> {
-    let file_manager = DefaultFileManager::new().await?;
+pub fn mount_filesystem(mountpoint: &str) -> anyhow::Result<()> {
+    let file_manager = tokio::runtime::Handle::current().block_on(DefaultFileManager::new())?;
     
     let fs = OpenDriveFuse::new(file_manager,);
     let options = vec![

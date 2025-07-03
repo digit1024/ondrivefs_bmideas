@@ -44,7 +44,7 @@ pub struct DriveItem {
     pub file: Option<FileFacet>,
     #[serde(rename = "@microsoft.graph.downloadUrl")]
     pub download_url: Option<String>,
-    pub deleted: Option<serde_json::Value>,
+    pub deleted: Option<DeletedFacet>,
     #[serde(rename = "parentReference")]
     pub parent_reference: Option<ParentReference>,
 }
@@ -61,6 +61,12 @@ pub struct FolderFacet {
 pub struct FileFacet {
     #[serde(rename = "mimeType")]
     pub mime_type: Option<String>,
+}
+
+/// DeletedFacet: Represents the deleted facet of a drive item.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DeletedFacet {
+    pub state: String,  // Usually "deleted"
 }
 
 /// DriveItemCollection: Represents a collection of drive items.

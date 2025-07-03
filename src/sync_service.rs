@@ -6,7 +6,7 @@ use crate::helpers::path_to_inode;
 use crate::metadata_manager_for_files::{get_metadata_manager_singleton, MetadataManagerForFiles};
 use crate::onedrive_service::onedrive_client::OneDriveClient;
 use crate::onedrive_service::onedrive_models::DriveItem;
-use anyhow::{Context, Ok, Result};
+use anyhow::{Context, Result};
 use log::warn;
 use log::{debug, error, info};
 use std::path::{Path, PathBuf};
@@ -50,6 +50,81 @@ impl SyncService {
         Ok(())
     }
 
+    async fn handle_deleted_item(&mut self, item: &DriveItem) -> Result<()> {
+        // Get the old local path from metadata
+        let local_path = self
+            .metadata_manager
+            .get_local_path_for_onedrive_id(&item.id)
+            .context("Failed to get local path for onedrive id")?;
+            
+        if let Some(local_path_str) = local_path {
+            let local_path = PathBuf::from(&local_path_str);
+            info!("Found local path for deleted item: {}", local_path.display());
+            
+            // Delete the actual file/folder
+            let deletion_result = if item.folder.is_some() {
+                if local_path.exists() {
+                    info!("Deleting folder: {}", local_path.display());
+                    match std::fs::remove_dir_all(&local_path) {
+                        Ok(_) => {
+                            info!("Successfully deleted folder: {}", local_path.display());
+                            Ok(())
+                        }
+                        Err(e) => {
+                            error!("Failed to delete folder {}: {}", local_path.display(), e);
+                            Err(anyhow::anyhow!("Failed to delete folder: {}", e))
+                        }
+                    }
+                } else {
+                    info!("Folder already does not exist: {}", local_path.display());
+                    Ok(())
+                }
+            } else {
+                if local_path.exists() {
+                    info!("Deleting file: {}", local_path.display());
+                    match std::fs::remove_file(&local_path) {
+                        Ok(_) => {
+                            info!("Successfully deleted file: {}", local_path.display());
+                            Ok(())
+                        }
+                        Err(e) => {
+                            error!("Failed to delete file {}: {}", local_path.display(), e);
+                            Err(anyhow::anyhow!("Failed to delete file: {}", e))
+                        }
+                    }
+                } else {
+                    info!("File already does not exist: {}", local_path.display());
+                    Ok(())
+                }
+            };
+            
+            // Clean up metadata mappings regardless of deletion success
+            if let Err(e) = self.metadata_manager.remove_onedrive_id_to_local_path(&item.id) {
+                error!("Failed to remove OneDrive ID mapping for {}: {}", item.id, e);
+            }
+            
+            // Remove inode mapping if we can get the inode
+            let inode = path_to_inode(&local_path.as_path());
+            if let Err(e) = self.metadata_manager.remove_inode_to_local_path(inode) {
+                error!("Failed to remove inode mapping for {}: {}", local_path.display(), e);
+            }
+            
+            info!("Cleaned up metadata for deleted item: {}", item.id);
+            
+            // Propagate deletion errors but continue processing
+            if let Err(e) = deletion_result {
+                error!("Deletion failed for item {}: {}", item.id, e);
+            }
+        } else {
+            warn!(
+                "Deleted object not found in local cache: ID={}, name={:?}",
+                item.id, item.name
+            );
+        }
+
+        Ok(())
+    }
+
     pub async fn update_cache(&mut self) -> Result<()> {
         //get the delta token from the metadata manager
         let delta_token = self.metadata_manager.get_folder_delta(&"".to_string())?;
@@ -78,6 +153,12 @@ impl SyncService {
                     self.get_local_path_for_item(&item)
                 };
 
+                // Handle deleted items first (outside folder/file check)
+                if let Some(_deleted_info) = &item.deleted {
+                    self.handle_deleted_item(&item).await?;
+                    continue;
+                }
+
                 // Only handle folders and files
                 if item.folder.is_some() || item.file.is_some() {
                     //Root folder
@@ -94,86 +175,59 @@ impl SyncService {
                     if item.name.as_ref().unwrap().eq(".dir.json") {
                         continue;
                     }
-                    //Deleted object
-                    if item.deleted.is_some() && item.deleted.as_ref().unwrap() == &true {
-                        info!("Deleting object: {}", item.name.as_ref().unwrap());
-                        //delete the folder
-                        //TODO: item does not have a parent - so now we cannot know which folder or file to delete
-                        let local_path = self
-                            .metadata_manager
-                            .get_local_path_for_onedrive_id(&item.id)
-                            .context("Failed to get local path for onedrive id")?;
-                        if local_path.is_some() {
-                            if item.folder.is_some() {
-                                std::fs::remove_dir_all(&local_path.unwrap())
-                                    .context("Failed to delete object")?;
-                            } else {
-                                std::fs::remove_file(&local_path.unwrap())
-                                    .context("Failed to delete object")?;
-                            }
-                        } else {
-                            warn!(
-                                "Object not found in local cache: {}",
-                                item.name.as_ref().unwrap()
-                            );
-                        }
-                        //we should handle this case
 
-                        //std::fs::remove_dir_all(&local_path)?;
-                    } else {
-                        // Check if this item already exists at a different location (move detection)
-                        if let Some(old_local_path_str) = self.metadata_manager
-                            .get_local_path_for_onedrive_id(&item.id)? 
-                        {
-                            let old_local_path = PathBuf::from(&old_local_path_str);
+                    // Check if this item already exists at a different location (move detection)
+                    if let Some(old_local_path_str) = self.metadata_manager
+                        .get_local_path_for_onedrive_id(&item.id)? 
+                    {
+                        let old_local_path = PathBuf::from(&old_local_path_str);
+                        
+                        // If the path changed, it's a move - clean up old location
+                        if old_local_path != local_path {
+                            info!("Detected move: {} -> {}", old_local_path.display(), local_path.display());
                             
-                            // If the path changed, it's a move - clean up old location
-                            if old_local_path != local_path {
-                                info!("Detected move: {} -> {}", old_local_path.display(), local_path.display());
-                                
-                                if item.folder.is_some() {
-                                    if old_local_path.exists() {
-                                        std::fs::remove_dir_all(&old_local_path)
-                                            .context("Failed to remove old folder location")?;
-                                        info!("Removed old folder location: {}", old_local_path.display());
-                                    }
-                                } else {
-                                    if old_local_path.exists() {
-                                        std::fs::remove_file(&old_local_path)
-                                            .context("Failed to remove old file location")?;
-                                        info!("Removed old file location: {}", old_local_path.display());
-                                    }
+                            if item.folder.is_some() {
+                                if old_local_path.exists() {
+                                    std::fs::remove_dir_all(&old_local_path)
+                                        .context("Failed to remove old folder location")?;
+                                    info!("Removed old folder location: {}", old_local_path.display());
+                                }
+                            } else {
+                                if old_local_path.exists() {
+                                    std::fs::remove_file(&old_local_path)
+                                        .context("Failed to remove old file location")?;
+                                    info!("Removed old file location: {}", old_local_path.display());
                                 }
                             }
                         }
-
-                        //update or create the file or folder at new location
-                        info!("Updating or creating object: {}", local_path.display());
-
-                        let object_json = serde_json::to_string(&item)?;
-                        self.metadata_manager.store_onedrive_id_to_local_path(
-                            &item.id,
-                            &local_path.display().to_string(),
-                        )?;
-
-                        if item.folder.is_some() {
-                            std::fs::create_dir_all(&local_path)
-                                .context("Failed to create directory")?;
-                            std::fs::write(local_path.join(".dir.json"), object_json)
-                                .context("Failed to write dir.json")?;
-                        } else {
-                            //there is always parent for file
-                            std::fs::create_dir_all(&local_path.parent().unwrap().clone())
-                                .context("Failed to create directory for file")?;
-                            std::fs::write(&local_path, object_json)
-                                .context("Failed to write file")?;
-                        }
-                        let inode = path_to_inode(&local_path.as_path());
-                        self.metadata_manager.store_inode_to_local_path(
-                            inode,
-                            local_path.display().to_string().as_str(),
-                        )?;
                     }
+
+                    //update or create the file or folder at new location
+                    info!("Updating or creating object: {}", local_path.display());
+
+                    let object_json = serde_json::to_string(&item)?;
+                    self.metadata_manager.store_onedrive_id_to_local_path(
+                        &item.id,
+                        &local_path.display().to_string(),
+                    )?;
+
+                    if item.folder.is_some() {
+                        std::fs::create_dir_all(&local_path)
+                            .context("Failed to create directory")?;
+                        std::fs::write(local_path.join(".dir.json"), object_json)
+                            .context("Failed to write dir.json")?;
+                    } else {
+                        //there is always parent for file
+                        std::fs::create_dir_all(&local_path.parent().unwrap().clone())
+                            .context("Failed to create directory for file")?;
+                        std::fs::write(&local_path, object_json)
+                            .context("Failed to write file")?;
+                    }
+                    let inode = path_to_inode(&local_path.as_path());
+                    self.metadata_manager.store_inode_to_local_path(
+                        inode,
+                        local_path.display().to_string().as_str(),
+                    )?;
                 }
             }
             if delta_response.next_link.is_some() {

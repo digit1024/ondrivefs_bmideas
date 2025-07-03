@@ -28,7 +28,7 @@ impl Default for SyncConfig {
         Self {
             local_dir,
             remote_dir: "/".to_string(),
-            sync_interval: Duration::from_secs(120),
+            sync_interval: Duration::from_secs(30),
         }
     }
 }
