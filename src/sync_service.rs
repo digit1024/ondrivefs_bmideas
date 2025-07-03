@@ -21,6 +21,7 @@ pub struct SyncService {
     pub config: SyncConfig,
     pub settings: Settings,
     pub metadata_manager: &'static MetadataManagerForFiles,
+    
 }
 
 impl SyncService {
@@ -120,7 +121,33 @@ impl SyncService {
 
                         //std::fs::remove_dir_all(&local_path)?;
                     } else {
-                        //update or create the file or folder
+                        // Check if this item already exists at a different location (move detection)
+                        if let Some(old_local_path_str) = self.metadata_manager
+                            .get_local_path_for_onedrive_id(&item.id)? 
+                        {
+                            let old_local_path = PathBuf::from(&old_local_path_str);
+                            
+                            // If the path changed, it's a move - clean up old location
+                            if old_local_path != local_path {
+                                info!("Detected move: {} -> {}", old_local_path.display(), local_path.display());
+                                
+                                if item.folder.is_some() {
+                                    if old_local_path.exists() {
+                                        std::fs::remove_dir_all(&old_local_path)
+                                            .context("Failed to remove old folder location")?;
+                                        info!("Removed old folder location: {}", old_local_path.display());
+                                    }
+                                } else {
+                                    if old_local_path.exists() {
+                                        std::fs::remove_file(&old_local_path)
+                                            .context("Failed to remove old file location")?;
+                                        info!("Removed old file location: {}", old_local_path.display());
+                                    }
+                                }
+                            }
+                        }
+
+                        //update or create the file or folder at new location
                         info!("Updating or creating object: {}", local_path.display());
 
                         let object_json = serde_json::to_string(&item)?;
