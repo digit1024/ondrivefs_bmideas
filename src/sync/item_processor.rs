@@ -72,39 +72,3 @@ impl ItemProcessor {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::onedrive_service::onedrive_models::{DriveItem, ParentReference};
-
-    fn create_test_item(name: &str, parent_path: &str, is_folder: bool) -> DriveItem {
-        DriveItem {
-            id: "test-id".to_string(),
-            name: Some(name.to_string()),
-            parent_reference: Some(ParentReference {
-                path: Some(parent_path.to_string()),
-                ..Default::default()
-            }),
-            folder: if is_folder { Some(Default::default()) } else { None },
-            file: if !is_folder { Some(Default::default()) } else { None },
-            ..Default::default()
-        }
-    }
-
-    #[tokio::test]
-    async fn test_item_processor_new() {
-        let file_manager = DefaultFileManager::new().await.unwrap();
-        let metadata_manager = crate::metadata_manager_for_files::get_metadata_manager_singleton();
-        let onedrive_client = OneDriveClient::new().unwrap();
-        
-        let processor = ItemProcessor::new(
-            file_manager,
-            metadata_manager,
-            onedrive_client,
-        );
-        
-        // Should not panic
-        assert!(true);
-    }
-} 

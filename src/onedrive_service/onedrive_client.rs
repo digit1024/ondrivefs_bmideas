@@ -28,6 +28,7 @@ impl OneDriveClient {
     /// Get authorization header with valid token
     async fn auth_header(&self) -> Result<String> {
         let token = self.auth.get_valid_token().await?;
+        info!("Token: {}", token);
         Ok(format!("Bearer {}", token))
     }
 
@@ -245,9 +246,10 @@ impl OneDriveClient {
 
     /// Get delta changes by URL
     pub async fn get_delta_by_url(&self, next_link: &str) -> Result<DeltaResponseApi> {
+        let auth_header = self.auth_header().await.context("Failed to get auth header")?;
         let delta_response = self
             .http_client
-            .get(next_link, "")
+            .get(next_link, &auth_header)
             .await
             .context("Failed to get delta by url")?;
 
@@ -258,10 +260,10 @@ impl OneDriveClient {
     #[allow(dead_code)]
     pub async fn get_delta_for_root(&self) -> Result<DeltaResponseApi> {
         let url = "/me/drive/root/delta?select=id,name,eTag,lastModifiedDateTime,size,folder,file,@microsoft.graph.downloadUrl,deleted,parentReference";
-        
+        let auth_header = self.auth_header().await.context("Failed to get auth header")?;
         let delta_response: DeltaResponseApi = self
             .http_client
-            .get(url, "")
+            .get(url, &auth_header)
             .await
             .context("Failed to get delta for root")?;
         
@@ -340,7 +342,7 @@ mod tests {
     use serial_test::serial;
 
     use super::*;
-    use std::collections::HashMap;
+    
 
     #[test]
     fn test_extract_delta_token_with_valid_url() {

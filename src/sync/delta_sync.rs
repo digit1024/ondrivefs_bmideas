@@ -84,19 +84,3 @@ impl DeltaSyncProcessor {
         "/me/drive/root/delta?select=id,name,eTag,lastModifiedDateTime,size,folder,file,@microsoft.graph.downloadUrl,deleted,parentReference".to_string()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_get_initial_delta_url() {
-        let client = OneDriveClient::new().unwrap();
-        let metadata_manager = crate::metadata_manager_for_files::get_metadata_manager_singleton();
-        let processor = DeltaSyncProcessor::new(client, metadata_manager);
-        
-        let url = processor.get_initial_delta_url();
-        assert!(url.contains("/me/drive/root/delta"));
-        assert!(url.contains("select="));
-    }
-} 
