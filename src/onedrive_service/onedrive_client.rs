@@ -141,11 +141,11 @@ impl OneDriveClient {
         onedrive_id: &str,
         file_name: &str,
     ) -> Result<DownloadResult> {
-        let auth_header = self.auth_header().await?;
+        
         let response = self
             .client
             .get(download_url)
-            .header("Authorization", auth_header)
+            //.header("Authorization", auth_header)
             .send()
             .await
             .context("Failed to get response for download")?

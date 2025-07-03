@@ -12,4 +12,3 @@ pub fn path_to_inode(cache_path: &Path) -> u64 {
     }
     return 0;
 }
-

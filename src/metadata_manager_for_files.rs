@@ -38,9 +38,7 @@ pub struct MetadataManagerForFiles {
 static MATADATAMANAGER: OnceLock<MetadataManagerForFiles> = OnceLock::new();
 
 pub fn get_metadata_manager_singleton() -> &'static MetadataManagerForFiles {
-    MATADATAMANAGER.get_or_init(|| {
-        MetadataManagerForFiles::new().unwrap()
-    })
+    MATADATAMANAGER.get_or_init(|| MetadataManagerForFiles::new().unwrap())
 }
 
 impl MetadataManagerForFiles {

@@ -37,7 +37,6 @@ pub trait FileManager {
     fn cache_path_to_virtual_path(&self, cache_path: &Path) -> PathBuf;
     fn virtual_path_to_cache_path(&self, virtual_path: &Path) -> PathBuf;
     fn virtual_path_to_downloaded_path(&self, virtual_path: &Path) -> PathBuf;
-
 }
 
 /// Default implementation of FileManager
@@ -165,6 +164,4 @@ impl FileManager for DefaultFileManager {
         let virtual_path = virtual_path.strip_prefix("/").unwrap();
         self.temp_dir.join(virtual_path)
     }
-
-
 }

@@ -1,5 +1,5 @@
 use crate::file_manager::{self, DefaultFileManager, FileManager};
-use crate::metadata_manager_for_files::{get_metadata_manager_singleton, MetadataManagerForFiles};
+use crate::metadata_manager_for_files::{MetadataManagerForFiles, get_metadata_manager_singleton};
 use crate::onedrive_service::onedrive_models::DriveItem;
 use anyhow::Context;
 use fuser::{
@@ -10,26 +10,24 @@ use fuser::{
 use libc::{ENOENT, ENOSYS, ENOTDIR};
 
 use crate::helpers::path_to_inode;
+use crate::openfs::models::{DirEntry, DirHanldeManager};
 use log::{debug, error, info, trace, warn};
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::ffi::OsStr;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use time::OffsetDateTime;
-use crate::openfs::models::{DirEntry, DirHanldeManager};
 
 const TTL: Duration = Duration::from_secs(1);
 
 /// FUSE filesystem implementation that reads from OneDrive cache
 pub struct OpenDriveFuse {
-
     file_manager: DefaultFileManager,
     metadata_manager: &'static MetadataManagerForFiles,
     dir_handle_manager: DirHanldeManager,
-
 }
 
 pub trait to_fuse_attr {
@@ -129,7 +127,10 @@ impl OpenDriveFuse {
 
     /// Get FileAttr for a virtual path by reading from cache
     fn get_file_attr_from_cache(&self, virtual_path: &Path) -> Option<FileAttr> {
-        trace!("get_file_attr_from_cache called with virtual_path: {:?}", virtual_path);
+        trace!(
+            "get_file_attr_from_cache called with virtual_path: {:?}",
+            virtual_path
+        );
         let cache_path = self.virtual_path_to_cache_path(virtual_path);
         trace!("get_file_attr_from_cache - cache_path: {:?}", cache_path);
 
@@ -145,7 +146,10 @@ impl OpenDriveFuse {
         if virtual_path == Path::new("/") {
             // Root directory - check for .dir.json in cache root
             let dir_json_path = cache_path.join(".dir.json");
-            trace!("get_file_attr_from_cache - checking root .dir.json at: {:?}", dir_json_path);
+            trace!(
+                "get_file_attr_from_cache - checking root .dir.json at: {:?}",
+                dir_json_path
+            );
             if let Some(drive_item) = self.read_drive_item_from_cache(&dir_json_path) {
                 let mut attr = drive_item.to_fuse_attr();
                 attr.ino = ino;
@@ -155,7 +159,10 @@ impl OpenDriveFuse {
         } else if cache_path.is_dir() {
             // Directory - check for .dir.json
             let dir_json_path = cache_path.join(".dir.json");
-            trace!("get_file_attr_from_cache - checking directory .dir.json at: {:?}", dir_json_path);
+            trace!(
+                "get_file_attr_from_cache - checking directory .dir.json at: {:?}",
+                dir_json_path
+            );
             if let Some(drive_item) = self.read_drive_item_from_cache(&dir_json_path) {
                 let mut attr = drive_item.to_fuse_attr();
                 attr.ino = ino;
@@ -164,7 +171,10 @@ impl OpenDriveFuse {
             }
         } else {
             // File - read metadata directly
-            trace!("get_file_attr_from_cache - checking file at: {:?}", cache_path);
+            trace!(
+                "get_file_attr_from_cache - checking file at: {:?}",
+                cache_path
+            );
             if let Some(drive_item) = self.read_drive_item_from_cache(&cache_path) {
                 let mut attr = drive_item.to_fuse_attr();
                 attr.ino = ino;
@@ -231,7 +241,6 @@ impl OpenDriveFuse {
         None
     }
 
-
     fn create_file_attr(&self, ino: u64, kind: FileType, size: u64, perm: u16) -> FileAttr {
         let now = SystemTime::now();
         FileAttr {
@@ -272,13 +281,19 @@ impl Filesystem for OpenDriveFuse {
         debug!("OpenDriveFuse: lookup parent={}, name={:?}", parent, name);
 
         let name_str = name.to_string_lossy();
-        
+
         let child_path = if parent == 1 {
             PathBuf::from("/").join(name_str.as_ref())
         } else {
-            let path = self.metadata_manager.get_local_path_for_inode(parent).unwrap().unwrap();
+            let path = self
+                .metadata_manager
+                .get_local_path_for_inode(parent)
+                .unwrap()
+                .unwrap();
             trace!("lookup - cache path from inode {}: {}", parent, path);
-            let virtual_path = self.file_manager.cache_path_to_virtual_path(Path::new(&path));
+            let virtual_path = self
+                .file_manager
+                .cache_path_to_virtual_path(Path::new(&path));
             trace!("lookup - virtual path: {:?}", virtual_path);
             let child_path = virtual_path.join(name_str.as_ref());
             trace!("lookup - child_path: {:?}", child_path);
@@ -317,7 +332,9 @@ impl Filesystem for OpenDriveFuse {
             trace!("getattr - resolving inode {} to path", ino);
             if let Some(cache_path) = self.metadata_manager.get_local_path_for_inode(ino).unwrap() {
                 trace!("getattr - cache path from inode: {}", cache_path);
-                let virtual_path = self.file_manager.cache_path_to_virtual_path(Path::new(&cache_path));
+                let virtual_path = self
+                    .file_manager
+                    .cache_path_to_virtual_path(Path::new(&cache_path));
                 trace!("getattr - virtual path: {:?}", virtual_path);
                 if let Some(attr) = self.get_file_attr_from_cache(&virtual_path) {
                     reply.attr(&TTL, &attr);
@@ -552,11 +569,16 @@ impl Filesystem for OpenDriveFuse {
         let entries = if ino == 1 {
             trace!("opendir - reading root directory");
             self.read_directory_from_cache(&PathBuf::from("/"))
-            
         } else {
-            let path = self.metadata_manager.get_local_path_for_inode(ino).unwrap().unwrap();
+            let path = self
+                .metadata_manager
+                .get_local_path_for_inode(ino)
+                .unwrap()
+                .unwrap();
             trace!("opendir - cache path from inode {}: {}", ino, path);
-            let virtual_path = self.file_manager.cache_path_to_virtual_path(Path::new(&path));
+            let virtual_path = self
+                .file_manager
+                .cache_path_to_virtual_path(Path::new(&path));
             trace!("opendir - virtual path: {:?}", virtual_path);
             let entries = self.read_directory_from_cache(&virtual_path);
             trace!("opendir - found {} entries", entries.len());
@@ -565,11 +587,20 @@ impl Filesystem for OpenDriveFuse {
 
         trace!("opendir - processing {} entries", entries.len());
         let mut current_offset = 0;
-        self.dir_handle_manager.append_to_handle(dir_handle, DirEntry::new(1, 0, FileType::Directory, ".".to_string()));
-        self.dir_handle_manager.append_to_handle(dir_handle, DirEntry::new(1, 1, FileType::Directory, "..".to_string()));
+        self.dir_handle_manager.append_to_handle(
+            dir_handle,
+            DirEntry::new(1, 0, FileType::Directory, ".".to_string()),
+        );
+        self.dir_handle_manager.append_to_handle(
+            dir_handle,
+            DirEntry::new(1, 1, FileType::Directory, "..".to_string()),
+        );
         current_offset += 2;
         for (name, attr) in entries.iter() {
-            trace!("opendir - adding entry: name={}, ino={}, kind={:?}", name, attr.ino, attr.kind);
+            trace!(
+                "opendir - adding entry: name={}, ino={}, kind={:?}",
+                name, attr.ino, attr.kind
+            );
             let entry = DirEntry::new(attr.ino, current_offset, attr.kind, name.clone());
             if attr.ino == 0 {
                 trace!("opendir - skipping entry with ino=0: {}", name);
@@ -579,7 +610,10 @@ impl Filesystem for OpenDriveFuse {
             current_offset += 1;
         }
 
-        info!("OpenDriveFuse: opendir ino={}, dir_handle={}", ino, dir_handle);
+        info!(
+            "OpenDriveFuse: opendir ino={}, dir_handle={}",
+            ino, dir_handle
+        );
         reply.opened(dir_handle, 0);
     }
 
@@ -593,7 +627,6 @@ impl Filesystem for OpenDriveFuse {
     ) {
         debug!("OpenDriveFuse: readdir ino={}, offset={}", ino, offset);
 
-        
         let entries = self.dir_handle_manager.get_dir_handle(fh).unwrap();
         if offset >= entries.len() as i64 - 1 {
             reply.ok();
@@ -827,8 +860,8 @@ impl Filesystem for OpenDriveFuse {
 /// Mount the FUSE filesystem
 pub fn mount_filesystem(mountpoint: &str) -> anyhow::Result<()> {
     let file_manager = tokio::runtime::Handle::current().block_on(DefaultFileManager::new())?;
-    
-    let fs = OpenDriveFuse::new(file_manager,);
+
+    let fs = OpenDriveFuse::new(file_manager);
     let options = vec![
         MountOption::RW,
         MountOption::FSName("opendrive".to_string()),
@@ -853,7 +886,4 @@ mod tests {
         }
         DefaultFileManager::new().await.unwrap()
     }
-
-   
-
 }

@@ -66,7 +66,7 @@ pub struct FileFacet {
 /// DeletedFacet: Represents the deleted facet of a drive item.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct DeletedFacet {
-    pub state: String,  // Usually "deleted"
+    pub state: String, // Usually "deleted"
 }
 
 /// DriveItemCollection: Represents a collection of drive items.

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use fuser::FileType;
 use rand::Rng;
-#[derive(Clone,  Debug)]
+#[derive(Clone, Debug)]
 pub struct DirEntry {
     pub ino: u64,
     pub offset: i64,
@@ -12,7 +12,12 @@ pub struct DirEntry {
 
 impl DirEntry {
     pub fn new(ino: u64, offset: i64, kind: FileType, name: String) -> Self {
-        Self { ino, offset, kind, name }
+        Self {
+            ino,
+            offset,
+            kind,
+            name,
+        }
     }
 }
 pub struct DirHanldeManager {
@@ -21,7 +26,9 @@ pub struct DirHanldeManager {
 
 impl DirHanldeManager {
     pub fn new() -> Self {
-        Self { dir_handles: HashMap::new() }
+        Self {
+            dir_handles: HashMap::new(),
+        }
     }
 
     pub fn new_dir_handle(&mut self) -> u64 {
@@ -43,7 +50,7 @@ impl DirHanldeManager {
     pub fn get_dir_handle(&self, ino: u64) -> Option<&Vec<DirEntry>> {
         self.dir_handles.get(&ino)
     }
-    pub fn append_to_handle(&mut self , ino : u64, entry : DirEntry ) {
+    pub fn append_to_handle(&mut self, ino: u64, entry: DirEntry) {
         self.dir_handles.get_mut(&ino).unwrap().push(entry.clone());
     }
 
@@ -51,6 +58,3 @@ impl DirHanldeManager {
         self.dir_handles.remove(&ino);
     }
 }
-
-
-
