@@ -1,9 +1,8 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use sled::{Db, Tree};
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
 /// Simplified metadata record that only stores local path as value
@@ -31,6 +30,7 @@ pub struct MetadataManagerForFiles {
     db: Db,
 
     folder_deltas: Tree,
+    #[allow(dead_code)]
     changed_queue: Tree,
     onedrive_id_to_local_path: Tree,
     inode_to_local_path: Tree,
@@ -109,6 +109,7 @@ impl MetadataManagerForFiles {
     }
 
     /// Add a file to the changed queue
+    #[allow(dead_code)]
     pub fn add_to_changed_queue(&self, full_path: &str) -> Result<()> {
         // Store empty string as value (we only need the key)
         self.changed_queue.insert(full_path.as_bytes(), b"")?;
@@ -117,6 +118,7 @@ impl MetadataManagerForFiles {
     }
 
     /// Remove a file from the changed queue
+    #[allow(dead_code)]
     pub fn remove_from_changed_queue(&self, full_path: &str) -> Result<()> {
         let removed = self.changed_queue.remove(full_path.as_bytes())?;
 
@@ -128,6 +130,7 @@ impl MetadataManagerForFiles {
     }
 
     /// Get all files in the changed queue
+    #[allow(dead_code)]
     pub fn get_changed_queue_files(&self) -> Result<Vec<String>> {
         let mut files = Vec::new();
 
@@ -141,6 +144,7 @@ impl MetadataManagerForFiles {
     }
 
     /// Clear the changed queue
+    #[allow(dead_code)]
     pub fn clear_changed_queue(&self) -> Result<()> {
         self.changed_queue.clear()?;
         info!("Cleared changed queue");

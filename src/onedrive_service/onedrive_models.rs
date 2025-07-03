@@ -82,6 +82,7 @@ pub struct DriveItemCollection {
 
 /// Represents the result of a file download operation
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct DownloadResult {
     pub file_data: Vec<u8>,
     pub file_name: String,
@@ -94,6 +95,7 @@ pub struct DownloadResult {
 
 /// Represents the result of a file upload operation
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct UploadResult {
     pub onedrive_id: String,
     pub etag: Option<String>,
@@ -103,6 +105,7 @@ pub struct UploadResult {
 
 /// Represents the result of a folder creation operation
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct CreateFolderResult {
     pub onedrive_id: String,
     pub folder_name: String,
@@ -111,6 +114,7 @@ pub struct CreateFolderResult {
 
 /// Represents the result of a delete operation
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct DeleteResult {
     pub success: bool,
     pub item_id: String,

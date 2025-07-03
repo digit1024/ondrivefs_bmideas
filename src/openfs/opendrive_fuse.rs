@@ -1,24 +1,20 @@
-use crate::file_manager::{self, DefaultFileManager, FileManager};
+use crate::auth::onedrive_auth::OneDriveAuth;
+use crate::file_manager::{DefaultFileManager, FileManager};
 use crate::metadata_manager_for_files::{MetadataManagerForFiles, get_metadata_manager_singleton};
 use crate::onedrive_service::onedrive_models::DriveItem;
 use crate::onedrive_service::onedrive_client::OneDriveClient;
-use anyhow::Context;
 use fuser::{
-    FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyBmap, ReplyCreate, ReplyData,
-    ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyLock, ReplyOpen, ReplyStatfs, ReplyWrite,
-    ReplyXattr, Request, TimeOrNow,
+    FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyBmap, ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyLock, ReplyOpen, ReplyStatfs, ReplyWrite, ReplyXattr, Request, TimeOrNow
 };
-use libc::{ENOENT, ENOSYS, ENOTDIR};
+use libc::{ENOENT, ENOSYS};
 
 use crate::helpers::path_to_inode;
 use crate::openfs::models::{DirEntry, DirHanldeManager};
-use log::{debug, error, info, trace, warn};
-use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
+use log::{debug, error, info, trace};
 use std::ffi::OsStr;
 use std::fs;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use time::OffsetDateTime;
 
@@ -32,7 +28,7 @@ pub struct OpenDriveFuse {
     onedrive_client: OneDriveClient,
 }
 
-pub trait to_fuse_attr {
+pub trait ToFuseAttr {
     fn to_fuse_attr(&self) -> FileAttr;
 }
 fn parse_time_string(time_string: &String) -> Result<SystemTime, time::error::Parse> {
@@ -44,7 +40,7 @@ fn parse_time_string(time_string: &String) -> Result<SystemTime, time::error::Pa
     Ok(SystemTime::from(datetime))
 }
 
-impl to_fuse_attr for DriveItem {
+impl ToFuseAttr for DriveItem {
     fn to_fuse_attr(&self) -> FileAttr {
         let default_time_string = String::from("1960-01-01T01:00:0-Z");
         let last_modified = self
@@ -232,19 +228,15 @@ impl OpenDriveFuse {
         entries
     }
 
-    /// Convert virtual path to cache path and resolve inode
-    fn virtual_path_from_inode(&self, ino: u64) -> Option<PathBuf> {
-        if ino == 1 {
-            return Some(PathBuf::from("/"));
-        }
-
-        // This is a simplified approach - in a full implementation, you'd want to maintain
-        // an inode-to-path mapping. For now, we'll have to search or use a different approach
-        // This is a limitation of the current approach
+    #[allow(dead_code)]
+    fn virtual_path_from_inode(&self, _ino: u64) -> Option<PathBuf> {
+        // This is a placeholder implementation
+        // In a real implementation, you would maintain a mapping from inode to path
         None
     }
 
-    fn create_file_attr(&self, ino: u64, kind: FileType, size: u64, perm: u16) -> FileAttr {
+    #[allow(dead_code)]
+    fn create_file_attr(&self, ino: u64, size: u64, is_dir: bool) -> FileAttr {
         let now = SystemTime::now();
         FileAttr {
             ino,
@@ -254,9 +246,9 @@ impl OpenDriveFuse {
             mtime: now,
             ctime: now,
             crtime: now,
-            kind,
-            perm,
-            nlink: if kind == FileType::Directory { 2 } else { 1 },
+            kind: if is_dir { FileType::Directory } else { FileType::RegularFile },
+            perm: if is_dir { 0o755 } else { 0o644 },
+            nlink: if is_dir { 2 } else { 1 },
             uid: 1000,
             gid: 1000,
             rdev: 0,
@@ -304,7 +296,7 @@ impl OpenDriveFuse {
             return Ok(());
         }
 
-        let download_url = match drive_item.download_url {
+        let _download_url = match drive_item.download_url {
             Some(url) => url,
             None => {
                 error!("No download URL for file: {:?}", virtual_path);
@@ -361,6 +353,7 @@ impl OpenDriveFuse {
     }
 }
 
+#[allow(unused_variables)]
 impl Filesystem for OpenDriveFuse {
     fn init(
         &mut self,
@@ -1030,7 +1023,10 @@ impl Filesystem for OpenDriveFuse {
 /// Mount the FUSE filesystem
 pub fn mount_filesystem(mountpoint: &str) -> anyhow::Result<()> {
     let file_manager = tokio::runtime::Handle::current().block_on(DefaultFileManager::new())?;
-    let onedrive_client = OneDriveClient::new()?;
+    
+    // Initialize OneDrive authentication
+    let auth = Arc::new(OneDriveAuth::new()?);
+    let onedrive_client = OneDriveClient::new(auth)?;
 
     let fs = OpenDriveFuse::new(file_manager, onedrive_client);
     let options = vec![
@@ -1061,7 +1057,8 @@ mod tests {
     #[tokio::test]
     async fn test_file_exists_in_temp() {
         let file_manager = create_test_file_manager().await;
-        let onedrive_client = OneDriveClient::new().unwrap();
+        let auth = Arc::new(OneDriveAuth::new().unwrap());
+        let onedrive_client = OneDriveClient::new(auth).unwrap();
         let fuse = OpenDriveFuse::new(file_manager, onedrive_client);
 
         // Test with root path
@@ -1076,7 +1073,8 @@ mod tests {
     #[tokio::test]
     async fn test_get_temp_path_for_virtual_path() {
         let file_manager = create_test_file_manager().await;
-        let onedrive_client = OneDriveClient::new().unwrap();
+        let auth = Arc::new(OneDriveAuth::new().unwrap());
+        let onedrive_client = OneDriveClient::new(auth).unwrap();
         let fuse = OpenDriveFuse::new(file_manager, onedrive_client);
 
         let virtual_path = PathBuf::from("/test.txt");

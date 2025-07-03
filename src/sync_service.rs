@@ -7,18 +7,15 @@ use crate::metadata_manager_for_files::{MetadataManagerForFiles, get_metadata_ma
 use crate::onedrive_service::onedrive_client::OneDriveClient;
 use crate::onedrive_service::onedrive_models::DriveItem;
 use anyhow::{Context, Result};
-use log::warn;
-use log::{debug, error, info};
+use log::{error, info, warn};
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
-use tokio::signal;
-use tokio::time::sleep;
 use std::time::Duration;
 
 /// Service responsible for synchronizing files between OneDrive and local storage.
 pub struct SyncService {
     pub client: OneDriveClient,
     pub file_manager: DefaultFileManager,
+    #[allow(dead_code)]
     pub config: SyncConfig,
     pub settings: Settings,
     pub metadata_manager: &'static MetadataManagerForFiles,
@@ -229,7 +226,7 @@ impl SyncService {
                             .context("Failed to write dir.json")?;
                     } else {
                         //there is always parent for file
-                        std::fs::create_dir_all(&local_path.parent().unwrap().clone())
+                        std::fs::create_dir_all(&local_path.parent().unwrap())
                             .context("Failed to create directory for file")?;
                         std::fs::write(&local_path, object_json).context("Failed to write file")?;
                     }
@@ -285,7 +282,7 @@ impl SyncService {
         });
         let old_local_path = self.metadata_manager.get_local_path_for_onedrive_id(&item.id)?;
         if old_local_path.is_some() {
-            let old_local_path = PathBuf::from(old_local_path.unwrap());
+            let _old_local_path = PathBuf::from(old_local_path.unwrap());
             // Old local path exists, we may want to download file anyway
             skip_synchronization = false;
         }
@@ -484,6 +481,7 @@ impl SyncService {
         file_path
     }
 
+    #[allow(dead_code)]
     pub fn get_local_root_path(&self) -> PathBuf {
         let local_path = self.config.local_dir.clone();
         local_path

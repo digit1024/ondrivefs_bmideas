@@ -1,4 +1,3 @@
-use crate::metadata_manager_for_files::{MetadataManagerForFiles, OnedriveFileMeta};
 use crate::onedrive_service::onedrive_models::DownloadResult;
 use anyhow::{Context, Result};
 use log::info;
@@ -8,6 +7,7 @@ use tokio::fs;
 /// Trait for handling file system operations
 pub trait FileManager {
     /// Save a downloaded file to the local file system
+    #[allow(dead_code)]
     async fn save_downloaded_file_r(
         &self,
         download_result: &DownloadResult,
@@ -15,18 +15,23 @@ pub trait FileManager {
     ) -> Result<()>;
 
     /// Create a directory
+    #[allow(dead_code)]
     async fn create_directory_r(&self, path: &Path) -> Result<()>;
 
     /// Delete a file
+    #[allow(dead_code)]
     async fn delete_file(&self, path: &Path) -> Result<()>;
 
     /// Delete a directory and its contents
+    #[allow(dead_code)]
     async fn delete_directory(&self, path: &Path) -> Result<()>;
 
     /// Check if a file exists
+    #[allow(dead_code)]
     fn file_exists(&self, path: &Path) -> bool;
 
     /// Check if a directory exists
+    #[allow(dead_code)]
     fn directory_exists(&self, path: &Path) -> bool;
 
     /// Get the temporary download directory
@@ -35,11 +40,13 @@ pub trait FileManager {
     /// Get the cache directory
     fn get_cache_dir(&self) -> PathBuf;
     fn cache_path_to_virtual_path(&self, cache_path: &Path) -> PathBuf;
+    #[allow(dead_code)]
     fn virtual_path_to_cache_path(&self, virtual_path: &Path) -> PathBuf;
     fn virtual_path_to_downloaded_path(&self, virtual_path: &Path) -> PathBuf;
 }
 
 /// Default implementation of FileManager
+#[derive(Clone)]
 pub struct DefaultFileManager {
     temp_dir: PathBuf,  // Directory to store temporary files
     cache_dir: PathBuf, // Directory to store metadata for files

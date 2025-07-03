@@ -1,314 +1,170 @@
+//! OneDrive FUSE filesystem for Linux
+//! 
+//! This is a FUSE filesystem that provides access to OneDrive files
+//! through a local mount point. Files are cached locally and synchronized
+//! with OneDrive in the background.
+
 mod auth;
-mod helpers;
-mod openfs;
-use anyhow::Result;
-use clap::{Arg, Command};
-use log::{error, info, warn};
-use openfs::opendrive_fuse;
-
-mod onedrive_service;
-
 mod config;
 mod file_manager;
+mod helpers;
 mod metadata_manager_for_files;
+mod onedrive_service;
+mod openfs;
+mod operations;
+mod sync;
 
-use auth::onedrive_auth::OneDriveAuth;
-use config::{Settings, SyncConfig};
-use file_manager::FileManager;
-use onedrive_service::onedrive_client::OneDriveClient;
-
-mod sync_service;
-use sync_service::SyncService;
+use crate::auth::onedrive_auth::OneDriveAuth;
+use crate::config::{Settings, SyncConfig};
+use crate::onedrive_service::onedrive_client::OneDriveClient;
+use crate::openfs::opendrive_fuse::mount_filesystem;
+use crate::sync::sync_service::SyncService;
+use anyhow::{Context, Result};
+use clap::{Command, Arg};
+use log::{error, info};
+use std::path::Path;
+use tokio::time::{sleep, Duration};
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize logging
     env_logger::init();
 
-    let matches = Command::new("OneDrive Sync")
+    // Parse command line arguments
+    let matches = Command::new("OneDrive FUSE Filesystem")
         .version("1.0")
-        .about("OneDrive synchronization daemon for Linux")
+        .about("Mount OneDrive as a FUSE filesystem")
         .arg(
-            Arg::new("fuse")
-                .short('f')
-                .long("fuse")
-                .action(clap::ArgAction::SetTrue)
-                .help("Fuse the local directory with the OneDrive directory"),
-        )
-        .arg(
-            Arg::new("sync-daemon")
-                .short('d')
-                .long("sync-daemon")
-                .action(clap::ArgAction::SetTrue)
-                .help("Run sync daemon in background without FUSE mount"),
-        )
-        .arg(
-            Arg::new("auth")
-                .long("auth")
-                .action(clap::ArgAction::SetTrue)
-                .help("Run authorization flow only"),
-        )
-        .arg(
-            Arg::new("list")
-                .long("list")
-                .action(clap::ArgAction::SetTrue)
-                .help("List files in OneDrive root"),
-        )
-        .arg(
-            Arg::new("list-dir")
-                .long("list-dir")
+            Arg::new("mountpoint")
+                .short('m')
+                .long("mountpoint")
                 .value_name("PATH")
-                .help("List files in a specific OneDrive directory"),
+                .help("Mount point path")
+                .required(true)
+                .num_args(1),
         )
         .arg(
-            Arg::new("get-file")
-                .long("get-file")
-                .num_args(2)
-                .value_names(["REMOTE_PATH", "LOCAL_PATH"])
-                .help("Download a file from OneDrive to a local path"),
+            Arg::new("config")
+                .short('c')
+                .long("config")
+                .value_name("FILE")
+                .help("Configuration file path")
+                .default_value("config.toml")
+                .num_args(1),
         )
         .arg(
-            Arg::new("put-file")
-                .long("put-file")
-                .num_args(2)
-                .value_names(["LOCAL_PATH", "REMOTE_PATH"])
-                .help("Upload a local file to a OneDrive directory"),
-        )
-        .arg(
-            Arg::new("settings-add-folder-to-sync")
-                .long("settings-add-folder-to-sync")
-                .value_name("FOLDER")
-                .help("Add a folder to the sync list in settings.json"),
-        )
-        .arg(
-            Arg::new("settings-remove-folder-to-sync")
-                .long("settings-remove-folder-to-sync")
-                .value_name("FOLDER")
-                .help("Remove a folder from the sync list in settings.json"),
-        )
-        .arg(
-            Arg::new("settings-list-folders-to-sync")
-                .long("settings-list-folders-to-sync")
-                .help("List all folders currently set to sync in settings.json")
-                .action(clap::ArgAction::SetTrue),
+            Arg::new("daemon")
+                .short('d')
+                .long("daemon")
+                .help("Run as daemon (background process)"),
         )
         .get_matches();
 
-    let mut config = SyncConfig::default();
+    let mountpoint = matches.get_one::<String>("mountpoint").unwrap();
+    let config_file = matches.get_one::<String>("config").unwrap();
+    let daemon_mode = matches.contains_id("daemon");
 
-    // Handle different modes
-    if matches.get_flag("auth") {
-        // Authorization only
-        let auth = OneDriveAuth::new()?;
-        auth.authorize().await?;
-        println!("Authorization completed!");
-        return Ok(());
+    info!("Starting OneDrive FUSE filesystem");
+    info!("Mount point: {}", mountpoint);
+    info!("Config file: {}", config_file);
+
+    // Load configuration
+    let settings = Settings::load_from_file()
+        .context("Failed to load settings")?;
+    let config = SyncConfig::default();
+
+    // Check if mountpoint exists and is a directory
+    let mount_path = Path::new(mountpoint);
+    if !mount_path.exists() {
+        return Err(anyhow::anyhow!("Mount point does not exist: {}", mountpoint));
+    }
+    if !mount_path.is_dir() {
+        return Err(anyhow::anyhow!("Mount point is not a directory: {}", mountpoint));
     }
 
-    if matches.get_flag("fuse") {
-        let client = OneDriveClient::new()?;
-        let settings = Settings::load_from_file()?;
-        let mut daemon = SyncService::new(client, config.clone(), settings.clone()).await?;
+    // Initialize OneDrive authentication
+    let auth = Arc::new(OneDriveAuth::new()?);
+    
+    // Get access token
+    let _token = auth.get_valid_token().await
+        .context("Failed to get access token")?;
 
-        // Initial sync
-        daemon.init().await?;
+    // Create OneDrive client
+    let client = OneDriveClient::new(auth)
+        .context("Failed to create OneDrive client")?;
 
-        //make sure the directory exists
-        let path = config.local_dir.clone();
-        if !path.exists() {
-            std::fs::create_dir_all(path.clone())?;
-        }
+    // Create sync service
+    let mut sync_service = SyncService::new(
+        client.clone(),
+        config.clone(),
+        settings.clone(),
+    ).await
+    .context("Failed to create sync service")?;
 
-        // Start background sync task
-        let sync_interval = config.sync_interval;
-        let mut sync_daemon = daemon;
-        let sync_handle = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(sync_interval);
-            interval.tick().await; // Skip first tick since we just did init()
+    // Initialize sync service
+    sync_service.init().await
+        .context("Failed to initialize sync service")?;
 
+    if daemon_mode {
+        info!("Running in daemon mode");
+        
+        // Start background sync loop
+        let sync_client = client.clone();
+        let sync_config = config.clone();
+        let sync_settings = settings.clone();
+        
+        tokio::spawn(async move {
             loop {
-                tokio::select! {
-                    _ = interval.tick() => {
-                        info!("Starting periodic sync...");
-                        if let Err(e) = sync_daemon.update_cache().await {
+                match SyncService::new(
+                    sync_client.clone(),
+                    sync_config.clone(),
+                    sync_settings.clone(),
+                ).await {
+                    Ok(mut service) => {
+                        if let Err(e) = service.update_cache().await {
                             error!("Sync error: {}", e);
-                        } else {
-                            info!("Periodic sync completed successfully");
-                        }
-                    }
-                    _ = tokio::signal::ctrl_c() => {
-                        warn!("Sync daemon received shutdown signal, stopping...");
-                        break;
-                    }
-                }
-            }
-        });
-
-        // Setup signal handler for graceful shutdown
-        let mountpoint = path.display().to_string();
-        let mountpoint_for_signal = mountpoint.clone();
-
-        // Start FUSE mount in a separate blocking task
-        let fuse_handle =
-            tokio::task::spawn_blocking(move || opendrive_fuse::mount_filesystem(&mountpoint));
-
-        // Wait for Ctrl+C and handle shutdown
-        tokio::select! {
-            result = fuse_handle => {
-                info!("FUSE filesystem has been unmounted");
-                if let Err(e) = result? {
-                    error!("FUSE mount failed: {}", e);
-                }
-            }
-            _ = tokio::signal::ctrl_c() => {
-                warn!("Received shutdown signal, stopping sync daemon and unmounting...");
-
-                // Stop the sync daemon
-                sync_handle.abort();
-
-                // Unmount the filesystem
-                info!("Attempting to unmount filesystem at: {}", mountpoint_for_signal);
-                match std::process::Command::new("fusermount")
-                    .arg("-u")
-                    .arg(&mountpoint_for_signal)
-                    .output()
-                {
-                    Ok(output) => {
-                        if output.status.success() {
-                            info!("Successfully unmounted filesystem");
-                        } else {
-                            error!("Failed to unmount filesystem: {}",
-                                   String::from_utf8_lossy(&output.stderr));
                         }
                     }
                     Err(e) => {
-                        error!("Failed to execute fusermount command: {}", e);
+                        error!("Failed to create sync service: {}", e);
                     }
                 }
-
-                info!("Shutdown complete");
+                
+                // Wait before next sync
+                sleep(Duration::from_secs(300)).await; // 5 minutes
             }
-        }
-
-        info!("Sync daemon shutdown complete");
-        return Ok(());
+        });
     }
 
-    if matches.get_flag("sync-daemon") {
-        let client = OneDriveClient::new()?;
-        let settings = Settings::load_from_file()?;
-        let mut daemon = SyncService::new(client, config.clone(), settings.clone()).await?;
-
-        // Initial sync
-        daemon.init().await?;
-        info!("Initial sync completed. Starting periodic sync daemon...");
-        info!("Sync interval: {:?}", config.sync_interval);
-
-        // Run sync daemon in foreground
-        let mut interval = tokio::time::interval(config.sync_interval);
-        interval.tick().await; // Skip first tick since we just did init()
-
-        loop {
-            tokio::select! {
-                _ = interval.tick() => {
-                    info!("Starting periodic sync...");
-                    if let Err(e) = daemon.update_cache().await {
-                        error!("Sync error: {}", e);
-                    } else {
-                        info!("Periodic sync completed successfully");
-                    }
-                }
-                _ = tokio::signal::ctrl_c() => {
-                    warn!("Received shutdown signal, stopping sync daemon...");
-                    break;
-                }
-            }
-        }
-
-        return Ok(());
-    }
-
-    if let Some(get_args) = matches.get_many::<String>("get-file") {
-        let args: Vec<_> = get_args.collect();
-        let remote_path = &args[0];
-        let local_path = &args[1];
-        let client = OneDriveClient::new()?;
-        let item = client.get_item_by_path(remote_path).await?;
-        if let Some(download_url) = &item.download_url {
-            let download_result = client
-                .download_file(
-                    download_url,
-                    &item.id,
-                    item.name.as_ref().map_or("Unknown", |v| v),
-                )
-                .await?;
-
-            // Create file manager to handle the file save
-            let metadata_manager =
-                crate::metadata_manager_for_files::MetadataManagerForFiles::new()?;
-            let file_manager = crate::file_manager::DefaultFileManager::new().await?;
-            file_manager
-                .save_downloaded_file_r(&download_result, std::path::Path::new(local_path))
-                .await?;
-
-            println!("Downloaded '{}' to '{}'", remote_path, local_path);
-        } else {
-            println!(
-                "No download URL found for '{}'. Is it a folder?",
-                remote_path
-            );
-        }
-        return Ok(());
-    }
-
-    if let Some(put_args) = matches.get_many::<String>("put-file") {
-        let args: Vec<_> = put_args.collect();
-        let local_path = &args[0];
-        let remote_path = &args[1];
-        let client = OneDriveClient::new()?;
-
-        // Read file data
-        let file_data = tokio::fs::read(local_path).await?;
-        let file_name = std::path::Path::new(local_path)
-            .file_name()
-            .ok_or_else(|| anyhow::anyhow!("Invalid file path"))?
-            .to_string_lossy();
-
-        let upload_result = client
-            .upload_file(&file_data, &file_name, remote_path)
-            .await?;
-        println!(
-            "Uploaded '{}' to '{}' (ID: {})",
-            local_path, remote_path, upload_result.onedrive_id
-        );
-        return Ok(());
-    }
-
-    // Handle settings management options
-    if let Some(folder) = matches.get_one::<String>("settings-add-folder-to-sync") {
-        let mut settings = Settings::load_from_file()?;
-        if !settings.sync_folders.contains(folder) {
-            settings.sync_folders.push(folder.clone());
-            settings.save_to_file()?;
-            println!("Added '{}' to sync folders.", folder);
-        } else {
-            println!("'{}' is already in the sync folders list.", folder);
-        }
-        return Ok(());
-    }
-    if let Some(folder) = matches.get_one::<String>("settings-remove-folder-to-sync") {
-        let mut settings = Settings::load_from_file()?;
-        if let Some(pos) = settings.sync_folders.iter().position(|f| f == folder) {
-            settings.sync_folders.remove(pos);
-            settings.save_to_file()?;
-            println!("Removed '{}' from sync folders.", folder);
-        } else {
-            println!("'{}' was not found in the sync folders list.", folder);
-        }
-        return Ok(());
-    }
-
-    let settings = Settings::load_from_file()?;
-    let client = OneDriveClient::new()?;
+    // Mount the filesystem
+    info!("Mounting filesystem at: {}", mountpoint);
+    mount_filesystem(mountpoint)
+        .context("Failed to mount filesystem")?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_mountpoint_validation() {
+        // Test with non-existent path
+        let result = std::panic::catch_unwind(|| {
+            let mount_path = Path::new("/non/existent/path");
+            if !mount_path.exists() {
+                panic!("Mount point does not exist");
+            }
+        });
+        assert!(result.is_err());
+
+        // Test with existing directory
+        let temp_dir = tempdir().unwrap();
+        let mount_path = temp_dir.path();
+        assert!(mount_path.exists());
+        assert!(mount_path.is_dir());
+    }
 }

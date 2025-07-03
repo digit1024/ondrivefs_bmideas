@@ -43,6 +43,7 @@ impl DirHanldeManager {
         ino
     }
 
+    #[allow(dead_code)]
     pub fn add_dir_handle(&mut self, ino: u64, entries: Vec<DirEntry>) {
         self.dir_handles.insert(ino, entries);
     }

@@ -1,3 +1,3 @@
 #!/bin/bash
 
-RUST_LOG=INFO cargo run -- --fuse 
+RUST_LOG=INFO cargo run -- --mountpoint ~/OneDrive 

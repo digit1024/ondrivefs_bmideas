@@ -12,10 +12,14 @@ use url::Url;
 use crate::auth::token_store::{AuthConfig, TokenStore};
 
 const CLIENT_ID: &str = "95367b4f-624c-452c-b099-bfc9c27b69b9"; // Replace with your Azure app ID
+#[allow(dead_code)]
 const REDIRECT_URI: &str = "http://localhost:8080/callback";
+#[allow(dead_code)]
 const SCOPES: &str = "https://graph.microsoft.com/Files.ReadWrite offline_access";
+#[allow(dead_code)]
 const AUTH_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
 const TOKEN_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
+#[allow(dead_code)]
 const INDEX_HTML: &str = include_str!("./index.html");
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -40,6 +44,7 @@ impl OneDriveAuth {
     }
 
     /// Generate PKCE code verifier and challenge
+    #[allow(dead_code)]
     fn generate_pkce() -> (String, String) {
         let code_verifier: String = (0..128)
             .map(|_| {
@@ -56,6 +61,7 @@ impl OneDriveAuth {
     }
 
     /// Start the OAuth flow
+    #[allow(dead_code)]
     pub async fn authorize(&self) -> Result<AuthConfig> {
         let (code_verifier, code_challenge) = Self::generate_pkce();
 
@@ -114,6 +120,7 @@ impl OneDriveAuth {
     }
 
     /// Exchange authorization code for tokens
+    #[allow(dead_code)]
     async fn exchange_code_for_tokens(
         &self,
         code: &str,
