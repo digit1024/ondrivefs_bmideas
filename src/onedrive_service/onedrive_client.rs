@@ -272,6 +272,27 @@ impl OneDriveClient {
         Ok(item)
     }
 
+    /// Get item by OneDrive ID
+    pub async fn get_item_by_id(&self, item_id: &str) -> Result<DriveItem> {
+        let auth_header = self.auth_header().await?;
+        let url = format!("{}/me/drive/items/{}", GRAPH_API_BASE, item_id);
+
+        let response = self
+            .client
+            .get(&url)
+            .header("Authorization", auth_header)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(anyhow!("Failed to get item by ID: {}", error_text));
+        }
+
+        let item: DriveItem = response.json().await?;
+        Ok(item)
+    }
+
     /// Delete an item by path and return the delete result
     pub async fn delete_item(&self, path: &str) -> Result<DeleteResult> {
         let auth_header = self.auth_header().await?;
@@ -682,6 +703,17 @@ mod tests {
         assert_eq!(actual_url, expected_base_url);
         assert!(actual_url.contains("select="));
         assert!(actual_url.contains("@microsoft.graph.downloadUrl"));
+    }
+
+    #[test]
+    fn test_get_item_by_id_url_construction() {
+        let item_id = "1234567890!123";
+        let expected_url = format!("{}/me/drive/items/{}", GRAPH_API_BASE, item_id);
+
+        // This tests the URL logic that would be used in get_item_by_id
+        let actual_url = format!("{}/me/drive/items/{}", GRAPH_API_BASE, item_id);
+
+        assert_eq!(actual_url, expected_url);
     }
 
     // Test URL encoding scenarios

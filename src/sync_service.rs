@@ -283,6 +283,13 @@ impl SyncService {
                 skip_synchronization = true;
             }
         });
+        let old_local_path = self.metadata_manager.get_local_path_for_onedrive_id(&item.id)?;
+        if old_local_path.is_some() {
+            let old_local_path = PathBuf::from(old_local_path.unwrap());
+            // Old local path exists, we may want to download file anyway
+            skip_synchronization = false;
+        }
+        
 
         if skip_synchronization {
             return Ok(());
