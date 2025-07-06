@@ -1,15 +1,18 @@
 //! Sync utilities for common synchronization operations
 
-use crate::metadata_manager_for_files::MetadataManagerForFiles;
-use crate::onedrive_service::onedrive_models::DriveItem;
-use crate::operations::file_ops::{create_or_update_item, delete_item, move_item, should_download_item};
-use crate::operations::path_utils::{get_local_meta_cache_path_for_item, get_local_tmp_path_for_item};
-use crate::onedrive_service::onedrive_client::OneDriveClient;
 use crate::file_manager::FileManager;
+use crate::metadata_manager_for_files::MetadataManagerForFiles;
+use crate::onedrive_service::onedrive_client::OneDriveClient;
+use crate::onedrive_service::onedrive_models::DriveItem;
+use crate::operations::file_ops::{
+    create_or_update_item, delete_item, move_item, should_download_item,
+};
+use crate::operations::path_utils::{
+    get_local_meta_cache_path_for_item, get_local_tmp_path_for_item,
+};
 use anyhow::{Context, Result};
 use log::{error, info, warn};
 use std::path::{Path, PathBuf};
-
 
 static THUMBNAIL_SIZE: u64 = 4096;
 
@@ -45,29 +48,23 @@ pub async fn process_sync_item(
 ) -> Result<SyncResult> {
     let cache_dir = file_manager.get_cache_dir();
     let temp_dir = file_manager.get_temp_download_dir();
-    
+
     // Determine local paths
     let local_cache_path = if item.parent_reference.as_ref().unwrap().path.is_none() {
         PathBuf::from("/")
     } else {
         get_local_meta_cache_path_for_item(item, &cache_dir)
     };
-    
-    
-    
-    
-    
-    
-    
-    
+
     // Handle deleted items
     if let Some(_deleted_info) = &item.deleted {
         info!("Processing deleted item: {}", item.id);
         let result = delete_item(item, &cache_dir, &temp_dir).await?;
-        
+
         // Clean up metadata
         cleanup_metadata_for_item(item, metadata_manager)?;
-        
+        remove_item_from_processing_queue(item, metadata_manager)?;
+
         return Ok(SyncResult {
             operation: SyncOperation::Delete,
             item_id: item.id.clone(),
@@ -76,7 +73,7 @@ pub async fn process_sync_item(
             error: result.error,
         });
     }
-    
+
     // Handle regular items (files and folders)
     if item.folder.is_some() || item.file.is_some() {
         // Handle root folder
@@ -84,7 +81,7 @@ pub async fn process_sync_item(
             let dir_path = cache_dir.join(".dir.json");
             let dir_json = serde_json::to_string(item)?;
             std::fs::write(dir_path, dir_json)?;
-            
+            remove_item_from_processing_queue(item, metadata_manager)?;
             return Ok(SyncResult {
                 operation: SyncOperation::Update,
                 item_id: item.id.clone(),
@@ -93,9 +90,10 @@ pub async fn process_sync_item(
                 error: None,
             });
         }
-        
+
         // Skip .dir.json files
         if item.name.as_ref().unwrap().eq(".dir.json") {
+            remove_item_from_processing_queue(item, metadata_manager)?;
             return Ok(SyncResult {
                 operation: SyncOperation::Skip,
                 item_id: item.id.clone(),
@@ -104,22 +102,29 @@ pub async fn process_sync_item(
                 error: None,
             });
         }
-        
+
         // Check for moves
-        if let Some(old_local_path_str) = metadata_manager.get_local_path_for_onedrive_id(&item.id)? {
+        if let Some(old_local_path_str) =
+            metadata_manager.get_local_path_for_onedrive_id(&item.id)?
+        {
             let old_local_path = PathBuf::from(&old_local_path_str);
             let old_temp_path = file_manager.virtual_path_to_downloaded_path(
-                &file_manager.cache_path_to_virtual_path(&old_local_path)
+                &file_manager.cache_path_to_virtual_path(&old_local_path),
             );
-            
+
             if old_local_path != local_cache_path {
-                info!("Detected move: {} -> {}", old_local_path.display(), local_cache_path.display());
-                
-                let result = move_item(item, &old_local_path, &old_temp_path, &cache_dir, &temp_dir).await?;
-                
+                info!(
+                    "Detected move: {} -> {}",
+                    old_local_path.display(),
+                    local_cache_path.display()
+                );
+
+                let result =
+                    move_item(item, &old_local_path, &old_temp_path, &cache_dir, &temp_dir).await?;
+
                 // Update metadata
                 update_metadata_for_item(item, &local_cache_path, metadata_manager)?;
-                
+                remove_item_from_processing_queue(item, metadata_manager)?;
                 return Ok(SyncResult {
                     operation: SyncOperation::Move,
                     item_id: item.id.clone(),
@@ -129,19 +134,31 @@ pub async fn process_sync_item(
                 });
             }
         }
-        
+
         // Create or update item
         let result = create_or_update_item(item, &cache_dir, &temp_dir).await?;
-        
-        // Update metadata
-        update_metadata_for_item(item, &local_cache_path, metadata_manager)?;
-        
+
         // Download file if needed
         if item.file.is_some() {
-            
-         //   download_file_if_needed(item, &local_temp_path, onedrive_client, partial_sync).await?;
+            //chck if virtual path of parent folder is in sync_folders
+            let parent_virtual_path = file_manager.cache_path_to_virtual_path(&local_cache_path);
+
+            let parent_virtual_path_str = parent_virtual_path.parent().unwrap().to_str().unwrap();
+            // we need to remove leading "/" from parent_virtual_path_str
+            let parent_virtual_path_str = parent_virtual_path_str.trim_start_matches('/');
+            if settings_sync_folders
+                .iter()
+                .any(|folder| parent_virtual_path_str.starts_with(folder))
+            {
+                metadata_manager.add_download_items_to_process(item)?;
+                info!("Added item to download queue: {}", item.id);
+                metadata_manager.flush()?;
+            }
         }
-        
+        // Update metadata
+        update_metadata_for_item(item, &local_cache_path, metadata_manager)?;
+        remove_item_from_processing_queue(item, metadata_manager)?;
+
         return Ok(SyncResult {
             operation: SyncOperation::Update,
             item_id: item.id.clone(),
@@ -150,7 +167,7 @@ pub async fn process_sync_item(
             error: result.error,
         });
     }
-    
+
     // Skip items that are neither files nor folders
     Ok(SyncResult {
         operation: SyncOperation::Skip,
@@ -161,23 +178,28 @@ pub async fn process_sync_item(
     })
 }
 
+fn remove_item_from_processing_queue(
+    item: &DriveItem,
+    metadata_manager: &MetadataManagerForFiles,
+) -> Result<(), anyhow::Error> {
+    info!("Removing item from processing queue: {}", item.id);
+    metadata_manager.remove_delta_items_to_process(&item.id)?;
+    metadata_manager.flush()?;
+    Ok(())
+}
+
 /// Update metadata for an item
 fn update_metadata_for_item(
     item: &DriveItem,
     local_path: &Path,
     metadata_manager: &MetadataManagerForFiles,
 ) -> Result<()> {
-    metadata_manager.store_onedrive_id_to_local_path(
-        &item.id,
-        &local_path.display().to_string(),
-    )?;
-    
+    metadata_manager
+        .store_onedrive_id_to_local_path(&item.id, &local_path.display().to_string())?;
+
     let inode = crate::helpers::path_to_inode(local_path);
-    metadata_manager.store_inode_to_local_path(
-        inode,
-        local_path.display().to_string().as_str(),
-    )?;
-    
+    metadata_manager.store_inode_to_local_path(inode, local_path.display().to_string().as_str())?;
+
     Ok(())
 }
 
@@ -188,18 +210,25 @@ fn cleanup_metadata_for_item(
 ) -> Result<()> {
     // Remove OneDrive ID mapping
     if let Err(e) = metadata_manager.remove_onedrive_id_to_local_path(&item.id) {
-        error!("Failed to remove OneDrive ID mapping for {}: {}", item.id, e);
+        error!(
+            "Failed to remove OneDrive ID mapping for {}: {}",
+            item.id, e
+        );
     }
-    
+
     // Remove inode mapping if we can get the local path
     if let Ok(Some(local_path_str)) = metadata_manager.get_local_path_for_onedrive_id(&item.id) {
         let local_path = PathBuf::from(&local_path_str);
         let inode = crate::helpers::path_to_inode(&local_path);
         if let Err(e) = metadata_manager.remove_inode_to_local_path(inode) {
-            error!("Failed to remove inode mapping for {}: {}", local_path.display(), e);
+            error!(
+                "Failed to remove inode mapping for {}: {}",
+                local_path.display(),
+                e
+            );
         }
     }
-    
+
     Ok(())
 }
 
@@ -208,23 +237,7 @@ async fn download_file_if_needed(
     item: &DriveItem,
     local_temp_path: &Path,
     onedrive_client: &OneDriveClient,
-    partial_sync: bool,
 ) -> Result<()> {
-    if local_temp_path.exists() {
-        //We need to check file size 
-        //id partial is true than it's enogh that file exists. 
-        //if not we need to compare actual file size with DriveItem size
-        //it actual file size is smaller than DriveItem size than we need to download full file
-        if partial_sync {
-            return Ok(());
-        }
-        // full sync
-        let file_size = std::fs::metadata(local_temp_path)?.len();
-        if file_size < item.size.unwrap_or(0) {
-            return Ok(());
-        }
-    }
-    
     let download_url = match &item.download_url {
         Some(url) => url,
         None => {
@@ -232,7 +245,7 @@ async fn download_file_if_needed(
             return Ok(());
         }
     };
-    
+
     let file_name = match &item.name {
         Some(name) => name,
         None => {
@@ -240,25 +253,25 @@ async fn download_file_if_needed(
             return Ok(());
         }
     };
-    
+
     info!("Downloading file: {}", local_temp_path.display());
-    let download_result = if partial_sync {
-        onedrive_client.download_file_partial(download_url, &item.id, file_name).await?
-    } else {
-        onedrive_client.download_file(download_url, &item.id, file_name).await?
-    };
-    
-    
+    let download_result = onedrive_client
+        .download_file(download_url, &item.id, file_name)
+        .await?;
+
     // Create parent directory if it doesn't exist
     if let Some(parent) = local_temp_path.parent() {
         std::fs::create_dir_all(parent)
             .context("Failed to create parent directory for downloaded file")?;
     }
-    
+
     // Save the downloaded file
     std::fs::write(local_temp_path, &download_result.file_data)
         .context("Failed to save downloaded file")?;
-    
-    info!("Successfully downloaded file: {}", local_temp_path.display());
+
+    info!(
+        "Successfully downloaded file: {}",
+        local_temp_path.display()
+    );
     Ok(())
 }

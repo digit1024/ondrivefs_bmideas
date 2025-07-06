@@ -1,5 +1,5 @@
 //! OneDrive FUSE filesystem for Linux
-//! 
+//!
 //! This is a FUSE filesystem that provides access to OneDrive files
 //! through a local mount point. Files are cached locally and synchronized
 //! with OneDrive in the background.
@@ -12,6 +12,7 @@ mod metadata_manager_for_files;
 mod onedrive_service;
 mod openfs;
 mod operations;
+mod scheduler;
 mod sync;
 
 use crate::auth::onedrive_auth::OneDriveAuth;
@@ -20,7 +21,7 @@ use crate::onedrive_service::onedrive_client::OneDriveClient;
 use crate::openfs::opendrive_fuse::mount_filesystem_with_deps;
 use crate::sync::sync_service::SyncService;
 use anyhow::{Context, Result};
-use clap::{Command, Arg};
+use clap::{Arg, Command};
 use log::{error, info};
 use std::os::unix::thread;
 use std::path::Path;
@@ -56,7 +57,6 @@ fn main() -> Result<()> {
 
     let mountpoint = matches.get_one::<String>("mountpoint").unwrap();
     let config_file = matches.get_one::<String>("config").unwrap();
-    
 
     info!("Starting OneDrive FUSE filesystem");
     info!("Mount point: {}", mountpoint);
@@ -73,64 +73,63 @@ fn main() -> Result<()> {
     // Check if mountpoint exists and is a directory
     let mount_path = Path::new(mountpoint);
     if !mount_path.exists() {
-        return Err(anyhow::anyhow!("Mount point does not exist: {}", mountpoint));
+        return Err(anyhow::anyhow!(
+            "Mount point does not exist: {}",
+            mountpoint
+        ));
     }
     if !mount_path.is_dir() {
-        return Err(anyhow::anyhow!("Mount point is not a directory: {}", mountpoint));
+        return Err(anyhow::anyhow!(
+            "Mount point is not a directory: {}",
+            mountpoint
+        ));
     }
 
-
-
     // Create runtime manually
-    let runtime = tokio::runtime::Runtime::new()
-        .context("Failed to create tokio runtime")?;
+    let runtime = tokio::runtime::Runtime::new().context("Failed to create tokio runtime")?;
 
     // Get the runtime handle
     let runtime_handle = runtime.handle().clone();
     runtime.block_on(async {
-    //check if serret exists - if not authenticate
-    let auth = Arc::new(OneDriveAuth::new()?);
-    let _token = auth.get_valid_token().await
-        .context("Failed to get access token");
-    if _token.is_err() {
-        auth.authorize().await?;
-    }
-        
-    Ok::<_, anyhow::Error>(())
-    })?;
-    std::thread::sleep(std::time::Duration::from_secs(10));
+        //check if serret exists - if not authenticate
+        let auth = Arc::new(OneDriveAuth::new()?);
+        let _token = auth
+            .get_valid_token()
+            .await
+            .context("Failed to get access token");
+        if _token.is_err() {
+            auth.authorize().await?;
+        }
 
+        Ok::<_, anyhow::Error>(())
+    })?;
 
     // Run async setup in runtime
     let (file_manager, onedrive_client, mut sync_service) = runtime.block_on(async {
         // Load configuration
-        let settings = Settings::load_from_file()
-            .context("Failed to load settings")?;
+        let settings = Settings::load_from_file().context("Failed to load settings")?;
         let config = SyncConfig::default();
 
         // Initialize OneDrive authentication
         let auth = Arc::new(OneDriveAuth::new()?);
-        
+
         // Get access token
-        let _token = auth.get_valid_token().await
+        let _token = auth
+            .get_valid_token()
+            .await
             .context("Failed to get access token")?;
 
         // Create OneDrive client
-        let client = OneDriveClient::new(auth)
-            .context("Failed to create OneDrive client")?;
+        let client = OneDriveClient::new(auth).context("Failed to create OneDrive client")?;
 
         // Create sync service
-        let mut sync_service = SyncService::new(
-            client.clone(),
-            config.clone(),
-            settings.clone(),
-        ).await
-        .context("Failed to create sync service")?;
-
-        
+        let mut sync_service = SyncService::new(client.clone(), config.clone(), settings.clone())
+            .await
+            .context("Failed to create sync service")?;
 
         // Create file manager
-        let file_manager = crate::file_manager::DefaultFileManager::new().await
+        let file_manager = crate::file_manager::DefaultFileManager::new()
+            .await
             .context("Failed to create file manager")?;
 
         Ok::<_, anyhow::Error>((file_manager, client, sync_service))
@@ -138,17 +137,26 @@ fn main() -> Result<()> {
 
     // Mount the filesystem in a separate thread (FUSE is blocking)
     info!("Mounting filesystem at: {}", mountpoint);
-    
+
     let mountpoint_clone = mountpoint.clone();
     let mountpoint_for_shutdown = mountpoint.clone();
-    std::thread::spawn(move || {
-        if let Err(e) = mount_filesystem_with_deps(&mountpoint_clone, file_manager, onedrive_client, runtime_handle) {
-            error!("FUSE filesystem error: {}", e);
-        }
-    });
+    // std::thread::spawn(move || {
+    //     if let Err(e) = mount_filesystem_with_deps(&mountpoint_clone, file_manager, onedrive_client, runtime_handle) {
+    //         error!("FUSE filesystem error: {}", e);
+    //     }
+    // });
     let result = runtime.block_on(async {
-        sync_service.init().await
+        sync_service
+            .init()
+            .await
             .context("Failed to initialize sync service")?;
+
+        // Start periodic sync operations
+        sync_service
+            .start_periodic_sync()
+            .await
+            .context("Failed to start periodic sync")?;
+
         Ok::<_, anyhow::Error>(())
     });
     if let Err(e) = result {
@@ -157,23 +165,25 @@ fn main() -> Result<()> {
 
     // Keep the runtime alive for any background tasks
     info!("FUSE filesystem mounted successfully. Press Ctrl+C to unmount.");
-    
+
     // Wait for interrupt signal
     ctrlc::set_handler(move || {
         info!("Received interrupt signal, shutting down...");
-        
+
         // Try to unmount the filesystem gracefully
         if let Err(e) = std::process::Command::new("fusermount")
             .arg("-u")
             .arg(&mountpoint_for_shutdown)
-            .output() {
+            .output()
+        {
             error!("Failed to unmount filesystem: {}", e);
         } else {
             info!("Filesystem unmounted successfully");
         }
-        
+
         std::process::exit(0);
-    }).expect("Error setting Ctrl-C handler");
+    })
+    .expect("Error setting Ctrl-C handler");
 
     // Keep main thread alive
     loop {

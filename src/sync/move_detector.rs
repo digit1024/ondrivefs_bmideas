@@ -2,8 +2,10 @@
 
 use crate::metadata_manager_for_files::MetadataManagerForFiles;
 use crate::onedrive_service::onedrive_models::DriveItem;
-use crate::operations::path_utils::{get_local_meta_cache_path_for_item, get_local_tmp_path_for_item};
 use crate::operations::file_ops::move_item;
+use crate::operations::path_utils::{
+    get_local_meta_cache_path_for_item, get_local_tmp_path_for_item,
+};
 use anyhow::Result;
 use log::info;
 use std::path::{Path, PathBuf};
@@ -49,13 +51,7 @@ impl MoveDetector {
                 let _new_temp_path = get_local_tmp_path_for_item(item, temp_dir);
 
                 // Handle the move operation
-                move_item(
-                    item,
-                    &old_local_path,
-                    &old_temp_path,
-                    cache_dir,
-                    temp_dir,
-                ).await?;
+                move_item(item, &old_local_path, &old_temp_path, cache_dir, temp_dir).await?;
 
                 return Ok(Some(old_local_path));
             }

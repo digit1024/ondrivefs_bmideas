@@ -9,6 +9,7 @@ use anyhow::Result;
 use log::info;
 
 /// Processor for individual OneDrive items
+#[derive(Clone)]
 pub struct ItemProcessor {
     file_manager: DefaultFileManager,
     metadata_manager: &'static MetadataManagerForFiles,
@@ -30,21 +31,18 @@ impl ItemProcessor {
     }
 
     /// Process a single OneDrive item
-    pub async fn process_item(
-        &self,
-        item: &DriveItem,
-        sync_folders: &[String],
-    ) -> Result<()> {
+    pub async fn process_item(&self, item: &DriveItem, sync_folders: &[String]) -> Result<()> {
         info!("Processing item: {} ({:?})", item.id, item.name);
-        
+
         let result = process_sync_item(
             item,
             &self.file_manager,
             self.metadata_manager,
             &self.onedrive_client,
             sync_folders,
-        ).await?;
-        
+        )
+        .await?;
+
         match result.operation {
             crate::sync::sync_utils::SyncOperation::Create => {
                 info!("Created item: {}", result.item_id);
@@ -62,13 +60,13 @@ impl ItemProcessor {
                 info!("Skipped item: {}", result.item_id);
             }
         }
-        
+
         if !result.success {
             if let Some(error) = result.error {
                 log::warn!("Failed to process item {}: {}", result.item_id, error);
             }
         }
-        
+
         Ok(())
     }
 }

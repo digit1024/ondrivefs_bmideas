@@ -37,8 +37,7 @@ pub struct MetadataManagerForFiles {
     onedrive_id_to_local_path: Tree,
     inode_to_local_path: Tree,
     delta_items_to_process: Tree,
-
-    
+    download_items_to_process: Tree,
 }
 static MATADATAMANAGER: OnceLock<MetadataManagerForFiles> = OnceLock::new();
 
@@ -68,7 +67,8 @@ impl MetadataManagerForFiles {
         let changed_queue = db.open_tree("changed_queue")?;
         let inode_to_local_path = db.open_tree("inode_to_local_path")?;
         let delta_items_to_process = db.open_tree("delta_items_to_process")?;
-        
+        let download_items_to_process = db.open_tree("download_items_to_process")?;
+
         let manager = Self {
             db,
             folder_deltas,
@@ -76,6 +76,7 @@ impl MetadataManagerForFiles {
             onedrive_id_to_local_path,
             inode_to_local_path,
             delta_items_to_process,
+            download_items_to_process,
         };
 
         info!(
@@ -213,7 +214,8 @@ impl MetadataManagerForFiles {
 
     pub fn store_delta_items_to_process(&self, delta_item: &DriveItem) -> Result<()> {
         let json_value = serde_json::to_string(&delta_item)?;
-        self.delta_items_to_process.insert(delta_item.id.as_bytes(), json_value.as_bytes())?;
+        self.delta_items_to_process
+            .insert(delta_item.id.as_bytes(), json_value.as_bytes())?;
         debug!("Stored delta item to process: {}", delta_item.id);
         Ok(())
     }
@@ -228,7 +230,6 @@ impl MetadataManagerForFiles {
         }
         Ok(delta_items)
     }
-    
 
     pub fn remove_delta_items_to_process(&self, id: &str) -> Result<()> {
         self.delta_items_to_process.remove(id.as_bytes())?;
@@ -237,6 +238,20 @@ impl MetadataManagerForFiles {
 
     pub fn clear_delta_items_to_process(&self) -> Result<()> {
         self.delta_items_to_process.clear()?;
+        Ok(())
+    }
+    pub fn add_download_items_to_process(&self, item: &DriveItem) -> Result<()> {
+        let json_value = serde_json::to_string(&item)?;
+        self.download_items_to_process
+            .insert(item.id.as_bytes(), json_value.as_bytes())?;
+        Ok(())
+    }
+    pub fn remove_download_items_to_process(&self, id: &str) -> Result<()> {
+        self.download_items_to_process.remove(id.as_bytes())?;
+        Ok(())
+    }
+    pub fn clear_download_items_to_process(&self) -> Result<()> {
+        self.download_items_to_process.clear()?;
         Ok(())
     }
 }

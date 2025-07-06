@@ -34,7 +34,7 @@ impl HttpClient {
     {
         let url = self.get_full_url(url)?;
         debug!("Getting url: {}", url);
-        
+
         let response = self
             .client
             .get(&url)
@@ -194,4 +194,4 @@ mod tests {
     fn test_graph_api_base_constant() {
         assert_eq!(GRAPH_API_BASE, "https://graph.microsoft.com/v1.0");
     }
-} 
+}

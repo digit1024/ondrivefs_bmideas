@@ -7,8 +7,8 @@ use crate::onedrive_service::onedrive_models::{
 use anyhow::{Context, Result, anyhow};
 use log::info;
 use serde_json;
-use urlencoding;
 use std::sync::Arc;
+use urlencoding;
 
 static THUMBNAIL_SIZE: u64 = 4096;
 
@@ -30,7 +30,7 @@ impl OneDriveClient {
     /// Get authorization header with valid token
     async fn auth_header(&self) -> Result<String> {
         let token = self.auth.get_valid_token().await?;
-        
+
         Ok(format!("Bearer {}", token))
     }
 
@@ -135,10 +135,7 @@ impl OneDriveClient {
             format!("/me/drive/root:/{}:/content", file_name)
         } else {
             let encoded_path = urlencoding::encode(&parent_path);
-            format!(
-                "/me/drive/root:{}:/{}:/content",
-                encoded_path, file_name
-            )
+            format!("/me/drive/root:{}:/{}:/content", encoded_path, file_name)
         };
 
         Ok(url)
@@ -248,7 +245,10 @@ impl OneDriveClient {
 
     /// Get delta changes by URL
     pub async fn get_delta_by_url(&self, next_link: &str) -> Result<DeltaResponseApi> {
-        let auth_header = self.auth_header().await.context("Failed to get auth header")?;
+        let auth_header = self
+            .auth_header()
+            .await
+            .context("Failed to get auth header")?;
         let delta_response = self
             .http_client
             .get(next_link, &auth_header)
@@ -262,13 +262,16 @@ impl OneDriveClient {
     #[allow(dead_code)]
     pub async fn get_delta_for_root(&self) -> Result<DeltaResponseApi> {
         let url = "/me/drive/root/delta?select=id,name,eTag,lastModifiedDateTime,size,folder,file,@microsoft.graph.downloadUrl,deleted,parentReference";
-        let auth_header = self.auth_header().await.context("Failed to get auth header")?;
+        let auth_header = self
+            .auth_header()
+            .await
+            .context("Failed to get auth header")?;
         let delta_response: DeltaResponseApi = self
             .http_client
             .get(url, &auth_header)
             .await
             .context("Failed to get delta for root")?;
-        
+
         Ok(delta_response)
     }
 
@@ -286,7 +289,7 @@ impl OneDriveClient {
             .get(&url, "")
             .await
             .context("Failed to get delta changes")?;
-        
+
         Ok(collection)
     }
 
@@ -336,27 +339,29 @@ impl OneDriveClient {
         download_url: &str,
         item_id: &str,
         filename: &str,
-        range: Option<(u64, u64)>,  // (start, end) bytes
-       
+        range: Option<(u64, u64)>, // (start, end) bytes
     ) -> Result<DownloadResult> {
         // Build the request using the request builder
         let mut request = self.http_client.request_builder("GET", download_url);
-        
-        
-        
+
         // Add Range header if specified
         if let Some((start, end)) = range {
             let range_header = format!("bytes={}-{}", start, end);
             request = request.header("Range", range_header);
         }
-        
-        let response = request.send().await
+
+        let response = request
+            .send()
+            .await
             .context("Failed to send download request")?;
-        
+
         if !response.status().is_success() {
-            return Err(anyhow!("Download failed with status: {}", response.status()));
+            return Err(anyhow!(
+                "Download failed with status: {}",
+                response.status()
+            ));
         }
-        
+
         // Extract headers before consuming the response
         let etag = response
             .headers()
@@ -382,9 +387,11 @@ impl OneDriveClient {
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
 
-        let file_data = response.bytes().await
+        let file_data = response
+            .bytes()
+            .await
             .context("Failed to read response bytes")?;
-        
+
         Ok(DownloadResult {
             file_data: file_data.to_vec(),
             file_name: filename.to_string(),
@@ -402,16 +409,14 @@ impl OneDriveClient {
         download_url: &str,
         item_id: &str,
         filename: &str,
-        
     ) -> Result<DownloadResult> {
-        
-        
         self.download_file_with_options(
             download_url,
             item_id,
             filename,
-            Some((0, THUMBNAIL_SIZE - 1)),  
-        ).await
+            Some((0, THUMBNAIL_SIZE - 1)),
+        )
+        .await
     }
 
     /// Download full file (existing method, updated to use new function)
@@ -425,9 +430,9 @@ impl OneDriveClient {
             download_url,
             item_id,
             filename,
-            None,  // no range = full download
-            
-        ).await
+            None, // no range = full download
+        )
+        .await
     }
 }
 
@@ -445,7 +450,6 @@ mod tests {
     use serial_test::serial;
 
     use super::*;
-    
 
     #[test]
     fn test_extract_delta_token_with_valid_url() {
@@ -497,10 +501,7 @@ mod tests {
             format!("/me/drive/root:/{}:/content", file_name)
         } else {
             let encoded_path = urlencoding::encode(parent_path);
-            format!(
-                "/me/drive/root:{}:/{}:/content",
-                encoded_path, file_name
-            )
+            format!("/me/drive/root:{}:/{}:/content", encoded_path, file_name)
         };
 
         assert_eq!(actual_url, expected_url);
@@ -520,10 +521,7 @@ mod tests {
             format!("/me/drive/root:/{}:/content", file_name)
         } else {
             let encoded_path = urlencoding::encode(parent_path);
-            format!(
-                "/me/drive/root:{}:/{}:/content",
-                encoded_path, file_name
-            )
+            format!("/me/drive/root:{}:/{}:/content", encoded_path, file_name)
         };
 
         assert_eq!(actual_url, expected_url);

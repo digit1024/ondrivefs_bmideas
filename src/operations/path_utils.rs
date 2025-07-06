@@ -9,15 +9,12 @@ pub fn onedrive_path_to_local_components(parent_path: &str) -> PathBuf {
     let clean_path = parent_path
         .trim_start_matches("/drive/root:")
         .trim_start_matches("/");
-    
+
     PathBuf::from(clean_path)
 }
 
 /// Get local temporary path for a OneDrive item
-pub fn get_local_tmp_path_for_item(
-    item: &DriveItem,
-    temp_download_dir: &Path,
-) -> PathBuf {
+pub fn get_local_tmp_path_for_item(item: &DriveItem, temp_download_dir: &Path) -> PathBuf {
     let remote_path_from_parent = item
         .parent_reference
         .as_ref()
@@ -27,7 +24,7 @@ pub fn get_local_tmp_path_for_item(
         .unwrap_or(&"");
 
     let local_components = onedrive_path_to_local_components(remote_path_from_parent);
-    
+
     // Get the folder path and join it with the item name
     temp_download_dir
         .join(local_components)
@@ -35,10 +32,7 @@ pub fn get_local_tmp_path_for_item(
 }
 
 /// Get local metadata cache path for a OneDrive item
-pub fn get_local_meta_cache_path_for_item(
-    item: &DriveItem,
-    cache_dir: &Path,
-) -> PathBuf {
+pub fn get_local_meta_cache_path_for_item(item: &DriveItem, cache_dir: &Path) -> PathBuf {
     let remote_path_from_parent = item
         .parent_reference
         .as_ref()
@@ -48,7 +42,7 @@ pub fn get_local_meta_cache_path_for_item(
         .unwrap();
 
     let local_components = onedrive_path_to_local_components(remote_path_from_parent);
-    
+
     // Get the folder path and join it with the item name
     cache_dir
         .join(local_components)
