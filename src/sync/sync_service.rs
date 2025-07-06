@@ -6,6 +6,7 @@ use crate::metadata_manager_for_files::{MetadataManagerForFiles, get_metadata_ma
 use crate::onedrive_service::onedrive_client::OneDriveClient;
 use crate::scheduler::{PeriodicScheduler, PeriodicTask, TaskMetrics};
 use crate::sync::delta_sync::DeltaSyncProcessor;
+use crate::sync::download_processor::DownloadProcessor;
 use crate::sync::item_processor::ItemProcessor;
 use anyhow::Result;
 use log::info;
@@ -24,6 +25,7 @@ pub struct SyncService {
     pub metadata_manager: &'static MetadataManagerForFiles,
     delta_processor: DeltaSyncProcessor,
     item_processor: ItemProcessor,
+    download_processor: DownloadProcessor,
     scheduler: Option<PeriodicScheduler>,
 }
 
@@ -41,6 +43,12 @@ impl SyncService {
 
         let item_processor =
             ItemProcessor::new(file_manager.clone(), metadata_manager, client.clone());
+        
+        let download_processor = DownloadProcessor::new(
+            file_manager.clone(),
+            metadata_manager,
+            client.clone(),
+        );
 
         Ok(Self {
             client,
@@ -50,6 +58,7 @@ impl SyncService {
             metadata_manager,
             delta_processor,
             item_processor,
+            download_processor,
             scheduler: None,
         })
     }
@@ -121,13 +130,31 @@ impl SyncService {
                 let metadata_manager = metadata_manager;
                 let settings = settings.clone();
                 Box::pin(async move {
+                    
                     let delta_items = metadata_manager.get_delta_items_to_process()?;
+                    info!("Starting delta Items Procesing {} delta items to process", delta_items.len());
                     for item in delta_items {
                         item_processor
                             .process_item(&item, &settings.sync_folders)
                             .await?;
                     }
                     Ok(())
+                })
+            }),
+        });
+
+        // Add download processing task
+        let download_processor = self.download_processor.clone();
+        let settings = self.settings.clone();
+        scheduler.add_task(PeriodicTask {
+            name: "download_processing".to_string(),
+            interval: Duration::from_secs(15), // More frequent than delta
+            metrics: TaskMetrics::new(15, Duration::from_secs(12)),
+            task: Box::new(move || {
+                let download_processor = download_processor.clone();
+                let settings = settings.clone();
+                Box::pin(async move {
+                    download_processor.process_download_queue(&settings.sync_folders).await
                 })
             }),
         });

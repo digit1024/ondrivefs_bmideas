@@ -38,7 +38,7 @@ impl ItemProcessor {
             item,
             &self.file_manager,
             self.metadata_manager,
-            &self.onedrive_client,
+      
             sync_folders,
         )
         .await?;

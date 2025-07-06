@@ -18,12 +18,10 @@ mod sync;
 use crate::auth::onedrive_auth::OneDriveAuth;
 use crate::config::{Settings, SyncConfig};
 use crate::onedrive_service::onedrive_client::OneDriveClient;
-use crate::openfs::opendrive_fuse::mount_filesystem_with_deps;
 use crate::sync::sync_service::SyncService;
 use anyhow::{Context, Result};
 use clap::{Arg, Command};
 use log::{error, info};
-use std::os::unix::thread;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -123,7 +121,7 @@ fn main() -> Result<()> {
         let client = OneDriveClient::new(auth).context("Failed to create OneDrive client")?;
 
         // Create sync service
-        let mut sync_service = SyncService::new(client.clone(), config.clone(), settings.clone())
+        let sync_service = SyncService::new(client.clone(), config.clone(), settings.clone())
             .await
             .context("Failed to create sync service")?;
 

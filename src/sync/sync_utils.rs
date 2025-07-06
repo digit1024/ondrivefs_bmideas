@@ -5,16 +5,14 @@ use crate::metadata_manager_for_files::MetadataManagerForFiles;
 use crate::onedrive_service::onedrive_client::OneDriveClient;
 use crate::onedrive_service::onedrive_models::DriveItem;
 use crate::operations::file_ops::{
-    create_or_update_item, delete_item, move_item, should_download_item,
+    create_or_update_item, delete_item, move_item,
 };
-use crate::operations::path_utils::{
-    get_local_meta_cache_path_for_item, get_local_tmp_path_for_item,
-};
+use crate::operations::path_utils::get_local_meta_cache_path_for_item;
 use anyhow::{Context, Result};
 use log::{error, info, warn};
 use std::path::{Path, PathBuf};
 
-static THUMBNAIL_SIZE: u64 = 4096;
+
 
 /// Sync operation types
 #[derive(Debug, Clone)]
@@ -43,7 +41,7 @@ pub async fn process_sync_item(
     item: &DriveItem,
     file_manager: &impl FileManager,
     metadata_manager: &MetadataManagerForFiles,
-    onedrive_client: &OneDriveClient,
+    
     settings_sync_folders: &[String],
 ) -> Result<SyncResult> {
     let cache_dir = file_manager.get_cache_dir();

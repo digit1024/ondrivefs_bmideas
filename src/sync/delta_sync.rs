@@ -37,7 +37,7 @@ impl DeltaSyncProcessor {
             let items = delta_response.value;
             let mut c = 0;
             for item in items {
-                self.metadata_manager.store_delta_items_to_process(&item);
+                self.metadata_manager.store_delta_items_to_process(&item).context("Failed to store delta items to process")?;
                 c += 1;
             }
             self.metadata_manager.flush()?;

@@ -246,10 +246,23 @@ impl MetadataManagerForFiles {
             .insert(item.id.as_bytes(), json_value.as_bytes())?;
         Ok(())
     }
+    
+    pub fn get_download_items_to_process(&self) -> Result<Vec<DriveItem>> {
+        let mut download_items: Vec<DriveItem> = Vec::new();
+        for result in self.download_items_to_process.iter() {
+            let (key, value) = result?;
+            let json_str = String::from_utf8(value.to_vec())?;
+            let download_item: DriveItem = serde_json::from_str(&json_str)?;
+            download_items.push(download_item);
+        }
+        Ok(download_items)
+    }
+    
     pub fn remove_download_items_to_process(&self, id: &str) -> Result<()> {
         self.download_items_to_process.remove(id.as_bytes())?;
         Ok(())
     }
+    
     pub fn clear_download_items_to_process(&self) -> Result<()> {
         self.download_items_to_process.clear()?;
         Ok(())
