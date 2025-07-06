@@ -2,13 +2,16 @@
 
 use crate::metadata_manager_for_files::MetadataManagerForFiles;
 use crate::onedrive_service::onedrive_models::DriveItem;
-use crate::operations::file_ops::{create_or_update_item, delete_item, move_item, should_sync_item};
+use crate::operations::file_ops::{create_or_update_item, delete_item, move_item, should_download_item};
 use crate::operations::path_utils::{get_local_meta_cache_path_for_item, get_local_tmp_path_for_item};
 use crate::onedrive_service::onedrive_client::OneDriveClient;
 use crate::file_manager::FileManager;
 use anyhow::{Context, Result};
 use log::{error, info, warn};
 use std::path::{Path, PathBuf};
+
+
+static THUMBNAIL_SIZE: u64 = 4096;
 
 /// Sync operation types
 #[derive(Debug, Clone)]
@@ -50,18 +53,12 @@ pub async fn process_sync_item(
         get_local_meta_cache_path_for_item(item, &cache_dir)
     };
     
-    let local_temp_path = get_local_tmp_path_for_item(item, &temp_dir);
     
-    // Check if item should be synchronized
-    if !should_sync_item(&local_cache_path, &cache_dir, settings_sync_folders) {
-        return Ok(SyncResult {
-            operation: SyncOperation::Skip,
-            item_id: item.id.clone(),
-            path: local_cache_path,
-            success: true,
-            error: None,
-        });
-    }
+    
+    
+    
+    
+    
     
     // Handle deleted items
     if let Some(_deleted_info) = &item.deleted {
@@ -141,7 +138,8 @@ pub async fn process_sync_item(
         
         // Download file if needed
         if item.file.is_some() {
-            download_file_if_needed(item, &local_temp_path, onedrive_client).await?;
+            
+         //   download_file_if_needed(item, &local_temp_path, onedrive_client, partial_sync).await?;
         }
         
         return Ok(SyncResult {
@@ -210,9 +208,21 @@ async fn download_file_if_needed(
     item: &DriveItem,
     local_temp_path: &Path,
     onedrive_client: &OneDriveClient,
+    partial_sync: bool,
 ) -> Result<()> {
     if local_temp_path.exists() {
-        return Ok(());
+        //We need to check file size 
+        //id partial is true than it's enogh that file exists. 
+        //if not we need to compare actual file size with DriveItem size
+        //it actual file size is smaller than DriveItem size than we need to download full file
+        if partial_sync {
+            return Ok(());
+        }
+        // full sync
+        let file_size = std::fs::metadata(local_temp_path)?.len();
+        if file_size < item.size.unwrap_or(0) {
+            return Ok(());
+        }
     }
     
     let download_url = match &item.download_url {
@@ -232,8 +242,12 @@ async fn download_file_if_needed(
     };
     
     info!("Downloading file: {}", local_temp_path.display());
+    let download_result = if partial_sync {
+        onedrive_client.download_file_partial(download_url, &item.id, file_name).await?
+    } else {
+        onedrive_client.download_file(download_url, &item.id, file_name).await?
+    };
     
-    let download_result = onedrive_client.download_file(download_url, &item.id, file_name).await?;
     
     // Create parent directory if it doesn't exist
     if let Some(parent) = local_temp_path.parent() {

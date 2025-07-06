@@ -58,28 +58,28 @@ impl SyncService {
     /// Initialize the sync service
     pub async fn init(&mut self) -> Result<()> {
         info!("Initializing OneDrive sync service");
-        self.update_cache().await?;
+        self.update_delta().await?;
         info!("OneDrive sync service initialized successfully");
         Ok(())
     }
 
+
+    pub async fn process_delta_items(&mut self) -> Result<()> {
+        let delta_items = self.metadata_manager.get_delta_items_to_process()?;
+        for item in delta_items {
+            self.item_processor.process_item(&item, &self.settings.sync_folders).await?;
+        }
+        Ok(())
+    }
+
     /// Update the local cache with latest OneDrive changes
-    pub async fn update_cache(&mut self) -> Result<()> {
+    pub async fn update_delta(&mut self) -> Result<()> {
         info!("Starting cache update");
         
         // Process delta changes
-        let delta_items = self.delta_processor.get_delta_items().await?;
+        self.delta_processor.get_delta_items_and_update_queue().await?;
         
-        // Process each item
-        for item in delta_items {
-            self.item_processor.process_item(
-                &item,
-                &self.settings.sync_folders,
-            ).await?;
-        }
-        
-        // Flush metadata changes
-        self.metadata_manager.flush()?;
+      
         
         info!("Cache update completed successfully");
         Ok(())

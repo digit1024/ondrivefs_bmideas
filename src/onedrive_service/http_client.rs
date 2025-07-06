@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use log::info;
+use log::debug;
 use reqwest::Client;
 use serde::Serialize;
 
@@ -33,7 +33,7 @@ impl HttpClient {
         T: Serialize + serde::de::DeserializeOwned + std::fmt::Debug,
     {
         let url = self.get_full_url(url)?;
-        info!("Getting url: {}", url);
+        debug!("Getting url: {}", url);
         
         let response = self
             .client
@@ -128,6 +128,17 @@ impl HttpClient {
             .context("Not a success status")?;
 
         Ok(response)
+    }
+
+    /// Get a request builder for custom HTTP requests
+    pub fn request_builder(&self, method: &str, url: &str) -> reqwest::RequestBuilder {
+        match method.to_uppercase().as_str() {
+            "GET" => self.client.get(url),
+            "POST" => self.client.post(url),
+            "PUT" => self.client.put(url),
+            "DELETE" => self.client.delete(url),
+            _ => self.client.get(url), // Default to GET
+        }
     }
 
     /// Upload file content with authorization header

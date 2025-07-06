@@ -23,8 +23,8 @@ pub fn get_local_tmp_path_for_item(
         .as_ref()
         .unwrap()
         .path
-        .as_ref()
-        .unwrap();
+        .as_deref()
+        .unwrap_or(&"");
 
     let local_components = onedrive_path_to_local_components(remote_path_from_parent);
     

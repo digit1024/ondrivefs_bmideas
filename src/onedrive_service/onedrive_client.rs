@@ -10,6 +10,8 @@ use serde_json;
 use urlencoding;
 use std::sync::Arc;
 
+static THUMBNAIL_SIZE: u64 = 4096;
+
 /// OneDrive API client that handles API operations
 /// File system operations are handled by the FileManager trait
 pub struct OneDriveClient {
@@ -28,63 +30,63 @@ impl OneDriveClient {
     /// Get authorization header with valid token
     async fn auth_header(&self) -> Result<String> {
         let token = self.auth.get_valid_token().await?;
-        info!("Token: {}", token);
+        
         Ok(format!("Bearer {}", token))
     }
 
-    /// Download a file by its download URL and return the file data and metadata
-    pub async fn download_file(
-        &self,
-        download_url: &str,
-        onedrive_id: &str,
-        file_name: &str,
-    ) -> Result<DownloadResult> {
-        let response = self.http_client.download_file(download_url).await?;
+    // /// Download a file by its download URL and return the file data and metadata
+    // pub async fn download_file(
+    //     &self,
+    //     download_url: &str,
+    //     onedrive_id: &str,
+    //     file_name: &str,
+    // ) -> Result<DownloadResult> {
+    //     let response = self.http_client.download_file(download_url).await?;
 
-        if !response.status().is_success() {
-            return Err(anyhow!("Failed to download file: {}", response.status()));
-        }
+    //     if !response.status().is_success() {
+    //         return Err(anyhow!("Failed to download file: {}", response.status()));
+    //     }
 
-        // Extract headers before consuming the response
-        let etag = response
-            .headers()
-            .get("etag")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.trim_matches('"').to_string());
+    //     // Extract headers before consuming the response
+    //     let etag = response
+    //         .headers()
+    //         .get("etag")
+    //         .and_then(|v| v.to_str().ok())
+    //         .map(|s| s.trim_matches('"').to_string());
 
-        let content_type = response
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string());
+    //     let content_type = response
+    //         .headers()
+    //         .get("content-type")
+    //         .and_then(|v| v.to_str().ok())
+    //         .map(|s| s.to_string());
 
-        let content_length = response
-            .headers()
-            .get("content-length")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.parse::<u64>().ok());
+    //     let content_length = response
+    //         .headers()
+    //         .get("content-length")
+    //         .and_then(|v| v.to_str().ok())
+    //         .and_then(|s| s.parse::<u64>().ok());
 
-        let last_modified = response
-            .headers()
-            .get("last-modified")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string());
+    //     let last_modified = response
+    //         .headers()
+    //         .get("last-modified")
+    //         .and_then(|v| v.to_str().ok())
+    //         .map(|s| s.to_string());
 
-        let content = response.bytes().await?;
+    //     let content = response.bytes().await?;
 
-        let result = DownloadResult {
-            file_data: content.to_vec(),
-            file_name: file_name.to_string(),
-            onedrive_id: onedrive_id.to_string(),
-            etag,
-            mime_type: content_type,
-            size: content_length,
-            last_modified,
-        };
+    //     let result = DownloadResult {
+    //         file_data: content.to_vec(),
+    //         file_name: file_name.to_string(),
+    //         onedrive_id: onedrive_id.to_string(),
+    //         etag,
+    //         mime_type: content_type,
+    //         size: content_length,
+    //         last_modified,
+    //     };
 
-        info!("Downloaded file data: {} (ID: {})", file_name, onedrive_id);
-        Ok(result)
-    }
+    //     info!("Downloaded file data: {} (ID: {})", file_name, onedrive_id);
+    //     Ok(result)
+    // }
 
     /// Upload a file to OneDrive and return the upload result
     #[allow(dead_code)]
@@ -325,6 +327,107 @@ impl OneDriveClient {
         } else {
             None
         }
+    }
+
+    /// Download file with optional range and thumbnail support
+    /// Download file with optional range and thumbnail support
+    pub async fn download_file_with_options(
+        &self,
+        download_url: &str,
+        item_id: &str,
+        filename: &str,
+        range: Option<(u64, u64)>,  // (start, end) bytes
+       
+    ) -> Result<DownloadResult> {
+        // Build the request using the request builder
+        let mut request = self.http_client.request_builder("GET", download_url);
+        
+        
+        
+        // Add Range header if specified
+        if let Some((start, end)) = range {
+            let range_header = format!("bytes={}-{}", start, end);
+            request = request.header("Range", range_header);
+        }
+        
+        let response = request.send().await
+            .context("Failed to send download request")?;
+        
+        if !response.status().is_success() {
+            return Err(anyhow!("Download failed with status: {}", response.status()));
+        }
+        
+        // Extract headers before consuming the response
+        let etag = response
+            .headers()
+            .get("etag")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.trim_matches('"').to_string());
+
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
+        let content_length = response
+            .headers()
+            .get("content-length")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok());
+
+        let last_modified = response
+            .headers()
+            .get("last-modified")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
+        let file_data = response.bytes().await
+            .context("Failed to read response bytes")?;
+        
+        Ok(DownloadResult {
+            file_data: file_data.to_vec(),
+            file_name: filename.to_string(),
+            onedrive_id: item_id.to_string(),
+            etag,
+            mime_type: content_type,
+            size: content_length,
+            last_modified,
+        })
+    }
+
+    /// Download partial file (first chunk)
+    pub async fn download_file_partial(
+        &self,
+        download_url: &str,
+        item_id: &str,
+        filename: &str,
+        
+    ) -> Result<DownloadResult> {
+        
+        
+        self.download_file_with_options(
+            download_url,
+            item_id,
+            filename,
+            Some((0, THUMBNAIL_SIZE - 1)),  
+        ).await
+    }
+
+    /// Download full file (existing method, updated to use new function)
+    pub async fn download_file(
+        &self,
+        download_url: &str,
+        item_id: &str,
+        filename: &str,
+    ) -> Result<DownloadResult> {
+        self.download_file_with_options(
+            download_url,
+            item_id,
+            filename,
+            None,  // no range = full download
+            
+        ).await
     }
 }
 

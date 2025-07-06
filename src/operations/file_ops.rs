@@ -23,7 +23,7 @@ pub async fn create_or_update_item(
     temp_dir: &Path,
 ) -> Result<FileOpResult> {
     let cache_path = get_local_meta_cache_path_for_item(item, cache_dir);
-    let temp_path = get_local_tmp_path_for_item(item, temp_dir);
+    
     
     // Create parent directories
     if let Some(parent) = cache_path.parent() {
@@ -31,11 +31,7 @@ pub async fn create_or_update_item(
             .context("Failed to create cache parent directory")?;
     }
     
-    if let Some(parent) = temp_path.parent() {
-        std::fs::create_dir_all(parent)
-            .context("Failed to create temp parent directory")?;
-    }
-
+    
     // Serialize item metadata
     let object_json = serde_json::to_string(item)
         .context("Failed to serialize DriveItem to JSON")?;
@@ -192,7 +188,7 @@ pub async fn save_downloaded_file(
 }
 
 /// Check if item should be synchronized based on sync folders configuration
-pub fn should_sync_item(
+pub fn should_download_item(
     item_path: &Path,
     cache_dir: &Path,
     sync_folders: &[String],

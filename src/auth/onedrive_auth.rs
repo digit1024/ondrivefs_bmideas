@@ -78,6 +78,7 @@ impl OneDriveAuth {
             .append_pair("response_mode", "query");
 
         println!("Opening browser for authentication...");
+        println!("auth_url: {}", auth_url.as_str());
         webbrowser::open(auth_url.as_str())?;
 
         // Start local server to receive callback

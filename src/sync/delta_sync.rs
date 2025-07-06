@@ -2,7 +2,6 @@
 
 use crate::metadata_manager_for_files::MetadataManagerForFiles;
 use crate::onedrive_service::onedrive_client::OneDriveClient;
-use crate::onedrive_service::onedrive_models::DriveItem;
 use anyhow::{Context, Result};
 use log::info;
 
@@ -25,9 +24,9 @@ impl DeltaSyncProcessor {
     }
 
     /// Get all delta items from OneDrive
-    pub async fn get_delta_items(&self) -> Result<Vec<DriveItem>> {
+    pub async fn get_delta_items_and_update_queue(&self) -> Result<()> {
         let delta_url = self.build_delta_url()?;
-        let mut all_items = Vec::new();
+        
         
         let mut delta_response = self
             .client
@@ -38,14 +37,21 @@ impl DeltaSyncProcessor {
         info!("Processing delta changes");
 
         loop {
-            let items = std::mem::take(&mut delta_response.value);
-            all_items.extend(items);
-
+            let items = delta_response.value;
+            let mut c= 0;
+            for item in items {
+                self.metadata_manager.store_delta_items_to_process(&item);
+                c+=1;
+            }
+            self.metadata_manager.flush()?;
+            info!("New drive items added to queue for processing. NUmber of Items: {}", c);
+            
             if let Some(next_link) = &delta_response.next_link {
                 delta_response = self
                     .client
                     .get_delta_by_url(next_link)
                     .await?;
+
             } else {
                 // Store the delta token for next sync
                 if let Some(delta_link) = &delta_response.delta_link {
@@ -56,9 +62,9 @@ impl DeltaSyncProcessor {
                 break;
             }
         }
-
-        info!("Processed {} delta items", all_items.len());
-        Ok(all_items)
+        self.metadata_manager.flush()?;
+        
+        Ok(())
     }
 
     /// Build the delta URL based on stored token
@@ -81,6 +87,10 @@ impl DeltaSyncProcessor {
 
     /// Get the initial delta URL for first sync
     fn get_initial_delta_url(&self) -> String {
-        "/me/drive/root/delta?select=id,name,eTag,lastModifiedDateTime,size,folder,file,@microsoft.graph.downloadUrl,deleted,parentReference".to_string()
+        "/me/drive/root/delta?select=id,name,eTag,lastModifiedDateTime,size,folder,file,@microsoft.graph.downloadUrl,deleted,parentReference&top=5000".to_string()
     }
+
+    
+    
+    
 }

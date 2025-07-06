@@ -5,6 +5,8 @@ use sled::{Db, Tree};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
+use crate::onedrive_service::onedrive_models::DriveItem;
+
 /// Simplified metadata record that only stores local path as value
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FileMetadata {
@@ -34,6 +36,9 @@ pub struct MetadataManagerForFiles {
     changed_queue: Tree,
     onedrive_id_to_local_path: Tree,
     inode_to_local_path: Tree,
+    delta_items_to_process: Tree,
+
+    
 }
 static MATADATAMANAGER: OnceLock<MetadataManagerForFiles> = OnceLock::new();
 
@@ -62,13 +67,15 @@ impl MetadataManagerForFiles {
         let folder_deltas = db.open_tree("folder_deltas")?;
         let changed_queue = db.open_tree("changed_queue")?;
         let inode_to_local_path = db.open_tree("inode_to_local_path")?;
-
+        let delta_items_to_process = db.open_tree("delta_items_to_process")?;
+        
         let manager = Self {
             db,
             folder_deltas,
             changed_queue,
             onedrive_id_to_local_path,
             inode_to_local_path,
+            delta_items_to_process,
         };
 
         info!(
@@ -201,6 +208,35 @@ impl MetadataManagerForFiles {
     pub fn remove_inode_to_local_path(&self, inode: u64) -> Result<()> {
         self.inode_to_local_path
             .remove(inode.to_le_bytes().as_slice())?;
+        Ok(())
+    }
+
+    pub fn store_delta_items_to_process(&self, delta_item: &DriveItem) -> Result<()> {
+        let json_value = serde_json::to_string(&delta_item)?;
+        self.delta_items_to_process.insert(delta_item.id.as_bytes(), json_value.as_bytes())?;
+        debug!("Stored delta item to process: {}", delta_item.id);
+        Ok(())
+    }
+
+    pub fn get_delta_items_to_process(&self) -> Result<Vec<DriveItem>> {
+        let mut delta_items: Vec<DriveItem> = Vec::new();
+        for result in self.delta_items_to_process.iter() {
+            let (key, value) = result?;
+            let json_str = String::from_utf8(value.to_vec())?;
+            let delta_item: DriveItem = serde_json::from_str(&json_str)?;
+            delta_items.push(delta_item);
+        }
+        Ok(delta_items)
+    }
+    
+
+    pub fn remove_delta_items_to_process(&self, id: &str) -> Result<()> {
+        self.delta_items_to_process.remove(id.as_bytes())?;
+        Ok(())
+    }
+
+    pub fn clear_delta_items_to_process(&self) -> Result<()> {
+        self.delta_items_to_process.clear()?;
         Ok(())
     }
 }
