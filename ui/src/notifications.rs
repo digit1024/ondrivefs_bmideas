@@ -23,6 +23,7 @@ impl NotificationUrgency {
 }
 
 /// Desktop notification sender
+#[derive(Debug, Clone)]
 pub struct NotificationSender {
     connection: Connection,
 }
@@ -69,7 +70,7 @@ impl NotificationSender {
         let mut dbus_hints = std::collections::HashMap::new();
         for (key, value) in hints_map {
             
-            dbus_hints.insert(key, value);
+            dbus_hints.insert(key, Value::Str(value.into()));
         }
 
         proxy

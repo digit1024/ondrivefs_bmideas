@@ -4,9 +4,9 @@ use crate::config::Config;
 use crate::fl;
 use cosmic::app::context_drawer;
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
-use cosmic::iced::alignment::{Horizontal, Vertical};
+
 use cosmic::iced::{Alignment, Length, Subscription};
-use crate::notifications::NotificationSender;
+use crate::notifications::{NotificationSender, NotificationUrgency};
 
 use cosmic::prelude::*;
 use cosmic::widget::{self, icon, menu, nav_bar};
@@ -45,8 +45,8 @@ pub struct AppModel {
     mount_point: String,
     /// Error message if any
     error_message: Option<String>,
-    
-    
+    /// Notification sender for desktop notifications
+    notification_sender: Option<NotificationSender>,
 }
 
 /// Messages emitted by the application and its widgets.
@@ -65,6 +65,9 @@ pub enum Message {
     AddSyncFolder,
     RemoveSyncFolder(String),
     DisplayNotification,
+    
+    // Notification system
+    NotificationSenderInitialized(Result<NotificationSender, String>),
 }
 
 /// Create a COSMIC application from the app model
@@ -133,13 +136,22 @@ impl cosmic::Application for AppModel {
             last_sync_time: "Never".to_string(),
             mount_point: "/tmp/onedrive".to_string(),
             error_message: None,
-            
+            notification_sender: None,
         };
 
-        // Create a startup command that sets the window title
-        let command = app.update_title();
+        // Create startup commands: set window title and initialize notification sender
+        let title_command = app.update_title();
+        let notification_command = Task::perform(
+            async move {
+                match NotificationSender::new().await {
+                    Ok(sender) => Message::NotificationSenderInitialized(Ok(sender)),
+                    Err(e) => Message::NotificationSenderInitialized(Err(e.to_string())),
+                }
+            },
+            |result| cosmic::Action::App(result),
+        );
 
-        (app, command)
+        (app, Task::batch(vec![title_command, notification_command]))
     }
 
     /// Elements to pack at the start of the header bar.
@@ -257,7 +269,28 @@ impl cosmic::Application for AppModel {
             }
 
             Message::DisplayNotification => {
-                
+                if let Some(sender) = &self.notification_sender {
+                    let sender_clone = sender.clone();
+                    return Task::perform(
+                        async move {
+                            match sender_clone.send_simple_notification("summary", "body", NotificationUrgency::Low).await {
+                                Ok(()) => Message::RefreshStatus, // Return a message to indicate completion
+                                Err(e) => {
+                                    eprintln!("Failed to send notification: {}", e);
+                                    Message::RefreshStatus
+                                }
+                            }
+                        },
+                        |result| cosmic::Action::App(result),
+                    );
+                }
+            }
+
+            Message::NotificationSenderInitialized(result) => {
+                match result {
+                    Ok(sender) => self.notification_sender = Some(sender),
+                    Err(e) => eprintln!("Failed to initialize notification sender: {}", e),
+                }
             }
         }
         Task::none()
