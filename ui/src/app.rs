@@ -6,10 +6,13 @@ use cosmic::app::context_drawer;
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
 use cosmic::iced::alignment::{Horizontal, Vertical};
 use cosmic::iced::{Alignment, Length, Subscription};
+use crate::notifications::NotificationSender;
+
 use cosmic::prelude::*;
 use cosmic::widget::{self, icon, menu, nav_bar};
+use cosmic::widget::button;
+
 use cosmic::{cosmic_theme, theme};
-use futures_util::SinkExt;
 use std::collections::HashMap;
 
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
@@ -26,18 +29,42 @@ pub struct AppModel {
     nav: nav_bar::Model,
     /// Key bindings for the application's menu bar.
     key_binds: HashMap<menu::KeyBind, MenuAction>,
-    // Configuration data that persists between application runs.
+    /// Configuration data that persists between application runs.
     config: Config,
+    /// Current sync status
+    sync_status: String,
+    /// List of sync folders
+    sync_folders: Vec<String>,
+    /// Sync progress (current, total)
+    sync_progress: (u32, u32),
+    /// Download queue size
+    download_queue_size: u32,
+    /// Last sync time
+    last_sync_time: String,
+    /// Mount point
+    mount_point: String,
+    /// Error message if any
+    error_message: Option<String>,
+    
+    
 }
 
 /// Messages emitted by the application and its widgets.
 #[derive(Debug, Clone)]
 pub enum Message {
+    // Navigation and UI
     OpenRepositoryUrl,
-    SubscriptionChannel,
     ToggleContextPage(ContextPage),
     UpdateConfig(Config),
     LaunchUrl(String),
+    
+    // Simple UI actions
+    PauseSync,
+    ResumeSync,
+    RefreshStatus,
+    AddSyncFolder,
+    RemoveSyncFolder(String),
+    DisplayNotification,
 }
 
 /// Create a COSMIC application from the app model
@@ -69,22 +96,23 @@ impl cosmic::Application for AppModel {
     ) -> (Self, Task<cosmic::Action<Self::Message>>) {
         // Create a nav bar with three page items.
         let mut nav = nav_bar::Model::default();
+        
 
         nav.insert()
-            .text(fl!("page-id", num = 1))
-            .data::<Page>(Page::Page1)
-            .icon(icon::from_name("applications-science-symbolic"))
+            .text("Status")
+            .data::<Page>(Page::Status)
+            .icon(icon::from_name("applications-system-symbolic"))
             .activate();
 
         nav.insert()
-            .text(fl!("page-id", num = 2))
-            .data::<Page>(Page::Page2)
-            .icon(icon::from_name("applications-system-symbolic"));
+            .text("Folders")
+            .data::<Page>(Page::Folders)
+            .icon(icon::from_name("folder-symbolic"));
 
         nav.insert()
-            .text(fl!("page-id", num = 3))
-            .data::<Page>(Page::Page3)
-            .icon(icon::from_name("applications-games-symbolic"));
+            .text("Settings")
+            .data::<Page>(Page::Settings)
+            .icon(icon::from_name("applications-science-symbolic"));
 
         // Construct the app model with the runtime's core.
         let mut app = AppModel {
@@ -92,22 +120,23 @@ impl cosmic::Application for AppModel {
             context_page: ContextPage::default(),
             nav,
             key_binds: HashMap::new(),
-            // Optional configuration file for an application.
             config: cosmic_config::Config::new(Self::APP_ID, Config::VERSION)
                 .map(|context| match Config::get_entry(&context) {
                     Ok(config) => config,
-                    Err((_errors, config)) => {
-                        // for why in errors {
-                        //     tracing::error!(%why, "error loading app config");
-                        // }
-
-                        config
-                    }
+                    Err((_errors, config)) => config
                 })
                 .unwrap_or_default(),
+            sync_status: "Unknown".to_string(),
+            sync_folders: vec!["/home/user/Documents".to_string(), "/home/user/Pictures".to_string()],
+            sync_progress: (0, 0),
+            download_queue_size: 0,
+            last_sync_time: "Never".to_string(),
+            mount_point: "/tmp/onedrive".to_string(),
+            error_message: None,
+            
         };
 
-        // Create a startup command that sets the window title.
+        // Create a startup command that sets the window title
         let command = app.update_title();
 
         (app, command)
@@ -147,70 +176,43 @@ impl cosmic::Application for AppModel {
     }
 
     /// Describes the interface based on the current state of the application model.
-    ///
-    /// Application events will be processed through the view. Any messages emitted by
-    /// events received by widgets will be passed to the update method.
     fn view(&self) -> Element<Self::Message> {
-        widget::text::title1(fl!("welcome"))
-            .apply(widget::container)
+        let page = self.nav.active_data::<Page>().unwrap_or(&Page::Status);
+        
+        let content = match page {
+            Page::Status => self.status_page(),
+            Page::Folders => self.folders_page(),
+            Page::Settings => self.settings_page(),
+        };
+
+        widget::container(content)
             .width(Length::Fill)
             .height(Length::Fill)
-            .align_x(Horizontal::Center)
-            .align_y(Vertical::Center)
+            .padding(20)
             .into()
     }
 
     /// Register subscriptions for this application.
-    ///
-    /// Subscriptions are long-running async tasks running in the background which
-    /// emit messages to the application through a channel. They are started at the
-    /// beginning of the application, and persist through its lifetime.
     fn subscription(&self) -> Subscription<Self::Message> {
-        struct MySubscription;
-
         Subscription::batch(vec![
-            // Create a subscription which emits updates through a channel.
-            Subscription::run_with_id(
-                std::any::TypeId::of::<MySubscription>(),
-                cosmic::iced::stream::channel(4, move |mut channel| async move {
-                    _ = channel.send(Message::SubscriptionChannel).await;
-
-                    futures_util::future::pending().await
-                }),
-            ),
             // Watch for application configuration changes.
             self.core()
                 .watch_config::<Config>(Self::APP_ID)
-                .map(|update| {
-                    // for why in update.errors {
-                    //     tracing::error!(?why, "app config error");
-                    // }
-
-                    Message::UpdateConfig(update.config)
-                }),
+                .map(|update| Message::UpdateConfig(update.config)),
         ])
     }
 
     /// Handles messages emitted by the application and its widgets.
-    ///
-    /// Tasks may be returned for asynchronous execution of code in the background
-    /// on the application's async runtime.
     fn update(&mut self, message: Self::Message) -> Task<cosmic::Action<Self::Message>> {
         match message {
             Message::OpenRepositoryUrl => {
                 _ = open::that_detached(REPOSITORY);
             }
 
-            Message::SubscriptionChannel => {
-                // For example purposes only.
-            }
-
             Message::ToggleContextPage(context_page) => {
                 if self.context_page == context_page {
-                    // Close the context drawer if the toggled context page is the same.
                     self.core.window.show_context = !self.core.window.show_context;
                 } else {
-                    // Open the context drawer to display the requested context page.
                     self.context_page = context_page;
                     self.core.window.show_context = true;
                 }
@@ -226,26 +228,155 @@ impl cosmic::Application for AppModel {
                     eprintln!("failed to open {url:?}: {err}");
                 }
             },
+
+            // Simple UI actions
+            Message::PauseSync => {
+                self.sync_status = "Paused".to_string();
+                self.error_message = None;
+            }
+
+            Message::ResumeSync => {
+                self.sync_status = "Running".to_string();
+                self.error_message = None;
+            }
+
+            Message::RefreshStatus => {
+                self.sync_status = "Running".to_string();
+                self.sync_progress = (5, 10);
+                self.download_queue_size = 3;
+                self.last_sync_time = "2024-01-15 14:30:00".to_string();
+                self.error_message = None;
+            }
+
+            Message::AddSyncFolder => {
+                self.sync_folders.push("/home/user/NewFolder".to_string());
+            }
+
+            Message::RemoveSyncFolder(folder) => {
+                self.sync_folders.retain(|f| f != &folder);
+            }
+
+            Message::DisplayNotification => {
+                
+            }
         }
         Task::none()
     }
 
     /// Called when a nav item is selected.
     fn on_nav_select(&mut self, id: nav_bar::Id) -> Task<cosmic::Action<Self::Message>> {
-        // Activate the page in the model.
         self.nav.activate(id);
-
         self.update_title()
     }
 }
 
 impl AppModel {
+    /// Status page showing sync information
+    fn status_page(&self) -> Element<Message> {
+        let cosmic_theme::Spacing { space_s, space_m, .. } = theme::active().cosmic().spacing;
+
+        let status_text = widget::text::title2(&self.sync_status);
+        
+        let progress_text = if self.sync_progress.1 > 0 {
+            format!("Progress: {}/{} files", self.sync_progress.0, self.sync_progress.1)
+        } else {
+            "No sync in progress".to_string()
+        };
+        
+        let queue_text = format!("Download queue: {} files", self.download_queue_size);
+        let last_sync_text = format!("Last sync: {}", self.last_sync_time);
+
+        let control_buttons = widget::row()
+            .push(button::suggested("Pause")
+                    .on_press(Message::PauseSync)
+            )
+            .push(
+                widget::button::suggested("Resume")
+                    .on_press(Message::ResumeSync)
+            )
+            .push(
+                widget::button::suggested("Refresh")
+                    .on_press(Message::RefreshStatus)
+            ).push(button::suggested("Display Notification")
+                    .on_press(Message::DisplayNotification)
+            )
+            .spacing(space_s);
+
+        let error_widget = if let Some(error) = &self.error_message {
+            widget::text::body(format!("Error: {}", error))
+        } else {
+            widget::text::body("")
+        };
+
+        widget::column()
+            .push(status_text)
+            .push(widget::text::body(progress_text))
+            .push(widget::text::body(queue_text))
+            .push(widget::text::body(last_sync_text))
+            .push(control_buttons)
+            .push(error_widget)
+            .spacing(space_m)
+            .align_x(Alignment::Center)
+            .into()
+    }
+
+    /// Folders page showing sync folders
+    fn folders_page(&self) -> Element<Message> {
+        let cosmic_theme::Spacing { space_s, space_m, .. } = theme::active().cosmic().spacing;
+
+        let title = widget::text::title2("Sync Folders");
+        
+        let folders_list :Element<Message>= if self.sync_folders.is_empty() {
+            widget::text::body("No sync folders configured").into()  // Convert to Element
+        } else {
+            let mut column = widget::column().spacing(space_s);
+            
+            for folder in &self.sync_folders {
+                let row = widget::row()
+                    .push(widget::text::body(folder))
+                    .push(
+                        widget::button::destructive("Remove")
+                            .on_press(Message::RemoveSyncFolder(folder.clone()))
+                    )
+                    .spacing(space_s);
+                column = column.push(row);
+            }
+            
+            column.into()  // Both branches now return Element
+        };
+
+        let add_button = widget::button::suggested("Add Folder")
+            .on_press(Message::AddSyncFolder);
+
+        widget::column()
+            .push(title)
+            .push(folders_list)
+            .push(add_button)
+            .spacing(space_m)
+            .align_x(Alignment::Center)
+            .into()
+    }
+
+    /// Settings page
+    fn settings_page(&self) -> Element<Message> {
+        let cosmic_theme::Spacing { space_m, .. } = theme::active().cosmic().spacing;
+
+        let title = widget::text::title2("Settings");
+        let mount_point_text = format!("Mount point: {}", self.mount_point);
+
+        widget::column()
+            .push(title)
+            .push(widget::text::body(mount_point_text))
+            .spacing(space_m)
+            .align_x(Alignment::Center)
+            .into()
+    }
+
     /// The about page for this app.
     pub fn about(&self) -> Element<Message> {
         let cosmic_theme::Spacing { space_xxs, .. } = theme::active().cosmic().spacing;
 
         let icon = widget::svg(widget::svg::Handle::from_memory(APP_ICON));
-
         let title = widget::text::title3(fl!("app-title"));
 
         let hash = env!("VERGEN_GIT_SHA");
@@ -292,10 +423,11 @@ impl AppModel {
 }
 
 /// The page to display in the application.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
-    Page1,
-    Page2,
-    Page3,
+    Status,
+    Folders,
+    Settings,
 }
 
 /// The context page to display in the context drawer.
