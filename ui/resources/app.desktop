@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Onedrive Sync Ui
+Comment=onedrive-sync UI for POP OS Cosmic 
+Type=Application
+Icon=com.github.bmideas.onedrive-sync
+Exec=onedrive-sync-ui %F
+Terminal=false
+StartupNotify=true
+Categories=COSMIC
+Keywords=COSMIC
+MimeType=

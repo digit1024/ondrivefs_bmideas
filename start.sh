@@ -1,3 +1,3 @@
 #!/bin/bash
 
-RUST_LOG=INFO cargo run -- --mountpoint ~/OneDrive 
+RUST_LOG=INFO cargo  run -p onedrive-sync-daemon -- --mountpoint ~/OneDrive 
