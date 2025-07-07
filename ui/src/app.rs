@@ -307,7 +307,7 @@ impl AppModel {
     /// Status page showing sync information
     fn status_page(&self) -> Element<Message> {
         let cosmic_theme::Spacing { space_s, space_m, .. } = theme::active().cosmic().spacing;
-
+        
         let status_text = widget::text::title2(&self.sync_status);
         
         let progress_text = if self.sync_progress.1 > 0 {
@@ -340,8 +340,9 @@ impl AppModel {
         } else {
             widget::text::body("")
         };
-
-        widget::column()
+        
+        
+        let column =widget::column()
             .push(status_text)
             .push(widget::text::body(progress_text))
             .push(widget::text::body(queue_text))
@@ -349,8 +350,13 @@ impl AppModel {
             .push(control_buttons)
             .push(error_widget)
             .spacing(space_m)
-            .align_x(Alignment::Center)
-            .into()
+            .align_x(Alignment::Center);
+        widget::container(column)
+            .padding(20)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(800)
+            .center_y(800).into()
     }
 
     /// Folders page showing sync folders
