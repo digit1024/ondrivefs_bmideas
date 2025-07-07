@@ -22,6 +22,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use time::OffsetDateTime;
 
 const TTL: Duration = Duration::from_secs(1);
+const ONEDRIVE_REMOTE_FILE_SUFFIX: &str = ".onedriveremotefile";
 
 /// FUSE filesystem implementation that reads from OneDrive cache
 pub struct OpenDriveFuse {
@@ -82,6 +83,14 @@ impl ToFuseAttr for DriveItem {
         };
         attr
     }
+}
+fn is_surfixed(file_name: &str) -> bool {
+    file_name.ends_with(ONEDRIVE_REMOTE_FILE_SUFFIX)
+}
+fn remove_surfix(file_path: &PathBuf) -> PathBuf {
+    let path_str = file_path.to_str().unwrap();
+    let desurfixed_path_str = path_str.trim_end_matches(ONEDRIVE_REMOTE_FILE_SUFFIX);
+    PathBuf::from(desurfixed_path_str)
 }
 
 impl OpenDriveFuse {
@@ -185,6 +194,7 @@ impl OpenDriveFuse {
                 "get_file_attr_from_cache - checking file at: {:?}",
                 cache_path
             );
+            let cache_path = remove_surfix(&cache_path);
             if let Some(drive_item) = self.read_drive_item_from_cache(&cache_path) {
                 let mut attr = drive_item.to_fuse_attr();
                 attr.ino = ino;
@@ -216,17 +226,24 @@ impl OpenDriveFuse {
                         if file_name == ".dir.json" {
                             continue;
                         }
+                        let temp_path = self.get_temp_path_for_virtual_path(&virtual_path);
+                        let surfix: &'static str = if(!temp_path.exists()){
+                            ONEDRIVE_REMOTE_FILE_SUFFIX
+                        }else{
+                            ""
+                        };
+                        let file_name = file_name.clone().to_string() ;
 
                         // Construct virtual path for this entry
                         let child_virtual_path = if virtual_path == Path::new("/") {
-                            PathBuf::from("/").join(&file_name)
+                            PathBuf::from("/").join(file_name.as_str())
                         } else {
-                            virtual_path.join(&file_name)
+                            virtual_path.join(file_name.as_str())
                         };
 
                         // Get attributes for this entry
                         if let Some(attr) = self.get_file_attr_from_cache(&child_virtual_path) {
-                            entries.push((file_name, attr));
+                            entries.push((file_name+ surfix, attr));
                         }
                     }
                 }
@@ -295,258 +312,11 @@ impl OpenDriveFuse {
             .clone()
     }
 
-    /// Download with lock protection
-    fn download_with_lock(
-        &self,
-        virtual_path: &Path,
+    
 
-        download_fn: impl FnOnce() -> Result<(), libc::c_int>,
-    ) -> Result<(), libc::c_int> {
-        let lock = self.get_download_lock(virtual_path);
-        let _guard = lock.lock().unwrap();
 
-        ///     
-        // let temp_path = self.file_manager.virtual_path_to_downloaded_path(virtual_path);
-        // // Check again after acquiring lock (in case another process already downloaded)
-        // if self.file_exists_in_temp(virtual_path) {
-        //     let file_size = std::fs::metadata(temp_path).unwrap().len();
-        //     if file_size >= size_to_download as u64 {
-        //         info!("File already downloaded by another process: {:?}", virtual_path);
-        //         return Ok(());
-        //     }
-        // }
-        download_fn()
-    }
 
-    /// Handle missing file with smart download strategy
-    fn handle_missing_file(
-        &self,
-        virtual_path: &Path,
-        offset: i64,
-        size: u32,
-    ) -> Result<(), libc::c_int> {
-        let cache_path = self.virtual_path_to_cache_path(virtual_path);
-        let drive_item = match self.read_drive_item_from_cache(&cache_path) {
-            Some(item) => item,
-            None => {
-                error!("No DriveItem found in cache for path: {:?}", virtual_path);
-                return Err(ENOENT);
-            }
-        };
 
-        let actual_file_size = drive_item.size.unwrap_or(0);
-
-        info!(
-            "Handling missing file: {:?}, offset={}, size={}, file_size={}",
-            virtual_path, offset, size, actual_file_size
-        );
-
-        // Decision logic
-        if offset == 0 && size <= 4096 && actual_file_size > 4096 {
-            // Try partial download first
-            info!("Attempting partial download for {:?}", virtual_path);
-            match self.download_partial_file(&drive_item) {
-                Ok(_) => {
-                    info!("Partial download successful for {:?}", virtual_path);
-                    Ok(())
-                }
-                Err(e) => {
-                    info!(
-                        "Partial download failed for {:?}, falling back to full download: {}",
-                        virtual_path, e
-                    );
-                    self.download_full_file(&drive_item)
-                }
-            }
-        } else {
-            // Download full file
-            info!("Downloading full file for {:?}", virtual_path);
-            self.download_full_file(&drive_item)
-        }
-    }
-
-    /// Handle partial file (file exists but might be incomplete)
-    fn handle_partial_file(
-        &self,
-        virtual_path: &Path,
-        drive_item: &DriveItem,
-        offset: i64,
-        size: u32,
-        cached_size: u64,
-    ) -> Result<(), libc::c_int> {
-        let actual_file_size = drive_item.size.unwrap_or(0);
-
-        info!(
-            "Handling partial file: {:?}, offset={}, size={}, cached_size={}, actual_size={}",
-            virtual_path, offset, size, cached_size, actual_file_size
-        );
-
-        // Check if requested range fits in cached data
-        let requested_end = offset + size as i64;
-        let cached_end = cached_size as i64;
-
-        if requested_end <= cached_end {
-            info!("Requested range already in cache for {:?}", virtual_path);
-            return Ok(()); // We have what we need
-        }
-
-        // Requested range extends beyond cache - download full file
-        info!(
-            "Requested range extends beyond cache, downloading full file for {:?}",
-            virtual_path
-        );
-        self.download_full_file(drive_item)
-    }
-
-    /// Download partial file (first chunk)
-    fn download_partial_file(&self, drive_item: &DriveItem) -> Result<(), libc::c_int> {
-        let virtual_path = self.get_virtual_path_from_drive_item(drive_item)?;
-        let temp_path = self.get_temp_path_for_virtual_path(&virtual_path);
-
-        // Get fresh download URL
-        let temp_inode = match self
-            .runtime_handle
-            .block_on(async { self.onedrive_client.get_item_by_id(&drive_item.id).await })
-        {
-            Ok(item) => item,
-            Err(e) => {
-                error!("Failed to get fresh download URL: {}", e);
-                return Err(libc::EIO);
-            }
-        };
-
-        let download_url = match temp_inode.download_url {
-            Some(url) => url,
-            None => {
-                error!("No download URL for file: {:?}", virtual_path);
-                return Err(ENOENT);
-            }
-        };
-
-        let file_name = match drive_item.name {
-            Some(ref name) => name.clone(),
-            None => {
-                error!("No file name for file: {:?}", virtual_path);
-                return Err(ENOENT);
-            }
-        };
-
-        // Download partial file
-        let download_result = match self.runtime_handle.block_on(async {
-            self.onedrive_client
-                .download_file_partial(&download_url, &drive_item.id, &file_name)
-                .await
-        }) {
-            Ok(result) => result,
-            Err(e) => {
-                error!("Failed to download partial file {:?}: {}", virtual_path, e);
-                return Err(libc::EIO);
-            }
-        };
-
-        // Create parent directory if it doesn't exist
-        if let Some(parent) = temp_path.parent() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
-                error!(
-                    "Failed to create parent directory for {}: {}",
-                    temp_path.display(),
-                    e
-                );
-                return Err(libc::EIO);
-            }
-        }
-
-        // Save the downloaded partial file
-        match std::fs::write(&temp_path, &download_result.file_data) {
-            Ok(_) => {
-                info!(
-                    "Successfully downloaded partial file: {} ({} bytes)",
-                    temp_path.display(),
-                    download_result.file_data.len()
-                );
-                Ok(())
-            }
-            Err(e) => {
-                error!("Failed to save partial file {}: {}", temp_path.display(), e);
-                Err(libc::EIO)
-            }
-        }
-    }
-
-    /// Download full file (existing logic, updated)
-    fn download_full_file(&self, drive_item: &DriveItem) -> Result<(), libc::c_int> {
-        let virtual_path = self.get_virtual_path_from_drive_item(drive_item)?;
-        let temp_path = self.get_temp_path_for_virtual_path(&virtual_path);
-
-        // Get fresh download URL
-        let temp_inode = match self
-            .runtime_handle
-            .block_on(async { self.onedrive_client.get_item_by_id(&drive_item.id).await })
-        {
-            Ok(item) => item,
-            Err(e) => {
-                error!("Failed to get fresh download URL: {}", e);
-                return Err(libc::EIO);
-            }
-        };
-
-        let download_url = match temp_inode.download_url {
-            Some(url) => url,
-            None => {
-                error!("No download URL for file: {:?}", virtual_path);
-                return Err(ENOENT);
-            }
-        };
-
-        let file_name = match drive_item.name {
-            Some(ref name) => name.clone(),
-            None => {
-                error!("No file name for file: {:?}", virtual_path);
-                return Err(ENOENT);
-            }
-        };
-
-        // Download full file
-        let download_result = match self.runtime_handle.block_on(async {
-            self.onedrive_client
-                .download_file(&download_url, &drive_item.id, &file_name)
-                .await
-        }) {
-            Ok(result) => result,
-            Err(e) => {
-                error!("Failed to download full file {:?}: {}", virtual_path, e);
-                return Err(libc::EIO);
-            }
-        };
-
-        // Create parent directory if it doesn't exist
-        if let Some(parent) = temp_path.parent() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
-                error!(
-                    "Failed to create parent directory for {}: {}",
-                    temp_path.display(),
-                    e
-                );
-                return Err(libc::EIO);
-            }
-        }
-
-        // Save the downloaded file (overwrites any partial file)
-        match std::fs::write(&temp_path, &download_result.file_data) {
-            Ok(_) => {
-                info!(
-                    "Successfully downloaded full file: {} ({} bytes)",
-                    temp_path.display(),
-                    download_result.file_data.len()
-                );
-                Ok(())
-            }
-            Err(e) => {
-                error!("Failed to save full file {}: {}", temp_path.display(), e);
-                Err(libc::EIO)
-            }
-        }
-    }
 
     /// Helper: Get virtual path from DriveItem
     fn get_virtual_path_from_drive_item(
@@ -558,51 +328,8 @@ impl OpenDriveFuse {
         Ok(PathBuf::from("/").join(name))
     }
 
-    /// Ensure file is downloaded (async version)
-    async fn ensure_file_downloaded_async(
-        file_manager: DefaultFileManager,
-        onedrive_client: OneDriveClient,
-        virtual_path: PathBuf,
-    ) -> Result<(), libc::c_int> {
-        let mut temp_fuse = OpenDriveFuse::new(
-            file_manager,
-            onedrive_client,
-            tokio::runtime::Handle::current(),
-        );
-        temp_fuse.ensure_file_downloaded(&virtual_path).await
-    }
 
-    /// Ensure file is downloaded (original method - keep for compatibility)
-    async fn ensure_file_downloaded(&mut self, virtual_path: &Path) -> Result<(), libc::c_int> {
-        // Skip if it's a directory
-        if virtual_path == Path::new("/") {
-            return Ok(());
-        }
 
-        // Check if file already exists in temp
-        if self.file_exists_in_temp(virtual_path) {
-            return Ok(());
-        }
-
-        // Get the DriveItem from cache to get download URL
-        let cache_path = self.virtual_path_to_cache_path(virtual_path);
-        let drive_item = match self.read_drive_item_from_cache(&cache_path) {
-            Some(item) => item,
-            None => {
-                error!("No DriveItem found in cache for path: {:?}", virtual_path);
-                return Err(ENOENT);
-            }
-        };
-
-        // Check if it's a file and has a download URL
-        if drive_item.file.is_none() {
-            // It's a directory, no need to download
-            return Ok(());
-        }
-
-        // Download the full file (use the new implementation)
-        self.download_full_file(&drive_item)
-    }
 
     fn open(&mut self, _req: &Request<'_>, ino: u64, flags: i32, reply: ReplyOpen) {
         debug!("OpenDriveFuse: open ino={}, flags={}", ino, flags);
@@ -623,57 +350,7 @@ impl OpenDriveFuse {
                     .cache_path_to_virtual_path(Path::new(&cache_path));
 
                 // Check if it's a file (not a directory)
-                if let Some(attr) = self.get_file_attr_from_cache(&virtual_path) {
-                    if attr.kind == FileType::RegularFile {
-                        // For files, ensure they are downloaded
-                        // Clone data needed for the async operation
-                        let virtual_path_clone = virtual_path.clone();
-                        let onedrive_client = self.onedrive_client.clone();
-                        let file_manager = self.file_manager.clone();
-
-                        // Use std::thread::spawn to run async work on separate thread
-                        match std::thread::spawn(move || {
-                            tokio::runtime::Handle::current().block_on(async {
-                                Self::ensure_file_downloaded_async(
-                                    file_manager,
-                                    onedrive_client,
-                                    virtual_path_clone,
-                                )
-                                .await
-                            })
-                        })
-                        .join()
-                        {
-                            Ok(Ok(_)) => {
-                                info!(
-                                    "OpenDriveFuse: opened file ino={}, path={:?}",
-                                    ino, virtual_path
-                                );
-                                reply.opened(0, 0);
-                            }
-                            Ok(Err(e)) => {
-                                error!(
-                                    "OpenDriveFuse: failed to ensure file downloaded for ino={}: {}",
-                                    ino, e
-                                );
-                                reply.error(e);
-                            }
-                            Err(_e) => {
-                                error!("OpenDriveFuse: task failed for ino={}: ", ino);
-                                reply.error(libc::EIO);
-                            }
-                        }
-                    } else {
-                        // It's a directory
-                        info!(
-                            "OpenDriveFuse: opened directory ino={}, path={:?}",
-                            ino, virtual_path
-                        );
-                        reply.opened(0, 0);
-                    }
-                } else {
-                    reply.error(ENOENT);
-                }
+                reply.opened(0, 0);
             } else {
                 reply.error(ENOENT);
             }
@@ -715,6 +392,7 @@ impl Filesystem for OpenDriveFuse {
                 .cache_path_to_virtual_path(Path::new(&path));
             trace!("lookup - virtual path: {:?}", virtual_path);
             let child_path = virtual_path.join(name_str.as_ref());
+            let child_path = remove_surfix(&child_path);
             trace!("lookup - child_path: {:?}", child_path);
             child_path
         };
@@ -928,49 +606,11 @@ impl Filesystem for OpenDriveFuse {
             info!("File not found in temp directory: {}", temp_path.display());
 
             // Handle missing file with smart download strategy
-            if let Err(e) = self.download_with_lock(&virtual_path, || {
-                self.handle_missing_file(&virtual_path, offset, size)
-            }) {
-                error!("Failed to handle missing file: {}", e);
-                reply.error(e);
+            
+                error!("Failed to handle missing file: {}", virtual_path.display());
+                reply.error(libc::EIO);
                 return;
-            }
-        } else {
-            // File exists - check if it's complete
-            let cache_path = self.virtual_path_to_cache_path(&virtual_path);
-            if let Some(drive_item) = self.read_drive_item_from_cache(&cache_path) {
-                let actual_file_size = drive_item.size.unwrap_or(0);
-                let cached_file_size = match std::fs::metadata(&temp_path) {
-                    Ok(metadata) => metadata.len(),
-                    Err(e) => {
-                        error!("Failed to get file metadata: {}", e);
-                        reply.error(libc::EIO);
-                        return;
-                    }
-                };
-
-                if cached_file_size < actual_file_size {
-                    info!(
-                        "Partial file detected: cached={}, actual={}",
-                        cached_file_size, actual_file_size
-                    );
-
-                    // Handle partial file
-                    if let Err(e) = self.download_with_lock(&virtual_path, || {
-                        self.handle_partial_file(
-                            &virtual_path,
-                            &drive_item,
-                            offset,
-                            size,
-                            cached_file_size,
-                        )
-                    }) {
-                        error!("Failed to handle partial file: {}", e);
-                        reply.error(e);
-                        return;
-                    }
-                }
-            }
+            
         }
 
         // Read file data using standard filesystem calls

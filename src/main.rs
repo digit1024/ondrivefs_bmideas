@@ -18,6 +18,7 @@ mod sync;
 use crate::auth::onedrive_auth::OneDriveAuth;
 use crate::config::{Settings, SyncConfig};
 use crate::onedrive_service::onedrive_client::OneDriveClient;
+use crate::openfs::opendrive_fuse::mount_filesystem_with_deps;
 use crate::sync::sync_service::SyncService;
 use anyhow::{Context, Result};
 use clap::{Arg, Command};
@@ -138,11 +139,11 @@ fn main() -> Result<()> {
 
     let mountpoint_clone = mountpoint.clone();
     let mountpoint_for_shutdown = mountpoint.clone();
-    // std::thread::spawn(move || {
-    //     if let Err(e) = mount_filesystem_with_deps(&mountpoint_clone, file_manager, onedrive_client, runtime_handle) {
-    //         error!("FUSE filesystem error: {}", e);
-    //     }
-    // });
+    std::thread::spawn(move || {
+        if let Err(e) = mount_filesystem_with_deps(&mountpoint_clone, file_manager, onedrive_client, runtime_handle) {
+            error!("FUSE filesystem error: {}", e);
+        }
+    });
     let result = runtime.block_on(async {
         sync_service
             .init()
