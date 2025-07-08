@@ -9,8 +9,8 @@ use cosmic::iced::{Alignment, Length, Subscription};
 use crate::notifications::{NotificationSender, NotificationUrgency};
 
 use cosmic::prelude::*;
-use cosmic::widget::{self, icon, menu, nav_bar};
-use cosmic::widget::button;
+use cosmic::widget::{self, button, column, icon, menu, nav_bar, row, text, Column, Row};
+
 
 use cosmic::{cosmic_theme, theme};
 use std::collections::HashMap;
@@ -344,19 +344,35 @@ impl AppModel {
         
         let column =widget::column()
             .push(status_text)
-            .push(widget::text::body(progress_text))
-            .push(widget::text::body(queue_text))
-            .push(widget::text::body(last_sync_text))
+            // .push(widget::text::body(progress_text))
+            // .push(widget::text::body(queue_text))
+            // .push(widget::text::body(last_sync_text))
             .push(control_buttons)
             .push(error_widget)
             .spacing(space_m)
             .align_x(Alignment::Center);
-        widget::container(column)
+        let container = widget::container(column)
             .padding(20)
             .width(Length::Fill)
             .height(Length::Fill)
             .center_x(800)
-            .center_y(800).into()
+            .center_y(800);
+
+        let row: Row<Message>= row::with_children(vec![
+            
+            
+            widget::text::body("test").into(),
+            widget::divider::vertical::default().into(),
+            widget::text::body("Donloading 🟡").into(),
+            widget::divider::vertical::default().into(),
+            widget::text::body("Uploading 🟢").into(),
+            widget::divider::vertical::default().into(),
+            widget::text::body("Syncing 🟢").into(),
+        ]).spacing(5).align_y(Alignment::Center).width(Length::Fill).height(Length::Fixed(30.0));
+
+        widget::column::with_children(vec![row.into(),
+            container.into(),
+        ]).into()
     }
 
     /// Folders page showing sync folders
