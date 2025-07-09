@@ -36,10 +36,10 @@ pub struct OneDriveAuth {
 }
 
 impl OneDriveAuth {
-    pub fn new() -> Result<Self> {
+    pub async fn new() -> Result<Self> {
         Ok(Self {
             client: Client::new(),
-            token_store: TokenStore::new()?,
+            token_store: TokenStore::new().await?,
         })
     }
 
@@ -49,7 +49,7 @@ impl OneDriveAuth {
         let code_verifier: String = (0..128)
             .map(|_| {
                 let chars = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
-                chars[rand::thread_rng().gen_range(0..chars.len())] as char
+                chars[rand::rng().random_range(0..chars.len())] as char
             })
             .collect();
 

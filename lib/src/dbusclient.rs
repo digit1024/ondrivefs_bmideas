@@ -6,12 +6,12 @@ use anyhow::Result;
 use zbus::{Connection, Proxy};
 
 /// DBus client for OneDrive sync operations
-pub struct OneDriveSyncClient {
+pub struct DbusSyncClient {
     connection: Connection,
     proxy: Proxy<'static>,
 }
 
-impl OneDriveSyncClient {
+impl DbusSyncClient {
     /// Create a new DBus client
     pub async fn new() -> Result<Self> {
         let connection = Connection::session().await?;
@@ -101,7 +101,7 @@ impl OneDriveSyncClient {
     }
 }
 
-impl Clone for OneDriveSyncClient {
+impl Clone for DbusSyncClient {
     fn clone(&self) -> Self {
         Self {
             connection: self.connection.clone(),
@@ -111,7 +111,7 @@ impl Clone for OneDriveSyncClient {
 }
 
 /// Convenience methods for common operations
-impl OneDriveSyncClient {
+impl DbusSyncClient {
     /// Get sync metrics in a structured format
     pub async fn get_sync_metrics(&self) -> Result<crate::types::SyncMetrics> {
         let status_str = self.get_sync_status().await?;

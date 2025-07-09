@@ -2,7 +2,6 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use zbus::Connection;
 
 /// DBus bus name and object path constants
@@ -94,7 +93,7 @@ impl OneDriveSyncClient {
         )
         .await?;
 
-        proxy.call("AddSyncFolder", &(folder,)).await?;
+        proxy.call::<_, _, ()>("AddSyncFolder", &(folder,)).await?;
         Ok(())
     }
 
@@ -108,7 +107,7 @@ impl OneDriveSyncClient {
         )
         .await?;
 
-        proxy.call("RemoveSyncFolder", &(folder,)).await?;
+        proxy.call::<_, _, ()>("RemoveSyncFolder", &(folder,)).await?;
         Ok(())
     }
 
@@ -122,7 +121,7 @@ impl OneDriveSyncClient {
         )
         .await?;
 
-        proxy.call("PauseSyncing", &()).await?;
+        proxy.call::<_, _, ()>("PauseSyncing", &()).await?;
         Ok(())
     }
 
@@ -136,7 +135,7 @@ impl OneDriveSyncClient {
         )
         .await?;
 
-        proxy.call("ResumeSyncing", &()).await?;
+        proxy.call::<_, _, ()>("ResumeSyncing", &()).await?;
         Ok(())
     }
 
@@ -220,7 +219,7 @@ impl OneDriveSyncClient {
         )
         .await?;
 
-        proxy.call("SetMountPoint", &(path,)).await?;
+        proxy.call::<_, _, ()>("SetMountPoint", &(path,)).await?;
         Ok(())
     }
 
@@ -234,7 +233,7 @@ impl OneDriveSyncClient {
         )
         .await?;
 
-        proxy.call("UploadFile", &(file_path,)).await?;
+        proxy.call::<_, _, ()>("UploadFile", &(file_path,)).await?;
         Ok(())
     }
 } 

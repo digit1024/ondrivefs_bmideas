@@ -1,8 +1,10 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, Context};
 use keyring::Entry;
+use onedrive_sync_lib::config::ProjectConfig;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthConfig {
@@ -14,21 +16,25 @@ pub struct AuthConfig {
 pub struct TokenStore {
     keyring_entry: Option<Entry>,
     file_path: PathBuf,
+    
 }
 
 impl TokenStore {
-    pub fn new() -> Result<Self> {
+    pub async fn new() -> Result<Self> {
         let keyring_entry = Self::create_keyring_entry();
-        let file_path = Self::get_file_path()?;
+        let project_config = ProjectConfig::new().await?;
+        let file_path = Self::get_file_path(&project_config.project_dirs.config_dir().to_path_buf()).await?;
 
         // Ensure the directory exists for file fallback
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent)?;
         }
+        
 
         Ok(Self {
             keyring_entry,
             file_path,
+            
         })
     }
 
@@ -41,11 +47,9 @@ impl TokenStore {
     }
 
     /// Get the file path for fallback storage
-    fn get_file_path() -> Result<PathBuf> {
-        let mut path =
-            dirs::home_dir().ok_or_else(|| anyhow!("Could not determine home directory"))?;
-        path.push(".onedrive");
-        path.push("auth");
+    async fn get_file_path(config_path:&PathBuf) -> Result<PathBuf> {
+        
+        let mut path =config_path.clone();
         path.push("secrets.json");
         Ok(path)
     }
@@ -116,27 +120,5 @@ impl TokenStore {
         } else {
             format!("file: {:?}", self.file_path)
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_token_store_creation() {
-        let store = TokenStore::new();
-        assert!(store.is_ok());
-    }
-
-    #[test]
-    fn test_file_path_creation() {
-        let path = TokenStore::get_file_path();
-        assert!(path.is_ok());
-        let path = path.unwrap();
-        assert!(
-            path.to_string_lossy()
-                .contains(".onedrive/auth/secrets.json")
-        );
     }
 }

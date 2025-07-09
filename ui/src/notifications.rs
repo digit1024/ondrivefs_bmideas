@@ -74,7 +74,7 @@ impl NotificationSender {
         }
 
         proxy
-            .call(
+            .call::<_, _, ()>(
                 "Notify",
                 &(
                     app_name,

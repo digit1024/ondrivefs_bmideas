@@ -9,7 +9,7 @@ use cosmic::iced::{Alignment, Length, Subscription};
 use crate::notifications::{NotificationSender, NotificationUrgency};
 
 use cosmic::prelude::*;
-use cosmic::widget::{self, button, column, icon, menu, nav_bar, row, text, Column, Row};
+use cosmic::widget::{self, button, icon, menu, nav_bar, row, Row};
 
 
 use cosmic::{cosmic_theme, theme};
