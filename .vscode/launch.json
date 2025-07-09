@@ -7,7 +7,7 @@
             "name": "Debug Rust (LLDB, WSL2)",
             "type": "lldb",
             "request": "launch",
-            "program": "${workspaceFolder}/target/debug/onedrive-sync",
+            "program": "${workspaceFolder}/target/debug/onedrive-sync-daemon",
             "args": ["--mountpoint",  "/home/digit1024/OneDrive"],
             "cwd": "${workspaceFolder}",
             "sourceLanguages": ["rust"],
