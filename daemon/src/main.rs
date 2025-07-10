@@ -16,9 +16,12 @@ use clap::Command;
 use log::{info, debug};
 use onedrive_sync_lib::config::ProjectConfig;
 use std::path::PathBuf;
+use std::sync::Arc;
 
+use crate::auth::onedrive_auth::OneDriveAuth;
 use crate::log_appender::setup_logging;
-use crate::persistency::{PersistencyManager, database::{DriveItemRepository, SyncStateRepository, DownloadQueueRepository, UploadQueueRepository}};
+use crate::onedrive_service::onedrive_client::OneDriveClient;
+use crate::persistency::{PersistencyManager, database::{DriveItemRepository, SyncStateRepository, DownloadQueueRepository, UploadQueueRepository, ProfileRepository}};
 use crate::onedrive_service::onedrive_models::{DriveItem, FolderFacet, FileFacet, ParentReference};
 use crate::connectivity::{ConnectivityChecker, ConnectivityStatus};
 
@@ -26,13 +29,30 @@ struct AppState {
     project_config: ProjectConfig,
     persistency_manager: PersistencyManager,
     connectivity_checker: ConnectivityChecker,
+    onedrive_client: Arc<OneDriveClient>,
+    auth: Arc<OneDriveAuth>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize project configuration
     let project_config = ProjectConfig::new().await?;
+
+    let auth = Arc::new(OneDriveAuth::new().await.context("Failed to initialize OneDriveAuth")?);
+    let load_result = auth.load_tokens();
+    if load_result.is_err() {
+        info!("No tokens found, will authorize");
+        auth.authorize().await.context("Failed to authorize")?;
+        auth.load_tokens().context("Failed to load tokens")?;
+
+    }
+    info!("Tokens loaded successfully");
+    let onedrive_client = Arc::new(OneDriveClient::new(auth.clone()).context("Failed to initialize OneDriveClient")?);
+    let profile = onedrive_client.get_user_profile().await.context("Failed to get user profile")?;
+    info!("User profile: {}", profile.display_name.as_deref().unwrap_or("Unknown"));
+
     
+
     // Initialize logging
     setup_logging(&project_config.project_dirs.data_dir().to_path_buf())
         .await
@@ -68,12 +88,60 @@ async fn main() -> Result<()> {
     
     info!("✅ Connectivity checker demo completed!");
     
-    let app_state = AppState {
+    let mut app_state = AppState {
         project_config,
         persistency_manager,
         connectivity_checker,
+        onedrive_client,
+        auth: auth.clone(),
     };
+    
+    // DEMO: Test profile fetching functionality
+    info!("👤 Starting profile fetching demo...");
+    
+    // Create profile repository
+    let profile_repo = ProfileRepository::new(app_state.persistency_manager.pool().clone());
+    
+    // Try to get existing profile from database
+    match profile_repo.get_profile().await {
+        Ok(Some(profile)) => {
+            info!("📋 Found stored profile: {} ({})", 
+                profile.display_name.as_deref().unwrap_or("Unknown"),
+                profile.mail.as_deref().unwrap_or("No email"));
+        }
+        Ok(None) => {
+            info!("📋 No stored profile found, will fetch from API when authenticated");
+            info!("Autthenitcating now");
 
+            
+            app_state.onedrive_client = Arc::new(OneDriveClient::new(auth.clone()).context("Failed to initialize OneDriveClient")?);
+
+            let profile = app_state.onedrive_client.get_user_profile().await.context("Failed to get user profile")?;
+            profile_repo.store_profile(&profile).await.context("Failed to store profile")?;
+
+            
+        }
+        Err(e) => {
+            info!("⚠️ Error retrieving stored profile: {}", e);
+        }
+    }
+    
+        info!("✅ Profile fetching demo completed!");
+    
+    // Example function to fetch and store profile (commented out since we need auth)
+    // async fn fetch_and_store_profile(onedrive_client: &OneDriveClient, profile_repo: &ProfileRepository) -> Result<()> {
+    //     info!("🔄 Fetching user profile from Microsoft Graph...");
+    //     
+    //     let profile = onedrive_client.get_user_profile().await?;
+    //     profile_repo.store_profile(&profile).await?;
+    //     
+    //     info!("✅ Profile fetched and stored: {} ({})", 
+    //         profile.display_name.as_deref().unwrap_or("Unknown"),
+    //         profile.mail.as_deref().unwrap_or("No email"));
+    //     
+    //     Ok(())
+    // }
+    
     // Parse command line arguments
     let _matches = Command::new("OneDrive Client for Linux by digit1024@github")
         .version("01.0")

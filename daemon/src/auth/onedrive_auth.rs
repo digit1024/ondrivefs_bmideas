@@ -1,5 +1,6 @@
 use anyhow::{Result, anyhow};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use log::info;
 use rand::Rng;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -15,7 +16,7 @@ const CLIENT_ID: &str = "95367b4f-624c-452c-b099-bfc9c27b69b9"; // Replace with 
 #[allow(dead_code)]
 const REDIRECT_URI: &str = "http://localhost:8080/callback";
 #[allow(dead_code)]
-const SCOPES: &str = "https://graph.microsoft.com/Files.ReadWrite offline_access";
+const SCOPES: &str = " https://graph.microsoft.com/User.Read https://graph.microsoft.com/Files.ReadWrite openid profile email offline_access";
 #[allow(dead_code)]
 const AUTH_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
 const TOKEN_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
@@ -75,17 +76,18 @@ impl OneDriveAuth {
             .append_pair("scope", SCOPES)
             .append_pair("code_challenge", &code_challenge)
             .append_pair("code_challenge_method", "S256")
-            .append_pair("response_mode", "query");
+            .append_pair("response_mode", "query")
+            .append_pair("prompt", "consent");
 
-        println!("Opening browser for authentication...");
-        println!("auth_url: {}", auth_url.as_str());
+        info!("Opening browser for authentication...");
+        info!("auth_url: {}", auth_url.as_str());
         webbrowser::open(auth_url.as_str())?;
 
         // Start local server to receive callback
         let server = Server::http("127.0.0.1:8080")
             .map_err(|e| anyhow!("Failed to start local server: {}", e))?;
 
-        println!("Waiting for authorization callback...");
+        info!("Waiting for authorization callback...");
 
         for request in server.incoming_requests() {
             let url = format!("http://localhost:8080{}", request.url());

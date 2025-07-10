@@ -61,6 +61,7 @@ impl PersistencyManager {
         self.create_sync_state_table().await?;
         self.create_download_queue_table().await?;
         self.create_upload_queue_table().await?;
+        self.create_user_profiles_table().await?;
         
         info!("Database schema initialized successfully");
         Ok(())
@@ -151,6 +152,33 @@ impl PersistencyManager {
                 priority INTEGER DEFAULT 0,
                 status TEXT DEFAULT 'pending',
                 retry_count INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+        
+        Ok(())
+    }
+    
+    /// Create the user_profiles table for storing user profile information
+    async fn create_user_profiles_table(&self) -> Result<()> {
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS user_profiles (
+                id TEXT PRIMARY KEY,
+                display_name TEXT,
+                given_name TEXT,
+                surname TEXT,
+                mail TEXT,
+                user_principal_name TEXT,
+                job_title TEXT,
+                business_phones TEXT,
+                mobile_phone TEXT,
+                office_location TEXT,
+                preferred_language TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )

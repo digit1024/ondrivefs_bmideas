@@ -120,3 +120,29 @@ pub struct DeleteResult {
     pub item_id: String,
     pub item_path: String,
 }
+
+/// User profile information from Microsoft Graph API
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct UserProfile {
+    #[serde(default)]
+    pub id: String,
+    #[serde(rename = "displayName")]
+    pub display_name: Option<String>,
+    #[serde(rename = "givenName")]
+    pub given_name: Option<String>,
+    #[serde(rename = "surname")]
+    pub surname: Option<String>,
+    pub mail: Option<String>,
+    #[serde(rename = "userPrincipalName")]
+    pub user_principal_name: Option<String>,
+    #[serde(rename = "jobTitle")]
+    pub job_title: Option<String>,
+    #[serde(rename = "businessPhones")]
+    pub business_phones: Option<Vec<String>>,
+    #[serde(rename = "mobilePhone")]
+    pub mobile_phone: Option<String>,
+    #[serde(rename = "officeLocation")]
+    pub office_location: Option<String>,
+    #[serde(rename = "preferredLanguage")]
+    pub preferred_language: Option<String>,
+}
