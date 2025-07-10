@@ -44,6 +44,7 @@ async fn main() -> Result<()> {
         info!("No tokens found, will authorize");
         auth.authorize().await.context("Failed to authorize")?;
         auth.load_tokens().context("Failed to load tokens")?;
+        panic!("Authorization failed - panicking");
 
     }
     info!("Tokens loaded successfully");
