@@ -46,7 +46,7 @@ pub async fn setup_logging(log_dir: &PathBuf) -> Result<()> {
             Root::builder()
                 .appender("stdout")
                 .appender("file")
-                .build(LevelFilter::Info),
+                .build(LevelFilter::Debug),
         )?;
 
     log4rs::init_config(config)?;

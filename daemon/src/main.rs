@@ -5,6 +5,7 @@
 //! with OneDrive in the background.
 
 mod auth;
+mod connectivity;
 mod log_appender;
 mod onedrive_service;
 mod persistency;
@@ -19,10 +20,12 @@ use std::path::PathBuf;
 use crate::log_appender::setup_logging;
 use crate::persistency::{PersistencyManager, database::{DriveItemRepository, SyncStateRepository, DownloadQueueRepository, UploadQueueRepository}};
 use crate::onedrive_service::onedrive_models::{DriveItem, FolderFacet, FileFacet, ParentReference};
+use crate::connectivity::{ConnectivityChecker, ConnectivityStatus};
 
 struct AppState {
     project_config: ProjectConfig,
     persistency_manager: PersistencyManager,
+    connectivity_checker: ConnectivityChecker,
 }
 
 #[tokio::main]
@@ -44,15 +47,31 @@ async fn main() -> Result<()> {
     persistency_manager.init_database().await
         .context("Failed to initialize database schema")?;
     
+    // Initialize connectivity checker
+    let connectivity_checker = ConnectivityChecker::new();
     
+    // DEMO: Test connectivity checker functionality
+    info!("🚀 Starting connectivity checker demo...");
     
+    // Test basic connectivity
+    let status = connectivity_checker.check_connectivity().await;
+    info!("📡 Connectivity Status: {}", status);
     
-    // Demonstrate persistency functionality
-
+    // Test detailed status
+    let (detailed_status, details) = connectivity_checker.get_detailed_status().await;
+    info!("📊 Detailed Status: {} - {}", detailed_status, details);
+    
+    // Test with different timeout
+    let fast_checker = ConnectivityChecker::with_timeout(3);
+    let fast_status = fast_checker.check_connectivity().await;
+    info!("⚡ Fast Check Status: {}", fast_status);
+    
+    info!("✅ Connectivity checker demo completed!");
     
     let app_state = AppState {
         project_config,
         persistency_manager,
+        connectivity_checker,
     };
 
     // Parse command line arguments
