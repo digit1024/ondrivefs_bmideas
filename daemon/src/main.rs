@@ -10,6 +10,8 @@ mod log_appender;
 mod onedrive_service;
 mod persistency;
 mod scheduler;
+mod app_state;
+mod tasks;
 
 use anyhow::{Context, Result};
 use clap::Command;
@@ -24,21 +26,19 @@ use crate::onedrive_service::onedrive_client::OneDriveClient;
 use crate::persistency::{PersistencyManager, database::{DriveItemRepository, SyncStateRepository, DownloadQueueRepository, UploadQueueRepository, ProfileRepository}};
 use crate::onedrive_service::onedrive_models::{DriveItem, FolderFacet, FileFacet, ParentReference};
 use crate::connectivity::{ConnectivityChecker, ConnectivityStatus};
+use crate::app_state::{AppState, app_state_factory};
 
-struct AppState {
-    project_config: ProjectConfig,
-    persistency_manager: PersistencyManager,
-    connectivity_checker: ConnectivityChecker,
-    onedrive_client: Arc<OneDriveClient>,
-    auth: Arc<OneDriveAuth>,
-}
+
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize project configuration
+
+    let app_state = app_state_factory().await?;
+    
     let project_config = ProjectConfig::new().await?;
 
-    let auth = Arc::new(OneDriveAuth::new().await.context("Failed to initialize OneDriveAuth")?);
+    let auth = app_state.auth.clone();
     let load_result = auth.load_tokens();
     if load_result.is_err() {
         info!("No tokens found, will authorize");
@@ -47,10 +47,9 @@ async fn main() -> Result<()> {
         panic!("Authorization failed - panicking");
 
     }
+
     info!("Tokens loaded successfully");
-    let onedrive_client = Arc::new(OneDriveClient::new(auth.clone()).context("Failed to initialize OneDriveClient")?);
-    let profile = onedrive_client.get_user_profile().await.context("Failed to get user profile")?;
-    info!("User profile: {}", profile.display_name.as_deref().unwrap_or("Unknown"));
+    
 
     
 
@@ -59,17 +58,13 @@ async fn main() -> Result<()> {
         .await
         .context("Failed to setup logging")?;
 
-    // Initialize persistency manager
-    let persistency_manager = PersistencyManager::new(
-        project_config.project_dirs.data_dir().to_path_buf()
-    ).await.context("Failed to initialize persistency manager")?;
-    
+    let db = app_state.persistency_manager.clone();
     // Initialize database schema ( if not exists)
-    persistency_manager.init_database().await
+    db.init_database().await
         .context("Failed to initialize database schema")?;
     
     // Initialize connectivity checker
-    let connectivity_checker = ConnectivityChecker::new();
+    let connectivity_checker = app_state.connectivity_checker.clone();
     
     // DEMO: Test connectivity checker functionality
     info!("🚀 Starting connectivity checker demo...");
@@ -89,19 +84,13 @@ async fn main() -> Result<()> {
     
     info!("✅ Connectivity checker demo completed!");
     
-    let mut app_state = AppState {
-        project_config,
-        persistency_manager,
-        connectivity_checker,
-        onedrive_client,
-        auth: auth.clone(),
-    };
+    
     
     // DEMO: Test profile fetching functionality
     info!("👤 Starting profile fetching demo...");
     
     // Create profile repository
-    let profile_repo = ProfileRepository::new(app_state.persistency_manager.pool().clone());
+    let profile_repo = ProfileRepository::new(db.pool().clone());
     
     // Try to get existing profile from database
     match profile_repo.get_profile().await {
@@ -115,9 +104,9 @@ async fn main() -> Result<()> {
             info!("Autthenitcating now");
 
             
-            app_state.onedrive_client = Arc::new(OneDriveClient::new(auth.clone()).context("Failed to initialize OneDriveClient")?);
+            let onedrive_client = app_state.onedrive_client.clone();
 
-            let profile = app_state.onedrive_client.get_user_profile().await.context("Failed to get user profile")?;
+            let profile = onedrive_client.get_user_profile().await.context("Failed to get user profile")?;
             profile_repo.store_profile(&profile).await.context("Failed to store profile")?;
 
             
