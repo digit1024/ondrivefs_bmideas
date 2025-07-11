@@ -2,4 +2,4 @@
 
 pub mod periodic_scheduler;
 
-pub use periodic_scheduler::{PeriodicScheduler, PeriodicTask, TaskMetrics, TaskState};
+pub use periodic_scheduler::{PeriodicTask, TaskMetrics};

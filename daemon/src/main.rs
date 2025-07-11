@@ -15,18 +15,13 @@ mod tasks;
 
 use anyhow::{Context, Result};
 use clap::Command;
-use log::{info, debug};
+use log::info;
 use onedrive_sync_lib::config::ProjectConfig;
-use std::path::PathBuf;
-use std::sync::Arc;
 
-use crate::auth::onedrive_auth::OneDriveAuth;
 use crate::log_appender::setup_logging;
-use crate::onedrive_service::onedrive_client::OneDriveClient;
-use crate::persistency::{PersistencyManager, database::{DriveItemRepository, SyncStateRepository, DownloadQueueRepository, UploadQueueRepository, ProfileRepository}};
-use crate::onedrive_service::onedrive_models::{DriveItem, FolderFacet, FileFacet, ParentReference};
-use crate::connectivity::{ConnectivityChecker, ConnectivityStatus};
-use crate::app_state::{AppState, app_state_factory};
+use crate::persistency::database::ProfileRepository;
+use crate::connectivity::ConnectivityChecker;
+use crate::app_state::app_state_factory;
 
 
 

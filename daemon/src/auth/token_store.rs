@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow, Context};
+use anyhow::{Result, anyhow};
 use keyring::Entry;
 use onedrive_sync_lib::config::ProjectConfig;
 use serde::{Deserialize, Serialize};

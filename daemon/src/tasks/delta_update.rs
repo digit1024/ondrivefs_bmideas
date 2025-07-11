@@ -1,9 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
-use tokio::sync::Mutex;
 use anyhow::Result;
 
-use crate::{app_state::{self, AppState}, onedrive_service::onedrive_models::DriveItem, persistency::database::{ProcessingItem, ProcessingItemRepository, SyncStateRepository}, scheduler::{PeriodicTask, TaskMetrics}};
+use crate::{app_state::AppState, onedrive_service::onedrive_models::DriveItem, persistency::database::{ProcessingItem, ProcessingItemRepository, SyncStateRepository}, scheduler::{PeriodicTask, TaskMetrics}};
 
 
 struct SyncCycle {
