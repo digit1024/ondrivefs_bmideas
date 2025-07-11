@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthConfig {
     pub access_token: String,
@@ -16,25 +15,23 @@ pub struct AuthConfig {
 pub struct TokenStore {
     keyring_entry: Option<Entry>,
     file_path: PathBuf,
-    
 }
 
 impl TokenStore {
     pub async fn new() -> Result<Self> {
         let keyring_entry = Self::create_keyring_entry();
         let project_config = ProjectConfig::new().await?;
-        let file_path = Self::get_file_path(&project_config.project_dirs.config_dir().to_path_buf()).await?;
+        let file_path =
+            Self::get_file_path(&project_config.project_dirs.config_dir().to_path_buf()).await?;
 
         // Ensure the directory exists for file fallback
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        
 
         Ok(Self {
             keyring_entry,
             file_path,
-            
         })
     }
 
@@ -47,9 +44,8 @@ impl TokenStore {
     }
 
     /// Get the file path for fallback storage
-    async fn get_file_path(config_path:&PathBuf) -> Result<PathBuf> {
-        
-        let mut path =config_path.clone();
+    async fn get_file_path(config_path: &PathBuf) -> Result<PathBuf> {
+        let mut path = config_path.clone();
         path.push("secrets.json");
         Ok(path)
     }

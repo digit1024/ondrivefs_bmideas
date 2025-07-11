@@ -29,7 +29,11 @@ impl OneDriveClient {
 
     /// Get authorization header with valid token
     async fn auth_header(&self) -> Result<String> {
-        let token = self.auth.get_valid_token().await.context("Failed to get valid token")?;
+        let token = self
+            .auth
+            .get_valid_token()
+            .await
+            .context("Failed to get valid token")?;
         debug!("Auth header: {}", token);
         Ok(format!("Bearer {}", token))
     }
@@ -437,7 +441,10 @@ impl OneDriveClient {
 
     /// Get user profile information from Microsoft Graph API
     pub async fn get_user_profile(&self) -> Result<UserProfile> {
-        let auth_header = self.auth_header().await.context("Failed to get auth header")?;
+        let auth_header = self
+            .auth_header()
+            .await
+            .context("Failed to get auth header")?;
         debug!("Auth header: {}", auth_header);
         let url = "/me";
 
@@ -447,7 +454,10 @@ impl OneDriveClient {
             .await
             .context("Failed to get user profile")?;
 
-        info!("Retrieved user profile for: {}", profile.display_name.as_deref().unwrap_or("Unknown"));
+        info!(
+            "Retrieved user profile for: {}",
+            profile.display_name.as_deref().unwrap_or("Unknown")
+        );
         Ok(profile)
     }
 }

@@ -1,15 +1,15 @@
+use anyhow::Result;
+use log::{debug, error, info, warn};
+use reqwest::Client;
 use std::time::Duration;
 use tokio::time::timeout;
-use reqwest::Client;
-use anyhow::Result;
-use log::{info, warn, error, debug};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConnectivityStatus {
-    Online,           // Internet + MS Graph accessible
-    Offline,          // No internet connection
-    NotReachable,     // Internet available but MS Graph not accessible
-    Partial,          // Internet available, MS Graph status unknown
+    Online,       // Internet + MS Graph accessible
+    Offline,      // No internet connection
+    NotReachable, // Internet available but MS Graph not accessible
+    Partial,      // Internet available, MS Graph status unknown
 }
 
 impl std::fmt::Display for ConnectivityStatus {
@@ -45,7 +45,7 @@ impl ConnectivityChecker {
 
     pub async fn check_connectivity(&self) -> ConnectivityStatus {
         info!("🔍 Checking connectivity status...");
-        
+
         // First check basic internet connectivity
         match self.check_internet_connectivity().await {
             Ok(true) => {
@@ -81,8 +81,8 @@ impl ConnectivityChecker {
         // Check multiple reliable endpoints
         let endpoints = vec![
             "https://www.google.com",
-            "https://www.cloudflare.com", 
-            "https://www.microsoft.com"
+            "https://www.cloudflare.com",
+            "https://www.microsoft.com",
         ];
 
         for endpoint in endpoints {
@@ -96,10 +96,7 @@ impl ConnectivityChecker {
 
     async fn check_ms_graph_connectivity(&self) -> Result<bool> {
         // Check MS Graph API specifically
-        let graph_endpoints = vec![
-            
-            "https://graph.microsoft.com/v1.0/"
-        ];
+        let graph_endpoints = vec!["https://graph.microsoft.com/v1.0/"];
 
         for endpoint in graph_endpoints {
             if let Ok(true) = self.ping_endpoint(endpoint).await {
@@ -113,7 +110,11 @@ impl ConnectivityChecker {
     async fn ping_endpoint(&self, url: &str) -> Result<bool> {
         match timeout(self.timeout_duration, self.http_client.get(url).send()).await {
             Ok(Ok(response)) => {
-                debug!("✅ Pinged {} successfully - status {}", url, response.status());
+                debug!(
+                    "✅ Pinged {} successfully - status {}",
+                    url,
+                    response.status()
+                );
                 Ok(response.status().is_success() || response.status().is_redirection())
             }
             Ok(Err(e)) => {
@@ -131,10 +132,16 @@ impl ConnectivityChecker {
     pub async fn get_detailed_status(&self) -> (ConnectivityStatus, String) {
         let status = self.check_connectivity().await;
         let details = match status {
-            ConnectivityStatus::Online => "Full connectivity: Internet and MS Graph API accessible".to_string(),
+            ConnectivityStatus::Online => {
+                "Full connectivity: Internet and MS Graph API accessible".to_string()
+            }
             ConnectivityStatus::Offline => "No internet connection detected".to_string(),
-            ConnectivityStatus::NotReachable => "Internet available but MS Graph API not accessible".to_string(),
-            ConnectivityStatus::Partial => "Internet available but MS Graph API status uncertain".to_string(),
+            ConnectivityStatus::NotReachable => {
+                "Internet available but MS Graph API not accessible".to_string()
+            }
+            ConnectivityStatus::Partial => {
+                "Internet available but MS Graph API status uncertain".to_string()
+            }
         };
         (status, details)
     }
@@ -166,7 +173,10 @@ mod tests {
     fn test_connectivity_status_display() {
         assert_eq!(ConnectivityStatus::Online.to_string(), "🟢 Online");
         assert_eq!(ConnectivityStatus::Offline.to_string(), "🔴 Offline");
-        assert_eq!(ConnectivityStatus::NotReachable.to_string(), "🟡 Not Reachable");
+        assert_eq!(
+            ConnectivityStatus::NotReachable.to_string(),
+            "🟡 Not Reachable"
+        );
         assert_eq!(ConnectivityStatus::Partial.to_string(), "�� Partial");
     }
-} 
+}
