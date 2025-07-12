@@ -1,6 +1,6 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, Context};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use log::info;
+use log::{info, warn};
 use rand::Rng;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -12,17 +12,40 @@ use url::Url;
 
 use crate::auth::token_store::{AuthConfig, TokenStore};
 
-const CLIENT_ID: &str = "95367b4f-624c-452c-b099-bfc9c27b69b9"; // Replace with your Azure app ID
-#[allow(dead_code)]
+/// Azure application client ID
+const CLIENT_ID: &str = "95367b4f-624c-452c-b099-bfc9c27b69b9";
+
+/// OAuth redirect URI
 const REDIRECT_URI: &str = "http://localhost:8080/callback";
-#[allow(dead_code)]
+
+/// OAuth scopes for OneDrive access
 const SCOPES: &str = " https://graph.microsoft.com/User.Read https://graph.microsoft.com/Files.ReadWrite openid profile email offline_access";
-#[allow(dead_code)]
+
+/// Microsoft OAuth authorization URL
 const AUTH_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
+
+/// Microsoft OAuth token URL
 const TOKEN_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
-#[allow(dead_code)]
+
+/// Local server port for OAuth callback
+const CALLBACK_PORT: u16 = 8080;
+
+/// Local server address
+const CALLBACK_ADDRESS: &str = "127.0.0.1";
+
+/// Token refresh buffer time in seconds (refresh 5 minutes before expiry)
+const TOKEN_REFRESH_BUFFER_SECS: u64 = 300;
+
+/// PKCE code verifier length
+const PKCE_CODE_VERIFIER_LENGTH: usize = 128;
+
+/// PKCE character set
+const PKCE_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+
+/// HTML response for successful authorization
 const INDEX_HTML: &str = include_str!("./index.html");
 
+/// Token response from Microsoft OAuth
 #[derive(Debug, Serialize, Deserialize)]
 struct TokenResponse {
     access_token: String,
@@ -31,12 +54,14 @@ struct TokenResponse {
     token_type: String,
 }
 
+/// OneDrive authentication manager
 pub struct OneDriveAuth {
     client: Client,
     token_store: TokenStore,
 }
 
 impl OneDriveAuth {
+    /// Create a new authentication manager
     pub async fn new() -> Result<Self> {
         Ok(Self {
             client: Client::new(),
@@ -45,12 +70,10 @@ impl OneDriveAuth {
     }
 
     /// Generate PKCE code verifier and challenge
-    #[allow(dead_code)]
     fn generate_pkce() -> (String, String) {
-        let code_verifier: String = (0..128)
+        let code_verifier: String = (0..PKCE_CODE_VERIFIER_LENGTH)
             .map(|_| {
-                let chars = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
-                chars[rand::rng().random_range(0..chars.len())] as char
+                PKCE_CHARS[rand::rng().random_range(0..PKCE_CHARS.len())] as char
             })
             .collect();
 
@@ -61,12 +84,29 @@ impl OneDriveAuth {
         (code_verifier, code_challenge)
     }
 
-    /// Start the OAuth flow
-    #[allow(dead_code)]
+    /// Start the OAuth authorization flow
     pub async fn authorize(&self) -> Result<AuthConfig> {
         let (code_verifier, code_challenge) = Self::generate_pkce();
 
         // Build authorization URL
+        let auth_url = self.build_auth_url(&code_challenge)?;
+
+        info!("🌐 Opening browser for authentication...");
+        info!("🔗 Auth URL: {}", auth_url.as_str());
+        webbrowser::open(auth_url.as_str())
+            .context("Failed to open browser")?;
+
+        // Start local server to receive callback
+        let server = Server::http(format!("{}:{}", CALLBACK_ADDRESS, CALLBACK_PORT))
+            .map_err(|e| anyhow!("Failed to start local server: {}", e))?;
+
+        info!("⏳ Waiting for authorization callback...");
+
+        self.handle_authorization_callback(server, &code_verifier).await
+    }
+
+    /// Build the authorization URL with all required parameters
+    fn build_auth_url(&self, code_challenge: &str) -> Result<Url> {
         let mut auth_url = Url::parse(AUTH_URL)?;
         auth_url
             .query_pairs_mut()
@@ -74,47 +114,37 @@ impl OneDriveAuth {
             .append_pair("response_type", "code")
             .append_pair("redirect_uri", REDIRECT_URI)
             .append_pair("scope", SCOPES)
-            .append_pair("code_challenge", &code_challenge)
+            .append_pair("code_challenge", code_challenge)
             .append_pair("code_challenge_method", "S256")
             .append_pair("response_mode", "query")
             .append_pair("prompt", "consent");
 
-        info!("Opening browser for authentication...");
-        info!("auth_url: {}", auth_url.as_str());
-        webbrowser::open(auth_url.as_str())?;
+        Ok(auth_url)
+    }
 
-        // Start local server to receive callback
-        let server = Server::http("127.0.0.1:8080")
-            .map_err(|e| anyhow!("Failed to start local server: {}", e))?;
-
-        info!("Waiting for authorization callback...");
-
+    /// Handle the authorization callback from the browser
+    async fn handle_authorization_callback(
+        &self,
+        server: Server,
+        code_verifier: &str,
+    ) -> Result<AuthConfig> {
         for request in server.incoming_requests() {
-            let url = format!("http://localhost:8080{}", request.url());
-            let parsed_url = Url::parse(&url)?;
+            let url = format!("http://localhost:{}", CALLBACK_PORT);
+            let full_url = format!("{}{}", url, request.url());
+            let parsed_url = Url::parse(&full_url)?;
 
-            if let Some(code) = parsed_url
-                .query_pairs()
-                .find(|(key, _)| key == "code")
-                .map(|(_, value)| value.to_string())
-            {
+            if let Some(code) = self.extract_authorization_code(&parsed_url) {
                 // Send success response to browser
-                let response = Response::from_string(INDEX_HTML).with_header(
-                    Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap(),
-                );
-                let _ = request.respond(response);
+                self.send_success_response(request)?;
 
                 // Exchange code for tokens
-                let tokens = self.exchange_code_for_tokens(&code, &code_verifier).await?;
+                let tokens = self.exchange_code_for_tokens(&code, code_verifier).await?;
                 let config = self.save_tokens(tokens)?;
                 return Ok(config);
             }
 
-            if parsed_url.query_pairs().any(|(key, _)| key == "error") {
-                let response = Response::from_string("Authorization failed!").with_header(
-                    Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap(),
-                );
-                let _ = request.respond(response);
+            if self.is_authorization_error(&parsed_url) {
+                self.send_error_response(request)?;
                 return Err(anyhow!("Authorization was denied or failed"));
             }
         }
@@ -122,35 +152,75 @@ impl OneDriveAuth {
         Err(anyhow!("Authorization flow incomplete"))
     }
 
+    /// Extract authorization code from URL
+    fn extract_authorization_code(&self, url: &Url) -> Option<String> {
+        url.query_pairs()
+            .find(|(key, _)| key == "code")
+            .map(|(_, value)| value.to_string())
+    }
+
+    /// Check if URL contains authorization error
+    fn is_authorization_error(&self, url: &Url) -> bool {
+        url.query_pairs().any(|(key, _)| key == "error")
+    }
+
+    /// Send success response to browser
+    fn send_success_response(&self, request: tiny_http::Request) -> Result<()> {
+        let header = Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..])
+            .map_err(|_| anyhow!("Failed to create content-type header"))?;
+        let response = Response::from_string(INDEX_HTML).with_header(header);
+        request.respond(response)
+            .context("Failed to send success response")?;
+        Ok(())
+    }
+
+    /// Send error response to browser
+    fn send_error_response(&self, request: tiny_http::Request) -> Result<()> {
+        let header = Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..])
+            .map_err(|_| anyhow!("Failed to create content-type header"))?;
+        let response = Response::from_string("Authorization failed!").with_header(header);
+        request.respond(response)
+            .context("Failed to send error response")?;
+        Ok(())
+    }
+
     /// Exchange authorization code for tokens
-    #[allow(dead_code)]
     async fn exchange_code_for_tokens(
         &self,
         code: &str,
         code_verifier: &str,
     ) -> Result<TokenResponse> {
-        let mut params = HashMap::new();
-        params.insert("client_id", CLIENT_ID);
-        params.insert("code", code);
-        params.insert("redirect_uri", REDIRECT_URI);
-        params.insert("grant_type", "authorization_code");
-        params.insert("code_verifier", code_verifier);
+        let params = self.build_token_exchange_params(code, code_verifier);
 
-        let response = self.client.post(TOKEN_URL).form(&params).send().await?;
+        let response = self.client.post(TOKEN_URL).form(&params).send().await
+            .context("Failed to send token exchange request")?;
 
         if !response.status().is_success() {
             let error_text = response.text().await?;
             return Err(anyhow!("Token exchange failed: {}", error_text));
         }
 
-        let token_response: TokenResponse = response.json().await?;
+        let token_response: TokenResponse = response.json().await
+            .context("Failed to parse token response")?;
         Ok(token_response)
+    }
+
+    /// Build parameters for token exchange
+    fn build_token_exchange_params(&self, code: &str, code_verifier: &str) -> HashMap<&'static str, String> {
+        let mut params = HashMap::new();
+        params.insert("client_id", CLIENT_ID.to_string());
+        params.insert("code", code.to_string());
+        params.insert("redirect_uri", REDIRECT_URI.to_string());
+        params.insert("grant_type", "authorization_code".to_string());
+        params.insert("code_verifier", code_verifier.to_string());
+        params
     }
 
     /// Save tokens to storage
     fn save_tokens(&self, tokens: TokenResponse) -> Result<AuthConfig> {
-        let expires_at =
-            SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + tokens.expires_in;
+        let expires_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)?
+            .as_secs() + tokens.expires_in;
 
         let config = AuthConfig {
             access_token: tokens.access_token,
@@ -158,17 +228,17 @@ impl OneDriveAuth {
             expires_at,
         };
 
-        self.token_store.save_tokens(&config)?;
-        println!(
-            "Tokens saved successfully using: {}",
-            self.token_store.get_storage_info()
-        );
+        self.token_store.save_tokens(&config)
+            .context("Failed to save tokens")?;
+        
+        info!("✅ Tokens saved successfully using: {}", self.token_store.get_storage_info());
         Ok(config)
     }
 
     /// Load tokens from storage
     pub fn load_tokens(&self) -> Result<AuthConfig> {
         self.token_store.load_tokens()
+            .context("Failed to load tokens from storage")
     }
 
     /// Check if token is expired
@@ -177,25 +247,33 @@ impl OneDriveAuth {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        now >= config.expires_at - 300 // Refresh 5 minutes before expiry
+        now >= config.expires_at - TOKEN_REFRESH_BUFFER_SECS
     }
 
-    /// Refresh access token
+    /// Refresh access token using refresh token
     pub async fn refresh_token(&self, refresh_token: &str) -> Result<AuthConfig> {
-        let mut params = HashMap::new();
-        params.insert("client_id", CLIENT_ID);
-        params.insert("refresh_token", refresh_token);
-        params.insert("grant_type", "refresh_token");
+        let params = self.build_refresh_token_params(refresh_token);
 
-        let response = self.client.post(TOKEN_URL).form(&params).send().await?;
+        let response = self.client.post(TOKEN_URL).form(&params).send().await
+            .context("Failed to send token refresh request")?;
 
         if !response.status().is_success() {
             let error_text = response.text().await?;
             return Err(anyhow!("Token refresh failed: {}", error_text));
         }
 
-        let token_response: TokenResponse = response.json().await?;
+        let token_response: TokenResponse = response.json().await
+            .context("Failed to parse refresh token response")?;
         self.save_tokens(token_response)
+    }
+
+    /// Build parameters for token refresh
+    fn build_refresh_token_params(&self, refresh_token: &str) -> HashMap<&'static str, String> {
+        let mut params = HashMap::new();
+        params.insert("client_id", CLIENT_ID.to_string());
+        params.insert("refresh_token", refresh_token.to_string());
+        params.insert("grant_type", "refresh_token".to_string());
+        params
     }
 
     /// Get valid access token (refresh if needed)
@@ -203,7 +281,7 @@ impl OneDriveAuth {
         let config = self.load_tokens()?;
 
         if self.is_token_expired(&config) {
-            println!("Token expired, refreshing...");
+            warn!("🔄 Token expired, refreshing...");
             let new_config = self.refresh_token(&config.refresh_token).await?;
             Ok(new_config.access_token)
         } else {
@@ -219,7 +297,48 @@ mod tests {
     #[test]
     fn test_pkce_generation() {
         let (verifier, challenge) = OneDriveAuth::generate_pkce();
-        assert_eq!(verifier.len(), 128);
+        assert_eq!(verifier.len(), PKCE_CODE_VERIFIER_LENGTH);
         assert!(!challenge.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_build_auth_url() {
+        let auth = OneDriveAuth {
+            client: Client::new(),
+            token_store: TokenStore::new().await.unwrap(),
+        };
+        
+        let result = auth.build_auth_url("test_challenge");
+        assert!(result.is_ok());
+        
+        let url = result.unwrap();
+        assert!(url.as_str().contains("client_id"));
+        assert!(url.as_str().contains("code_challenge=test_challenge"));
+    }
+
+    #[tokio::test]
+    async fn test_extract_authorization_code() {
+        let auth = OneDriveAuth {
+            client: Client::new(),
+            token_store: TokenStore::new().await.unwrap(),
+        };
+        
+        let url = Url::parse("http://localhost:8080/callback?code=test_code").unwrap();
+        let code = auth.extract_authorization_code(&url);
+        assert_eq!(code, Some("test_code".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_is_authorization_error() {
+        let auth = OneDriveAuth {
+            client: Client::new(),
+            token_store: TokenStore::new().await.unwrap(),
+        };
+        
+        let url = Url::parse("http://localhost:8080/callback?error=access_denied").unwrap();
+        assert!(auth.is_authorization_error(&url));
+        
+        let url = Url::parse("http://localhost:8080/callback?code=test_code").unwrap();
+        assert!(!auth.is_authorization_error(&url));
     }
 }

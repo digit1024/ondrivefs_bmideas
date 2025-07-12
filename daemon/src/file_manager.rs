@@ -1,8 +1,14 @@
 use crate::onedrive_service::onedrive_models::DownloadResult;
 use anyhow::{Context, Result};
-use log::info;
+use log::{info, warn, error};
 use std::path::{Path, PathBuf};
 use tokio::fs;
+
+/// Default directory names for OneDrive storage
+const ONEDRIVE_DIR: &str = ".onedrive";
+const TEMP_DIR: &str = "tmp";
+const DOWNLOADS_DIR: &str = "downloads";
+const CACHE_DIR: &str = "cache";
 
 /// Trait for handling file system operations
 pub trait FileManager {
@@ -39,9 +45,15 @@ pub trait FileManager {
 
     /// Get the cache directory
     fn get_cache_dir(&self) -> PathBuf;
+    
+    /// Convert cache path to virtual path
     fn cache_path_to_virtual_path(&self, cache_path: &Path) -> PathBuf;
+    
+    /// Convert virtual path to cache path
     #[allow(dead_code)]
     fn virtual_path_to_cache_path(&self, virtual_path: &Path) -> PathBuf;
+    
+    /// Convert virtual path to downloaded file path
     fn virtual_path_to_downloaded_path(&self, virtual_path: &Path) -> PathBuf;
 }
 
@@ -53,30 +65,45 @@ pub struct DefaultFileManager {
 }
 
 impl DefaultFileManager {
+    /// Create a new file manager with default directories
     pub async fn new() -> Result<Self> {
-        let home_dir = std::env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("/tmp"));
+        let home_dir = Self::get_home_directory()?;
+        let onedrive_base = home_dir.join(ONEDRIVE_DIR);
+        
+        let temp_dir = onedrive_base.join(TEMP_DIR).join(DOWNLOADS_DIR);
+        let cache_dir = onedrive_base.join(CACHE_DIR);
 
-        let temp_dir = home_dir.join(".onedrive").join("tmp").join("downloads");
-        let cache_dir = home_dir.join(".onedrive").join("cache");
-
-        // Create temp directory if it doesn't exist
-        if !temp_dir.exists() {
-            fs::create_dir_all(&temp_dir)
-                .await
-                .context("Failed to create temp directory")?;
-        }
-        if !cache_dir.exists() {
-            fs::create_dir_all(&cache_dir)
-                .await
-                .context("Failed to create cache directory")?;
-        }
+        // Create directories if they don't exist
+        Self::ensure_directory_exists(&temp_dir).await?;
+        Self::ensure_directory_exists(&cache_dir).await?;
 
         Ok(Self {
             temp_dir,
             cache_dir,
         })
+    }
+
+    /// Get the user's home directory
+    fn get_home_directory() -> Result<PathBuf> {
+        std::env::var("HOME")
+            .map(PathBuf::from)
+            .map_err(|_| anyhow::anyhow!("HOME environment variable not set"))
+    }
+
+    /// Ensure a directory exists, creating it if necessary
+    async fn ensure_directory_exists(path: &Path) -> Result<()> {
+        if !path.exists() {
+            fs::create_dir_all(path)
+                .await
+                .with_context(|| format!("Failed to create directory: {}", path.display()))?;
+            info!("Created directory: {}", path.display());
+        }
+        Ok(())
+    }
+
+    /// Safely strip prefix from path
+    fn strip_path_prefix<'a>(path: &'a Path, prefix: &Path) -> &'a Path {
+        path.strip_prefix(prefix).unwrap_or(path)
     }
 }
 
@@ -88,18 +115,16 @@ impl FileManager for DefaultFileManager {
     ) -> Result<()> {
         // Create parent directory if it doesn't exist
         if let Some(parent) = target_path.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .context("Failed to create parent directory")?;
+            Self::ensure_directory_exists(parent).await?;
         }
 
         // Write file data
         fs::write(target_path, &download_result.file_data)
             .await
-            .context("Failed to write file")?;
+            .with_context(|| format!("Failed to write file: {}", target_path.display()))?;
 
         info!(
-            "Saved downloaded file: {} (ID: {})",
+            "✅ Saved downloaded file: {} (ID: {})",
             target_path.display(),
             download_result.onedrive_id
         );
@@ -109,8 +134,8 @@ impl FileManager for DefaultFileManager {
     async fn create_directory_r(&self, path: &Path) -> Result<()> {
         fs::create_dir_all(path)
             .await
-            .context("Failed to create directory")?;
-        info!("Created directory: {}", path.display());
+            .with_context(|| format!("Failed to create directory: {}", path.display()))?;
+        info!("✅ Created directory: {}", path.display());
         Ok(())
     }
 
@@ -118,8 +143,10 @@ impl FileManager for DefaultFileManager {
         if path.exists() {
             fs::remove_file(path)
                 .await
-                .context("Failed to delete file")?;
-            info!("Deleted file: {}", path.display());
+                .with_context(|| format!("Failed to delete file: {}", path.display()))?;
+            info!("🗑️ Deleted file: {}", path.display());
+        } else {
+            warn!("⚠️ Attempted to delete non-existent file: {}", path.display());
         }
         Ok(())
     }
@@ -128,8 +155,10 @@ impl FileManager for DefaultFileManager {
         if path.exists() {
             fs::remove_dir_all(path)
                 .await
-                .context("Failed to delete directory")?;
-            info!("Deleted directory: {}", path.display());
+                .with_context(|| format!("Failed to delete directory: {}", path.display()))?;
+            info!("🗑️ Deleted directory: {}", path.display());
+        } else {
+            warn!("⚠️ Attempted to delete non-existent directory: {}", path.display());
         }
         Ok(())
     }
@@ -145,12 +174,14 @@ impl FileManager for DefaultFileManager {
     fn get_temp_download_dir(&self) -> PathBuf {
         self.temp_dir.clone()
     }
+    
     fn get_cache_dir(&self) -> PathBuf {
         self.cache_dir.clone()
     }
 
     fn cache_path_to_virtual_path(&self, cache_path: &Path) -> PathBuf {
-        let relative_path = cache_path.strip_prefix(&self.cache_dir).unwrap();
+        let relative_path = Self::strip_path_prefix(cache_path, &self.cache_dir);
+        
         if relative_path == Path::new("") {
             // Root directory case
             PathBuf::from("/")
@@ -161,14 +192,68 @@ impl FileManager for DefaultFileManager {
     }
 
     fn virtual_path_to_cache_path(&self, virtual_path: &Path) -> PathBuf {
-        //remove leading /
-        let virtual_path = virtual_path.strip_prefix("/").unwrap();
+        // Remove leading slash
+        let virtual_path = Self::strip_path_prefix(virtual_path, Path::new("/"));
         self.cache_dir.join(virtual_path)
     }
 
     fn virtual_path_to_downloaded_path(&self, virtual_path: &Path) -> PathBuf {
-        //remove leading /
-        let virtual_path = virtual_path.strip_prefix("/").unwrap();
+        // Remove leading slash
+        let virtual_path = Self::strip_path_prefix(virtual_path, Path::new("/"));
         self.temp_dir.join(virtual_path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn test_file_manager_creation() {
+        let file_manager = DefaultFileManager::new().await;
+        assert!(file_manager.is_ok());
+    }
+
+    #[test]
+    fn test_path_operations() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = TempDir::new().unwrap();
+        
+        let file_manager = DefaultFileManager {
+            temp_dir: temp_dir.path().to_path_buf(),
+            cache_dir: cache_dir.path().to_path_buf(),
+        };
+
+        // Test virtual path to cache path conversion
+        let virtual_path = Path::new("/test/file.txt");
+        let cache_path = file_manager.virtual_path_to_cache_path(virtual_path);
+        assert_eq!(cache_path, cache_dir.path().join("test/file.txt"));
+
+        // Test cache path to virtual path conversion
+        let cache_path = cache_dir.path().join("test/file.txt");
+        let virtual_path = file_manager.cache_path_to_virtual_path(&cache_path);
+        assert_eq!(virtual_path, PathBuf::from("/test/file.txt"));
+    }
+
+    #[test]
+    fn test_file_exists_checks() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = TempDir::new().unwrap();
+        
+        let file_manager = DefaultFileManager {
+            temp_dir: temp_dir.path().to_path_buf(),
+            cache_dir: cache_dir.path().to_path_buf(),
+        };
+
+        // Test directory existence
+        assert!(file_manager.directory_exists(temp_dir.path()));
+        assert!(!file_manager.directory_exists(&temp_dir.path().join("nonexistent")));
+
+        // Test file existence
+        let test_file = temp_dir.path().join("test.txt");
+        std::fs::write(&test_file, "test").unwrap();
+        assert!(file_manager.file_exists(&test_file));
+        assert!(!file_manager.file_exists(&temp_dir.path().join("nonexistent.txt")));
     }
 }
