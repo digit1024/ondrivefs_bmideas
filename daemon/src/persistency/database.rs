@@ -861,6 +861,13 @@ impl ProcessingItemRepository {
         debug!("Incremented retry count for: {}", drive_item_id);
         Ok(())
     }
+    pub async fn get_new_items_count(&self) -> Result<i64> {
+        let count = sqlx::query("SELECT COUNT(1) as c FROM processing_items WHERE status = 'new'")
+            .fetch_one(&self.pool)
+            .await?;
+        let c: i64 = count.try_get("c")?;
+        Ok(c)
+    }
 
     /// Delete a processing item
     pub async fn delete_processing_item(&self, drive_item_id: &str) -> Result<()> {

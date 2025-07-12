@@ -13,6 +13,8 @@ mod persistency;
 mod scheduler;
 mod tasks;
 
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
 use clap::Command;
 use log::info;
@@ -22,14 +24,25 @@ use crate::app_state::app_state_factory;
 use crate::connectivity::ConnectivityChecker;
 use crate::log_appender::setup_logging;
 use crate::persistency::database::ProfileRepository;
+use crate::tasks::delta_update::SyncCycle;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+
+
+
     // Initialize project configuration
 
     let app_state = app_state_factory().await?;
 
     let project_config = ProjectConfig::new().await?;
+
+    // Initialize logging
+    setup_logging(&project_config.project_dirs.data_dir().to_path_buf())
+        .await
+        .context("Failed to setup logging")?;
+
+
 
     let auth = app_state.auth.clone();
     let load_result = auth.load_tokens();
@@ -42,10 +55,6 @@ async fn main() -> Result<()> {
 
     info!("Tokens loaded successfully");
 
-    // Initialize logging
-    setup_logging(&project_config.project_dirs.data_dir().to_path_buf())
-        .await
-        .context("Failed to setup logging")?;
 
     let db = app_state.persistency_manager.clone();
     // Initialize database schema ( if not exists)
@@ -110,6 +119,9 @@ async fn main() -> Result<()> {
     }
 
     info!("✅ Profile fetching demo completed!");
+    let sync_cycle = SyncCycle::new(Arc::new(app_state.clone()));
+    sync_cycle.run().await?;
+    
 
     // Example function to fetch and store profile (commented out since we need auth)
     // async fn fetch_and_store_profile(onedrive_client: &OneDriveClient, profile_repo: &ProfileRepository) -> Result<()> {

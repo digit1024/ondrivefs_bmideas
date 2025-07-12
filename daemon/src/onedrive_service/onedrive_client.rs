@@ -34,6 +34,7 @@ impl OneDriveClient {
             .get_valid_token()
             .await
             .context("Failed to get valid token")?;
+        //TODO: remove tis from debug
         debug!("Auth header: {}", token);
         Ok(format!("Bearer {}", token))
     }
@@ -283,14 +284,15 @@ impl OneDriveClient {
     #[allow(dead_code)]
     pub async fn get_delta_changes(
         &self,
-        folder: &str,
+        
         delta_token: Option<&str>,
     ) -> Result<DriveItemCollection> {
-        let url = self.build_delta_url(folder, delta_token);
+        let url = self.build_delta_url( delta_token);
+        let auth_header = self.auth_header().await?;
 
         let collection: DriveItemCollection = self
             .http_client
-            .get(&url, "")
+            .get(&url, &auth_header)
             .await
             .context("Failed to get delta changes")?;
 
@@ -298,32 +300,24 @@ impl OneDriveClient {
     }
 
     /// Build delta URL with optional token
-    #[allow(dead_code)]
-    fn build_delta_url(&self, folder: &str, delta_token: Option<&str>) -> String {
-        if let Some(token) = delta_token {
-            // Use existing delta token
-            format!("/me/drive/root:{}:/delta?token={}", folder, token)
-        } else {
-            // Initial delta query
-            format!("/me/drive/root:{}:/delta", folder)
+    
+    fn build_delta_url(&self,  delta_token: Option<&str>) -> String {
+        // it maay be full url or just token
+        // if it starts with http lets return same 
+        
+        if let Some(delta_token) = delta_token {
+            if delta_token.starts_with("http") {
+                return delta_token.to_string();
+            }
+            format!("/me/drive/root/delta?token={}", delta_token.to_string())
+        }else{
+            format!("/me/drive/root/delta")
         }
+        
     }
 
-    /// Get initial delta state for a folder
-    #[allow(dead_code)]
-    pub async fn get_initial_delta(&self, folder: &str) -> Result<DriveItemCollection> {
-        self.get_delta_changes(folder, None).await
-    }
 
-    /// Get subsequent delta changes using a token
-    #[allow(dead_code)]
-    pub async fn get_delta_with_token(
-        &self,
-        folder: &str,
-        delta_token: &str,
-    ) -> Result<DriveItemCollection> {
-        self.get_delta_changes(folder, Some(delta_token)).await
-    }
+    
 
     /// Extract delta token from delta link URL
     #[allow(dead_code)]
