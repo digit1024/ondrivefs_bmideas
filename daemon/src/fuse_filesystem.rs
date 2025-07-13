@@ -1,6 +1,7 @@
 use crate::persistency::fuse_repository::FuseRepository;
 use crate::persistency::download_queue_repository::DownloadQueueRepository;
 use crate::persistency::types::{VirtualFile, FileSource};
+use crate::file_manager::{FileManager, DefaultFileManager};
 use anyhow::Result;
 use fuser::{
     FileAttr, FileType, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEntry, ReplyStatfs,
@@ -14,11 +15,14 @@ use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::runtime::Handle;
 use tokio::sync::RwLock;
+use std::path::PathBuf;
+use sqlx::Pool;
 
 /// OneDrive FUSE filesystem implementation
 pub struct OneDriveFuse {
     fuse_repo: Arc<FuseRepository>,
     download_queue_repo: Arc<DownloadQueueRepository>,
+    file_manager: Arc<DefaultFileManager>,
     inode_map: Arc<Mutex<HashMap<u64, VirtualFile>>>,
     path_map: Arc<Mutex<HashMap<String, u64>>>,
 }
@@ -31,13 +35,35 @@ where
 
 impl OneDriveFuse {
     /// Create a new OneDrive FUSE filesystem
-    pub fn new(fuse_repo: FuseRepository, download_queue_repo: DownloadQueueRepository) -> Self {
-        Self {
+    pub async fn new(fuse_repo: FuseRepository, download_queue_repo: DownloadQueueRepository, file_manager: Arc<DefaultFileManager>) -> Result<Self> {
+        Ok(Self {
             fuse_repo: Arc::new(fuse_repo),
             download_queue_repo: Arc::new(download_queue_repo),
+            file_manager,
             inode_map: Arc::new(Mutex::new(HashMap::new())),
             path_map: Arc::new(Mutex::new(HashMap::new())),
-        }
+        })
+    }
+
+    /// Create a new OneDrive FUSE filesystem with file manager integration
+    pub async fn new_with_file_manager(
+        pool: Pool<sqlx::Sqlite>, 
+        download_queue_repo: DownloadQueueRepository, 
+        file_manager: Arc<DefaultFileManager>
+    ) -> Result<Self> {
+        // Create FuseRepository with file manager for local file checking
+        let fuse_repo = FuseRepository::new_with_file_manager(
+            pool, 
+            Box::new(file_manager.as_ref().clone())
+        );
+        
+        Ok(Self {
+            fuse_repo: Arc::new(fuse_repo),
+            download_queue_repo: Arc::new(download_queue_repo),
+            file_manager,
+            inode_map: Arc::new(Mutex::new(HashMap::new())),
+            path_map: Arc::new(Mutex::new(HashMap::new())),
+        })
     }
 
         /// Add a VirtualFile to the inode and path maps
@@ -46,6 +72,10 @@ impl OneDriveFuse {
             let mut path_map = self.path_map.lock().unwrap();
             inode_map.insert(virtual_file.ino, virtual_file.clone());
             path_map.insert(virtual_file.virtual_path.clone(), virtual_file.ino);
+            // Also store display path if it exists
+            if let Some(ref display_path) = virtual_file.display_path {
+                path_map.insert(display_path.clone(), virtual_file.ino);
+            }
         }
     
         /// Add multiple VirtualFiles to the inode and path maps
@@ -55,6 +85,10 @@ impl OneDriveFuse {
             for virtual_file in virtual_files {
                 inode_map.insert(virtual_file.ino, virtual_file.clone());
                 path_map.insert(virtual_file.virtual_path.clone(), virtual_file.ino);
+                // Also store display path if it exists
+                if let Some(ref display_path) = virtual_file.display_path {
+                    path_map.insert(display_path.clone(), virtual_file.ino);
+                }
             }
         }
 
@@ -76,6 +110,7 @@ impl OneDriveFuse {
                 ino: root_ino,
                 name: "/".to_string(),
                 virtual_path: "/".to_string(),
+                display_path: Some("/".to_string()), // Root directory uses same path for display
                 parent_ino: None,
                 is_folder: true,
                 size: 0,
@@ -182,6 +217,38 @@ impl OneDriveFuse {
             flags: 0,
             blksize: 512,
         }
+    }
+
+    /// Read data from a local file
+    fn read_local_file(&self, virtual_file: &VirtualFile, offset: i64, size: u32) -> Result<Vec<u8>> {
+        // Get the OneDrive ID from the virtual file
+        let onedrive_id = virtual_file.content_file_id.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No OneDrive ID found for file"))?;
+        
+        // Try to find the file in downloads first, then uploads
+        let download_path = self.file_manager.get_download_dir().join(onedrive_id);
+        let upload_path = self.file_manager.get_upload_dir().join(onedrive_id);
+        
+        let local_path = if download_path.exists() && download_path.is_file() {
+            download_path
+        } else if upload_path.exists() && upload_path.is_file() {
+            upload_path
+        } else {
+            return Err(anyhow::anyhow!("Local file not found for OneDrive ID: {}", onedrive_id));
+        };
+
+        // Read file data
+        let file_data = std::fs::read(&local_path)?;
+        
+        // Handle offset and size
+        let start = offset as usize;
+        let end = std::cmp::min(start + size as usize, file_data.len());
+        
+        if start >= file_data.len() {
+            return Ok(vec![]);
+        }
+        
+        Ok(file_data[start..end].to_vec())
     }
 }
 
@@ -371,11 +438,19 @@ impl fuser::Filesystem for OneDriveFuse {
         debug!("READ: ino={}, offset={}, size={}", ino, offset, size);
 
         if let Some(virtual_file) = self.get_virtual_file_by_ino(ino) {
-            // Check if this is a remote-only file (not downloaded locally)
-            if virtual_file.source == FileSource::Remote
-                && virtual_file.mime_type.as_deref() == Some("application/onedrivedownload")
-            {
-                // Return placeholder content
+            // Get the OneDrive ID from the virtual file
+            let onedrive_id = match &virtual_file.content_file_id {
+                Some(id) => id,
+                None => {
+                    warn!("No OneDrive ID found for file: {}", virtual_file.virtual_path);
+                    reply.error(libc::EIO);
+                    return;
+                }
+            };
+
+            // Check if this is a .onedrivedownload file (remote file with extension)
+            if virtual_file.display_path.as_ref().map_or(false, |path| path.ends_with(".onedrivedownload")) {
+                // Return generated placeholder content for .onedrivedownload files
                 let placeholder_content = self.generate_placeholder_content(&virtual_file);
                 let start = offset as usize;
                 let end = std::cmp::min(start + size as usize, placeholder_content.len());
@@ -388,9 +463,60 @@ impl fuser::Filesystem for OneDriveFuse {
                 return;
             }
 
-            // For now, return empty data for other files
-            // In a real implementation, we would read from the actual file
-            reply.data(&[]);
+            // Check if file exists in uploads directory
+            if self.file_manager.file_exists_in_upload(onedrive_id) {
+                let upload_path = self.file_manager.get_upload_dir().join(onedrive_id);
+                match std::fs::read(&upload_path) {
+                    Ok(file_data) => {
+                        let start = offset as usize;
+                        let end = std::cmp::min(start + size as usize, file_data.len());
+                        
+                        if start >= file_data.len() {
+                            reply.data(&[]);
+                        } else {
+                            reply.data(&file_data[start..end]);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to read file from uploads {}: {}", upload_path.display(), e);
+                        reply.error(libc::EIO);
+                    }
+                }
+                return;
+            }
+
+            // Check if file exists in downloads directory
+            if self.file_manager.file_exists_in_download(onedrive_id) {
+                let download_path = self.file_manager.get_download_dir().join(onedrive_id);
+                match std::fs::read(&download_path) {
+                    Ok(file_data) => {
+                        let start = offset as usize;
+                        let end = std::cmp::min(start + size as usize, file_data.len());
+                        
+                        if start >= file_data.len() {
+                            reply.data(&[]);
+                        } else {
+                            reply.data(&file_data[start..end]);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to read file from downloads {}: {}", download_path.display(), e);
+                        reply.error(libc::EIO);
+                    }
+                }
+                return;
+            }
+
+            // If file doesn't exist locally, return placeholder content
+            let placeholder_content = self.generate_placeholder_content(&virtual_file);
+            let start = offset as usize;
+            let end = std::cmp::min(start + size as usize, placeholder_content.len());
+
+            if start < placeholder_content.len() {
+                reply.data(&placeholder_content[start..end]);
+            } else {
+                reply.data(&[]);
+            }
         } else {
             reply.error(libc::ENOENT);
         }

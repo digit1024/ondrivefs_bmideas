@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Open OneDrive
+Comment=OneDrive file handler
+Exec=open-onedrive %f
+Terminal=false
+Type=Application
+MimeType=application/onedrivedownload;
+Icon=open-onedrive
+Categories=Network;FileManager;
+StartupNotify=true 

@@ -5,6 +5,7 @@ pub struct VirtualFile {
     pub ino: u64,                        // Inode number
     pub name: String,                    // File name
     pub virtual_path: String,            // Virtual path like "/Documents/file.txt"
+    pub display_path: Option<String>,    // Display path with extensions like "/Documents/file.txt.onedrivedownload"
     pub parent_ino: Option<u64>,         // Parent inode number
     pub is_folder: bool,                 // Whether this is a folder
     pub size: u64,                       // File size in bytes

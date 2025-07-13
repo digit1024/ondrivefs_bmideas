@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/onedrivedownload">
+    <comment>OneDrive Download File</comment>
+    <comment xml:lang="en">OneDrive Download File</comment>
+    <glob pattern="*.onedrivedownload"/>
+    <magic priority="50">
+      <match type="string" value="onedrive_id" offset="0"/>
+    </magic>
+    <icon name="open-onedrive"/>
+  </mime-type>
+</mime-info> 

@@ -8,6 +8,14 @@ use std::time::Duration;
 use directories::ProjectDirs;
 
 static SETTINGS_FILE_NAME: &str = "settings.json";
+//APPLICATION FILES ARE STORED UNDER ~/.local/share/onedrive-sync
+//logs are under  logs
+//downloaded files are under ~/.local/share/onedrive-sync/downloads
+//db is under ~/.local/share/onedrive-sync/ondrive.db
+//uploads are under ~/.local/share/onedrive-sync/uploads
+//secrets are under ~/.config/onedrive-sync/secrets.json
+//settings are under ~/.config/onedrive-sync/settings.json
+
 
 pub struct ProjectConfig {
     pub settings: Settings,
@@ -20,7 +28,10 @@ impl ProjectConfig {
 
         let proj_dirs = ProjectDirs::from("com", "digit1024@github", "onedrive-sync")
         .expect("Failed to get project directories");
-        for x in [proj_dirs.config_dir(), proj_dirs.cache_dir(), proj_dirs.data_dir()] {
+        let d   = proj_dirs.data_dir().join("downloads");
+        let u   = proj_dirs.data_dir().join("uploads");
+    
+        for x in [proj_dirs.config_dir(), proj_dirs.cache_dir(), proj_dirs.data_dir(), &d.to_path_buf(), &u.to_path_buf()] {
             if !x.exists() {
                 fs::create_dir_all(x).context("Failed to create config directory")?;
             }
@@ -29,6 +40,13 @@ impl ProjectConfig {
         let settings = Settings::new(&proj_dirs.config_dir().join(SETTINGS_FILE_NAME)).await?;
         Ok(Self { settings, project_dirs: proj_dirs })
     }
+    pub fn download_dir(&self) -> PathBuf { 
+        self.project_dirs.data_dir().join("downloads")
+    }
+    pub fn upload_dir(&self) -> PathBuf {
+        self.project_dirs.data_dir().join("uploads")
+    }
+    
 }
 
 

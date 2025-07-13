@@ -7,6 +7,7 @@
 mod app_state;
 mod auth;
 mod connectivity;
+mod file_manager;
 mod fuse_filesystem;
 mod log_appender;
 mod onedrive_service;
@@ -15,11 +16,15 @@ mod scheduler;
 mod tasks;
 
 use std::sync::Arc;
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::Arg;
 use clap::Command;
 use log::{error, info};
+use onedrive_sync_lib::notifications::NotificationSender;
+use onedrive_sync_lib::notifications::NotificationUrgency;
+use serde_json;
 
 use crate::app_state::app_state_factory;
 use crate::fuse_filesystem::OneDriveFuse;
@@ -29,6 +34,8 @@ use crate::persistency::fuse_repository::FuseRepository;
 use crate::persistency::profile_repository::ProfileRepository;
 use crate::tasks::delta_update::SyncCycle;
 use fuser::MountOption;
+use crate::file_manager::{DefaultFileManager, FileManager};
+
 
 /// Application configuration and setup
 struct AppSetup {
@@ -187,7 +194,7 @@ async fn main() -> Result<()> {
     // Parse command line arguments
     let matches = Command::new("OneDrive Client for Linux by digit1024@github")
         .version("01.0")
-        .about("Mount OneDrive as a FUSE filesystem")
+        .about("Mount OneDrive as a FUSE filesystem or handle OneDrive files")
         .arg(
             Arg::new("mount")
                 .long("mount")
@@ -195,7 +202,18 @@ async fn main() -> Result<()> {
                 .num_args(1)
                 .help("Mount point for FUSE filesystem"),
         )
+        .arg(
+            Arg::new("file")
+                .num_args(1)
+                .help("File path to handle (for MIME type handler)"),
+        )
         .get_matches();
+
+    // Check if this is a MIME type handler call
+    if let Some(file_path) = matches.get_one::<String>("file") {
+        info!("📁 Handling file: {}", file_path);
+        return handle_file_path(file_path).await;
+    }
 
     // Initialize application
     let app = AppSetup::initialize().await?;
@@ -217,9 +235,12 @@ async fn main() -> Result<()> {
         info!("🔗 Mounting FUSE filesystem at {}", mount_point);
         // Prepare repositories
         let pool = app.app_state.persistency().pool().clone();
-        let fuse_repo = FuseRepository::new(pool.clone());
-        let download_queue_repo = DownloadQueueRepository::new(pool);
-        let fuse_fs = OneDriveFuse::new(fuse_repo, download_queue_repo);
+        let download_queue_repo = DownloadQueueRepository::new(pool.clone());
+        let fuse_fs = OneDriveFuse::new_with_file_manager(
+            pool, 
+            download_queue_repo, 
+            app.app_state.file_manager.clone()
+        ).await?;
         fuse_fs.initialize().await.ok();
         info!("✅ FUSE filesystem initialized successfully");
         fuser::mount2(
@@ -235,4 +256,84 @@ async fn main() -> Result<()> {
 
     info!("🎉 Daemon started successfully");
     Ok(())
+}
+
+/// Handle a file path when launched as a MIME type handler
+async fn handle_file_path(file_path: &str) -> Result<()> {
+    info!("🚀 OneDrive file handler launched for: {}", file_path);
+    
+    // Initialize minimal app state for database access
+    let app = AppSetup::initialize().await?;
+    
+    // Parse the file path to extract OneDrive ID and virtual path
+    // The file should be a JSON placeholder with OneDrive metadata
+    match parse_onedrive_file(file_path) {
+        Ok((onedrive_id, virtual_path)) => {
+            info!("📥 Queuing download for OneDrive ID: {}", onedrive_id);
+            
+            // Queue the download
+            let pool = app.app_state.persistency().pool().clone();
+            let download_queue_repo = DownloadQueueRepository::new(pool);
+            
+            // Use file manager from app state
+            let file_manager = app.app_state.file_manager();
+            
+            // Convert virtual path to local path
+            let virtual_path_buf = PathBuf::from(virtual_path.clone());
+            let local_path = file_manager.get_download_dir().join(onedrive_id.clone());
+            
+            // Add to download queue
+            download_queue_repo.add_to_download_queue(&onedrive_id, &local_path).await?;
+            
+            info!("✅ Download queued successfully for: {}", virtual_path);
+            info!("💾 Local path: {}", local_path.display());
+
+            // Send desktop notification
+            let notification_sender = NotificationSender::new().await;
+            if let Ok(sender) = notification_sender {
+                let filename = std::path::Path::new(file_path)
+                    .file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "file".to_string());
+                let _ = sender.send_notification(
+                    "Open OneDrive",
+                    0,
+                    "cloud-upload",
+                    "Open OneDrive",
+                    &format!("File {} added to download queue", filename),
+                    vec![],
+                    vec![("urgency", &NotificationUrgency::Normal.to_u8().to_string())],
+                    5000,
+                ).await;
+            }
+        }
+        Err(e) => {
+            error!("❌ Failed to parse OneDrive file: {}", e);
+            return Err(e);
+        }
+    }
+    
+    Ok(())
+}
+
+/// Parse a OneDrive file path to extract OneDrive ID and virtual path
+fn parse_onedrive_file(file_path: &str) -> Result<(String, String)> {
+    // Read the JSON placeholder file
+    let content = std::fs::read_to_string(file_path)?;
+    let json: serde_json::Value = serde_json::from_str(&content)?;
+    
+    // Extract OneDrive ID and virtual path
+    let onedrive_id = json["onedrive_id"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("Missing onedrive_id in file"))?
+        .to_string();
+    
+    // For now, we'll use the file path to reconstruct the virtual path
+    // In a real implementation, you might want to store the virtual path in the JSON
+    let virtual_path = format!("/{}", std::path::Path::new(file_path)
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("Invalid file path"))?
+        .to_string_lossy());
+    
+    Ok((onedrive_id, virtual_path))
 }

@@ -3,12 +3,8 @@ use anyhow::{Context, Result};
 use log::{info, warn, error};
 use std::path::{Path, PathBuf};
 use tokio::fs;
-
-/// Default directory names for OneDrive storage
-const ONEDRIVE_DIR: &str = ".onedrive";
-const TEMP_DIR: &str = "tmp";
-const DOWNLOADS_DIR: &str = "downloads";
-const CACHE_DIR: &str = "cache";
+use onedrive_sync_lib::config::ProjectConfig;
+use std::sync::Arc;
 
 /// Trait for handling file system operations
 pub trait FileManager {
@@ -40,47 +36,39 @@ pub trait FileManager {
     #[allow(dead_code)]
     fn directory_exists(&self, path: &Path) -> bool;
 
-    /// Get the temporary download directory
-    fn get_temp_download_dir(&self) -> PathBuf;
+    /// Get the downloads directory
+    fn get_download_dir(&self) -> PathBuf;
+    /// Get the uploads directory
+    fn get_upload_dir(&self) -> PathBuf;
+    
+    
+}
 
-    /// Get the cache directory
-    fn get_cache_dir(&self) -> PathBuf;
-    
-    /// Convert cache path to virtual path
-    fn cache_path_to_virtual_path(&self, cache_path: &Path) -> PathBuf;
-    
-    /// Convert virtual path to cache path
-    #[allow(dead_code)]
-    fn virtual_path_to_cache_path(&self, virtual_path: &Path) -> PathBuf;
+/// Trait for synchronous file operations (dyn compatible)
+pub trait SyncFileManager {
+    /// Check if a file exists
+    fn file_exists(&self, path: &Path) -> bool;
     
     /// Convert virtual path to downloaded file path
-    fn virtual_path_to_downloaded_path(&self, virtual_path: &Path) -> PathBuf;
+    fn file_exists_in_download(&self, OneDriveId: &str) -> bool;
+    fn file_exists_in_upload(&self, OneDriveId: &str) -> bool;
+    fn file_exists_in_locally(&self, OneDriveId: &str) -> bool;// check both
+
 }
 
 /// Default implementation of FileManager
 #[derive(Clone)]
 pub struct DefaultFileManager {
-    temp_dir: PathBuf,  // Directory to store temporary files
-    cache_dir: PathBuf, // Directory to store metadata for files
+    config: Arc<ProjectConfig>,
 }
 
 impl DefaultFileManager {
-    /// Create a new file manager with default directories
-    pub async fn new() -> Result<Self> {
-        let home_dir = Self::get_home_directory()?;
-        let onedrive_base = home_dir.join(ONEDRIVE_DIR);
-        
-        let temp_dir = onedrive_base.join(TEMP_DIR).join(DOWNLOADS_DIR);
-        let cache_dir = onedrive_base.join(CACHE_DIR);
-
-        // Create directories if they don't exist
-        Self::ensure_directory_exists(&temp_dir).await?;
-        Self::ensure_directory_exists(&cache_dir).await?;
-
-        Ok(Self {
-            temp_dir,
-            cache_dir,
-        })
+    /// Create a new file manager using the provided config
+    pub async fn new(config: Arc<ProjectConfig>) -> Result<Self> {
+        // Ensure required directories exist
+        Self::ensure_directory_exists(&config.download_dir()).await?;
+        Self::ensure_directory_exists(&config.upload_dir()).await?;
+        Ok(Self { config })
     }
 
     /// Get the user's home directory
@@ -104,6 +92,19 @@ impl DefaultFileManager {
     /// Safely strip prefix from path
     fn strip_path_prefix<'a>(path: &'a Path, prefix: &Path) -> &'a Path {
         path.strip_prefix(prefix).unwrap_or(path)
+    }
+    pub fn file_exists_in_download(&self, OneDriveId: &str) -> bool {
+        let download_path = self.config.download_dir().join(OneDriveId);
+        download_path.exists() && download_path.is_file()
+    }
+    pub fn file_exists_in_upload(&self, OneDriveId: &str) -> bool {
+        let upload_path = self.config.upload_dir().join(OneDriveId);
+        upload_path.exists() && upload_path.is_file()
+    }
+    pub fn file_exists_in_locally(&self, OneDriveId: &str) -> bool {
+        let download_path = self.config.download_dir().join(OneDriveId);
+        let upload_path = self.config.upload_dir().join(OneDriveId);
+        download_path.exists() && download_path.is_file() || upload_path.exists() && upload_path.is_file()
     }
 }
 
@@ -171,89 +172,33 @@ impl FileManager for DefaultFileManager {
         path.exists() && path.is_dir()
     }
 
-    fn get_temp_download_dir(&self) -> PathBuf {
-        self.temp_dir.clone()
+    fn get_download_dir(&self) -> PathBuf {
+        self.config.download_dir()
     }
+    fn get_upload_dir(&self) -> PathBuf {
+        self.config.upload_dir()
+    }
+
     
-    fn get_cache_dir(&self) -> PathBuf {
-        self.cache_dir.clone()
-    }
-
-    fn cache_path_to_virtual_path(&self, cache_path: &Path) -> PathBuf {
-        let relative_path = Self::strip_path_prefix(cache_path, &self.cache_dir);
-        
-        if relative_path == Path::new("") {
-            // Root directory case
-            PathBuf::from("/")
-        } else {
-            // Add leading slash to make it a proper virtual path
-            PathBuf::from("/").join(relative_path)
-        }
-    }
-
-    fn virtual_path_to_cache_path(&self, virtual_path: &Path) -> PathBuf {
-        // Remove leading slash
-        let virtual_path = Self::strip_path_prefix(virtual_path, Path::new("/"));
-        self.cache_dir.join(virtual_path)
-    }
-
-    fn virtual_path_to_downloaded_path(&self, virtual_path: &Path) -> PathBuf {
-        // Remove leading slash
-        let virtual_path = Self::strip_path_prefix(virtual_path, Path::new("/"));
-        self.temp_dir.join(virtual_path)
-    }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::TempDir;
-
-    #[tokio::test]
-    async fn test_file_manager_creation() {
-        let file_manager = DefaultFileManager::new().await;
-        assert!(file_manager.is_ok());
+impl SyncFileManager for DefaultFileManager {
+    fn file_exists(&self, path: &Path) -> bool {
+        path.exists() && path.is_file()
     }
-
-    #[test]
-    fn test_path_operations() {
-        let temp_dir = TempDir::new().unwrap();
-        let cache_dir = TempDir::new().unwrap();
-        
-        let file_manager = DefaultFileManager {
-            temp_dir: temp_dir.path().to_path_buf(),
-            cache_dir: cache_dir.path().to_path_buf(),
-        };
-
-        // Test virtual path to cache path conversion
-        let virtual_path = Path::new("/test/file.txt");
-        let cache_path = file_manager.virtual_path_to_cache_path(virtual_path);
-        assert_eq!(cache_path, cache_dir.path().join("test/file.txt"));
-
-        // Test cache path to virtual path conversion
-        let cache_path = cache_dir.path().join("test/file.txt");
-        let virtual_path = file_manager.cache_path_to_virtual_path(&cache_path);
-        assert_eq!(virtual_path, PathBuf::from("/test/file.txt"));
+    fn file_exists_in_download(&self, OneDriveId: &str) -> bool {
+        let download_path = self.config.download_dir().join(OneDriveId);
+        download_path.exists() && download_path.is_file()
     }
-
-    #[test]
-    fn test_file_exists_checks() {
-        let temp_dir = TempDir::new().unwrap();
-        let cache_dir = TempDir::new().unwrap();
-        
-        let file_manager = DefaultFileManager {
-            temp_dir: temp_dir.path().to_path_buf(),
-            cache_dir: cache_dir.path().to_path_buf(),
-        };
-
-        // Test directory existence
-        assert!(file_manager.directory_exists(temp_dir.path()));
-        assert!(!file_manager.directory_exists(&temp_dir.path().join("nonexistent")));
-
-        // Test file existence
-        let test_file = temp_dir.path().join("test.txt");
-        std::fs::write(&test_file, "test").unwrap();
-        assert!(file_manager.file_exists(&test_file));
-        assert!(!file_manager.file_exists(&temp_dir.path().join("nonexistent.txt")));
+    fn file_exists_in_upload(&self, OneDriveId: &str) -> bool {
+        let upload_path = self.config.upload_dir().join(OneDriveId);
+        upload_path.exists() && upload_path.is_file()
     }
+    fn file_exists_in_locally(&self, OneDriveId: &str) -> bool {
+        let download_path = self.config.download_dir().join(OneDriveId);
+        let upload_path = self.config.upload_dir().join(OneDriveId);
+        download_path.exists() && download_path.is_file() || upload_path.exists() && upload_path.is_file()
+    }
+    
+   
 }

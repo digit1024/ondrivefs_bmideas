@@ -6,6 +6,7 @@ use onedrive_sync_lib::config::ProjectConfig;
 use crate::{
     auth::onedrive_auth::OneDriveAuth, connectivity::ConnectivityChecker,
     onedrive_service::onedrive_client::OneDriveClient, persistency::PersistencyManager,
+    file_manager::DefaultFileManager,
 };
 
 /// Application state containing all shared components
@@ -21,6 +22,8 @@ pub struct AppState {
     pub onedrive_client: Arc<OneDriveClient>,
     /// Authentication manager
     pub auth: Arc<OneDriveAuth>,
+    /// File manager
+    pub file_manager: Arc<DefaultFileManager>,
 }
 
 impl AppState {
@@ -30,10 +33,11 @@ impl AppState {
         let project_config = ProjectConfig::new()
             .await
             .context("Failed to create project configuration")?;
+        let project_config_arc = Arc::new(project_config);
 
         // Initialize persistence manager
         let persistency_manager =
-            PersistencyManager::new(project_config.project_dirs.data_dir().to_path_buf())
+            PersistencyManager::new(project_config_arc.project_dirs.data_dir().to_path_buf())
                 .await
                 .context("Failed to create persistence manager")?;
 
@@ -50,12 +54,16 @@ impl AppState {
         let onedrive_client =
             OneDriveClient::new(auth_arc.clone()).context("Failed to create OneDrive client")?;
 
+        // Initialize file manager
+        let file_manager = Arc::new(DefaultFileManager::new(project_config_arc.clone()).await?);
+
         Ok(Self {
-            project_config: Arc::new(project_config),
+            project_config: project_config_arc,
             persistency_manager: Arc::new(persistency_manager),
             connectivity_checker: Arc::new(connectivity_checker),
             onedrive_client: Arc::new(onedrive_client),
             auth: auth_arc,
+            file_manager,
         })
     }
 
@@ -82,6 +90,11 @@ impl AppState {
     /// Get a reference to the authentication manager
     pub fn auth(&self) -> &OneDriveAuth {
         &self.auth
+    }
+
+    /// Get a reference to the file manager
+    pub fn file_manager(&self) -> &DefaultFileManager {
+        &self.file_manager
     }
 }
 

@@ -2,6 +2,7 @@ use crate::persistency::drive_item_repository::DriveItemRepository;
 use crate::persistency::local_changes_repository::LocalChangesRepository;
 use crate::persistency::types::{VirtualFile, FileSource};
 use crate::onedrive_service::onedrive_models::DriveItem;
+use crate::file_manager::SyncFileManager;
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use sqlx::Pool;
@@ -10,6 +11,7 @@ pub struct FuseRepository {
     pool: Pool<sqlx::Sqlite>,
     drive_items_repo: DriveItemRepository,
     local_changes_repo: LocalChangesRepository,
+    file_manager: Option<Box<dyn SyncFileManager + Send + Sync>>,
 }
 
 impl FuseRepository {
@@ -20,6 +22,22 @@ impl FuseRepository {
             pool,
             drive_items_repo,
             local_changes_repo,
+            file_manager: None,
+        }
+    }
+
+    /// Create a new FuseRepository with file manager for local file checking
+    pub fn new_with_file_manager(
+        pool: Pool<sqlx::Sqlite>, 
+        file_manager: Box<dyn SyncFileManager + Send + Sync>
+    ) -> Self {
+        let drive_items_repo = DriveItemRepository::new(pool.clone());
+        let local_changes_repo = LocalChangesRepository::new(pool.clone());
+        Self {
+            pool,
+            drive_items_repo,
+            local_changes_repo,
+            file_manager: Some(file_manager),
         }
     }
 
@@ -32,7 +50,7 @@ impl FuseRepository {
         // Merge remote and local changes into a unified view
         let mut files = Vec::new();
         for item in remote_items {
-            files.push(self.remote_item_to_virtual_file(&item));
+            files.push(self.remote_item_to_virtual_file(&item).await?);
         }
         for change in local_changes {
             files.push(self.local_change_to_virtual_file(&change));
@@ -41,13 +59,69 @@ impl FuseRepository {
     }
 
     /// Convert a remote DriveItem to a VirtualFile
-    fn remote_item_to_virtual_file(&self, item: &DriveItem) -> VirtualFile {
+    async fn remote_item_to_virtual_file(&self, item: &DriveItem) -> Result<VirtualFile> {
         // Generate inode from virtual path
-        let ino = self.generate_inode(&self.get_virtual_path(item));
-        VirtualFile {
+        let virtual_path = self.get_virtual_path(item);
+        let ino = self.generate_inode(&virtual_path);
+        
+        // Determine the display name based on whether file is downloaded locally
+        let display_name = if item.folder.is_some() {
+            // Directories should never get .onedrivedownload extension
+            item.name.clone().unwrap_or_default()
+        } else if let Some(ref file_manager) = self.file_manager {
+            // Check if file exists locally using OneDrive ID
+            let onedrive_id = item.id.as_str();
+            if file_manager.file_exists_in_locally(onedrive_id) {
+                // File is downloaded locally - use original name
+                item.name.clone().unwrap_or_default()
+            } else {
+                // File is remote - append .onedrivedownload extension
+                let original_name = item.name.clone().unwrap_or_default();
+                if original_name.is_empty() {
+                    original_name
+                } else {
+                    format!("{}.onedrivedownload", original_name)
+                }
+            }
+        } else {
+            // No file manager available - assume remote and append extension
+            let original_name = item.name.clone().unwrap_or_default();
+            if original_name.is_empty() {
+                original_name
+            } else {
+                format!("{}.onedrivedownload", original_name)
+            }
+        };
+
+        // Generate display path for path map lookups
+        let display_path = if item.folder.is_some() {
+            virtual_path.clone()
+        } else {
+            // For files, construct the display path with the display name
+            if let Some(parent_ref) = &item.parent_reference {
+                if let Some(parent_path) = &parent_ref.path {
+                    let mut path = parent_path.replace("/drive/root:", "");
+                    if !path.starts_with('/') {
+                        path = format!("/{}", path);
+                    }
+                    if path == "/" {
+                        format!("/{}", display_name)
+                    } else {
+                        format!("{}/{}", path, display_name)
+                    }
+                } else {
+                    format!("/{}", display_name)
+                }
+            } else {
+                format!("/{}", display_name)
+            }
+        };
+
+        Ok(VirtualFile {
             ino,
-            name: item.name.clone().unwrap_or_default(),
-            virtual_path: self.get_virtual_path(item),
+            name: display_name,
+            virtual_path,
+            display_path: Some(display_path), // Add display path for lookups
             parent_ino: None, // Set by parent lookup
             is_folder: item.folder.is_some(),
             size: item.size.unwrap_or(0) as u64,
@@ -57,7 +131,7 @@ impl FuseRepository {
             content_file_id: item.id.clone().into(),
             source: FileSource::Remote,
             sync_status: None,
-        }
+        })
     }
 
     /// Convert a local change to a VirtualFile
@@ -67,6 +141,7 @@ impl FuseRepository {
             ino,
             name: change.file_name.clone().or_else(|| change.temp_name.clone()).unwrap_or_default(),
             virtual_path: change.virtual_path.clone(),
+            display_path: Some(change.virtual_path.clone()), // Local files use same path for display
             parent_ino: None,
             is_folder: change.temp_is_folder.unwrap_or(false),
             size: change.temp_size.unwrap_or(0) as u64,
