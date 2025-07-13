@@ -4,10 +4,8 @@ use anyhow::{Context, Result};
 use onedrive_sync_lib::config::ProjectConfig;
 
 use crate::{
-    auth::onedrive_auth::OneDriveAuth, 
-    connectivity::ConnectivityChecker,
-    onedrive_service::onedrive_client::OneDriveClient, 
-    persistency::PersistencyManager,
+    auth::onedrive_auth::OneDriveAuth, connectivity::ConnectivityChecker,
+    onedrive_service::onedrive_client::OneDriveClient, persistency::PersistencyManager,
 };
 
 /// Application state containing all shared components
@@ -29,26 +27,28 @@ impl AppState {
     /// Create a new application state with all required components
     pub async fn new() -> Result<Self> {
         // Initialize project configuration
-        let project_config = ProjectConfig::new().await
+        let project_config = ProjectConfig::new()
+            .await
             .context("Failed to create project configuration")?;
-        
+
         // Initialize persistence manager
-        let persistency_manager = PersistencyManager::new(
-            project_config.project_dirs.data_dir().to_path_buf()
-        ).await
-            .context("Failed to create persistence manager")?;
-        
+        let persistency_manager =
+            PersistencyManager::new(project_config.project_dirs.data_dir().to_path_buf())
+                .await
+                .context("Failed to create persistence manager")?;
+
         // Initialize connectivity checker
         let connectivity_checker = ConnectivityChecker::new();
-        
+
         // Initialize authentication
-        let auth = OneDriveAuth::new().await
+        let auth = OneDriveAuth::new()
+            .await
             .context("Failed to create authentication manager")?;
         let auth_arc = Arc::new(auth);
 
         // Initialize OneDrive client
-        let onedrive_client = OneDriveClient::new(auth_arc.clone())
-            .context("Failed to create OneDrive client")?;
+        let onedrive_client =
+            OneDriveClient::new(auth_arc.clone()).context("Failed to create OneDrive client")?;
 
         Ok(Self {
             project_config: Arc::new(project_config),
@@ -86,7 +86,7 @@ impl AppState {
 }
 
 /// Factory function to create application state
-/// 
+///
 /// This function initializes all required components and returns
 /// a fully configured application state.
 pub async fn app_state_factory() -> Result<AppState> {

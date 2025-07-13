@@ -115,7 +115,7 @@ impl HttpClient {
             .context("Failed to deserialize response to type T")?;
         Ok(response)
     }
-
+    #[allow(dead_code)]
     /// Download file content with custom headers
     pub async fn download_file(&self, download_url: &str) -> Result<reqwest::Response> {
         let response = self

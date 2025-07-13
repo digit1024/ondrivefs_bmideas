@@ -1,16 +1,14 @@
 use crate::auth::onedrive_auth::OneDriveAuth;
 use crate::onedrive_service::http_client::HttpClient;
 use crate::onedrive_service::onedrive_models::{
-    CreateFolderResult, DeleteResult, DeltaResponseApi, DownloadResult, DriveItem,
-    DriveItemCollection, UploadResult, UserProfile,
+    CreateFolderResult, DeleteResult, DownloadResult, DriveItem, DriveItemCollection, UploadResult,
+    UserProfile,
 };
 use anyhow::{Context, Result, anyhow};
 use log::{debug, info};
 use serde_json;
 use std::sync::Arc;
 use urlencoding;
-
-static THUMBNAIL_SIZE: u64 = 4096;
 
 /// OneDrive API client that handles API operations
 /// File system operations are handled by the FileManager trait
@@ -248,46 +246,14 @@ impl OneDriveClient {
         })
     }
 
-    /// Get delta changes by URL
-    pub async fn get_delta_by_url(&self, next_link: &str) -> Result<DeltaResponseApi> {
-        let auth_header = self
-            .auth_header()
-            .await
-            .context("Failed to get auth header")?;
-        let delta_response = self
-            .http_client
-            .get(next_link, &auth_header)
-            .await
-            .context("Failed to get delta by url")?;
-
-        Ok(delta_response)
-    }
-
-    /// Get initial delta for root
-    #[allow(dead_code)]
-    pub async fn get_delta_for_root(&self) -> Result<DeltaResponseApi> {
-        let url = "/me/drive/root/delta?select=id,name,eTag,lastModifiedDateTime,size,folder,file,@microsoft.graph.downloadUrl,deleted,parentReference";
-        let auth_header = self
-            .auth_header()
-            .await
-            .context("Failed to get auth header")?;
-        let delta_response: DeltaResponseApi = self
-            .http_client
-            .get(url, &auth_header)
-            .await
-            .context("Failed to get delta for root")?;
-
-        Ok(delta_response)
-    }
-
     /// Get delta changes for a folder using delta token
     #[allow(dead_code)]
     pub async fn get_delta_changes(
         &self,
-        
+
         delta_token: Option<&str>,
     ) -> Result<DriveItemCollection> {
-        let url = self.build_delta_url( delta_token);
+        let url = self.build_delta_url(delta_token);
         let auth_header = self.auth_header().await?;
 
         let collection: DriveItemCollection = self
@@ -300,24 +266,20 @@ impl OneDriveClient {
     }
 
     /// Build delta URL with optional token
-    
-    fn build_delta_url(&self,  delta_token: Option<&str>) -> String {
+
+    fn build_delta_url(&self, delta_token: Option<&str>) -> String {
         // it maay be full url or just token
-        // if it starts with http lets return same 
-        
+        // if it starts with http lets return same
+
         if let Some(delta_token) = delta_token {
             if delta_token.starts_with("http") {
                 return delta_token.to_string();
             }
             format!("/me/drive/root/delta?token={}", delta_token.to_string())
-        }else{
+        } else {
             format!("/me/drive/root/delta")
         }
-        
     }
-
-
-    
 
     /// Extract delta token from delta link URL
     #[allow(dead_code)]
@@ -399,22 +361,6 @@ impl OneDriveClient {
             size: content_length,
             last_modified,
         })
-    }
-
-    /// Download partial file (first chunk)
-    pub async fn download_file_partial(
-        &self,
-        download_url: &str,
-        item_id: &str,
-        filename: &str,
-    ) -> Result<DownloadResult> {
-        self.download_file_with_options(
-            download_url,
-            item_id,
-            filename,
-            Some((0, THUMBNAIL_SIZE - 1)),
-        )
-        .await
     }
 
     /// Download full file (existing method, updated to use new function)

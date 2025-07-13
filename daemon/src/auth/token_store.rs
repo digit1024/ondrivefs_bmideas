@@ -74,12 +74,10 @@ impl TokenStore {
             // Save to keyring
             if let Some(ref entry) = self.keyring_entry {
                 entry.set_password(&serialized)?;
-            
             }
         } else {
             // Save to file
             fs::write(&self.file_path, serialized)?;
-            
         }
 
         Ok(())

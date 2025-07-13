@@ -45,9 +45,8 @@ pub async fn setup_logging(log_dir: &PathBuf) -> Result<()> {
     let config = build_log_config(stdout, file)?;
 
     // Initialize logging
-    log4rs::init_config(config)
-        .context("Failed to initialize logging configuration")?;
-    
+    log4rs::init_config(config).context("Failed to initialize logging configuration")?;
+
     Ok(())
 }
 
@@ -76,10 +75,7 @@ fn create_rolling_file_appender(logs_path: &PathBuf) -> Result<RollingFileAppend
     let log_file_path = logs_path.join("daemon.log");
     RollingFileAppender::builder()
         .encoder(Box::new(PatternEncoder::new(FILE_LOG_PATTERN)))
-        .build(
-            log_file_path.to_str().unwrap(),
-            Box::new(policy),
-        )
+        .build(log_file_path.to_str().unwrap(), Box::new(policy))
         .map_err(|e| anyhow::anyhow!("Failed to create rolling file appender: {}", e))
 }
 
@@ -106,10 +102,10 @@ mod tests {
     async fn test_setup_logging() {
         let temp_dir = TempDir::new().unwrap();
         let log_dir = temp_dir.path().to_path_buf();
-        
+
         let result = setup_logging(&log_dir).await;
         assert!(result.is_ok());
-        
+
         // Verify logs directory was created
         let logs_path = log_dir.join(LOG_DIR);
         assert!(logs_path.exists());
@@ -126,7 +122,7 @@ mod tests {
     fn test_rolling_file_appender_creation() {
         let temp_dir = TempDir::new().unwrap();
         let logs_path = temp_dir.path().to_path_buf();
-        
+
         let result = create_rolling_file_appender(&logs_path);
         assert!(result.is_ok());
     }

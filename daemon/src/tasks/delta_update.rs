@@ -1,12 +1,12 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
-use log::{info, debug, warn, error};
+use log::{debug, error, info, warn};
 
 use crate::{
     app_state::AppState,
     onedrive_service::onedrive_models::DriveItem,
-    persistency::database::{DriveItemRepository, DownloadQueueRepository, SyncStateRepository},
+    persistency::database::{DownloadQueueRepository, DriveItemRepository, SyncStateRepository},
     scheduler::{PeriodicTask, TaskMetrics},
 };
 
@@ -49,8 +49,8 @@ impl SyncCycle {
     /// Create a periodic task for this sync cycle
     pub async fn get_task(&self) -> Result<PeriodicTask> {
         let metrics = TaskMetrics::new(
-            DEFAULT_METRICS_WINDOW, 
-            Duration::from_secs(DEFAULT_SLOW_THRESHOLD_SECS)
+            DEFAULT_METRICS_WINDOW,
+            Duration::from_secs(DEFAULT_SLOW_THRESHOLD_SECS),
         );
 
         let app_state = self.app_state.clone();
@@ -73,10 +73,8 @@ impl SyncCycle {
 
     /// Retrieve delta changes from OneDrive API with pagination handling
     pub async fn get_delta_changes(&self) -> Result<Vec<DriveItem>> {
-        let sync_state_repo = SyncStateRepository::new(
-            self.app_state.persistency_manager.pool().clone()
-        );
-        
+        let sync_state_repo = SyncStateRepository::new(self.app_state.persistency().pool().clone());
+
         let sync_state = sync_state_repo.get_latest_sync_state().await?;
         let delta_token = sync_state
             .map(|(_, _, delta_token)| delta_token)
@@ -132,11 +130,15 @@ impl SyncCycle {
     }
 
     /// Detect change type based on OneDrive delta response and existing DB state
-    fn detect_change_type(&self, item: &DriveItem, existing_item: Option<&DriveItem>) -> ChangeType {
+    fn detect_change_type(
+        &self,
+        item: &DriveItem,
+        existing_item: Option<&DriveItem>,
+    ) -> ChangeType {
         match (existing_item, &item.deleted) {
-            (None, Some(_)) => ChangeType::Delete, // Already deleted
+            (None, Some(_)) => ChangeType::Delete,    // Already deleted
             (Some(_), Some(_)) => ChangeType::Delete, // Newly deleted
-            (None, None) => ChangeType::Create, // New item
+            (None, None) => ChangeType::Create,       // New item
             (Some(existing), None) => {
                 // Check if moved (parent changed) or updated (etag changed)
                 if self.parent_id_changed(existing, item) {
@@ -152,8 +154,8 @@ impl SyncCycle {
 
     /// Check if parent ID changed (indicates move)
     fn parent_id_changed(&self, existing: &DriveItem, new: &DriveItem) -> bool {
-        existing.parent_reference.as_ref().map(|p| &p.id) != 
-        new.parent_reference.as_ref().map(|p| &p.id)
+        existing.parent_reference.as_ref().map(|p| &p.id)
+            != new.parent_reference.as_ref().map(|p| &p.id)
     }
 
     /// Check if etag changed (indicates file modification)
@@ -167,11 +169,11 @@ impl SyncCycle {
             if let Some(path) = &parent_ref.path {
                 // Remove "/drive/root:" prefix to get virtual path
                 let virtual_path = path.strip_prefix(DRIVE_ROOT_PREFIX).unwrap_or(path);
-                
+
                 // Check if any download folder matches as prefix (exact case matching)
-                download_folders.iter().any(|folder| {
-                    virtual_path.starts_with(folder)
-                })
+                download_folders
+                    .iter()
+                    .any(|folder| virtual_path.starts_with(folder))
             } else {
                 false // No path info
             }
@@ -186,46 +188,66 @@ impl SyncCycle {
         item: &DriveItem,
         download_folders: &[String],
     ) -> Result<()> {
-        let drive_item_repo = DriveItemRepository::new(
-            self.app_state.persistency_manager.pool().clone()
-        );
-        let download_queue_repo = DownloadQueueRepository::new(
-            self.app_state.persistency_manager.pool().clone()
-        );
-        
+        let drive_item_repo = DriveItemRepository::new(self.app_state.persistency().pool().clone());
+        let download_queue_repo =
+            DownloadQueueRepository::new(self.app_state.persistency().pool().clone());
+
         // Get existing item from DB
         let existing_item = drive_item_repo.get_drive_item(&item.id).await?;
-        
+
         // Detect change type
         let change_type = self.detect_change_type(item, existing_item.as_ref());
-        let local_path = self.app_state.project_config.project_dirs.data_dir().join("downloads");
-        
+        let local_path = self
+            .app_state
+            .config()
+            .project_dirs
+            .data_dir()
+            .join("downloads");
+
         // Ensure downloads directory exists
         Self::ensure_downloads_directory(&local_path)?;
-        
+
         match change_type {
             ChangeType::Create => {
-                self.handle_create_item(item, &drive_item_repo, &download_queue_repo, &local_path, download_folders).await?;
+                self.handle_create_item(
+                    item,
+                    &drive_item_repo,
+                    &download_queue_repo,
+                    &local_path,
+                    download_folders,
+                )
+                .await?;
             }
-            
+
             ChangeType::Update => {
-                self.handle_update_item(item, &drive_item_repo, &download_queue_repo, &local_path, download_folders, existing_item.as_ref()).await?;
+                self.handle_update_item(
+                    item,
+                    &drive_item_repo,
+                    &download_queue_repo,
+                    &local_path,
+                    download_folders,
+                    existing_item.as_ref(),
+                )
+                .await?;
             }
-            
+
             ChangeType::Delete => {
                 self.handle_delete_item(item, &drive_item_repo).await?;
             }
-            
+
             ChangeType::Move => {
                 self.handle_move_item(item, &drive_item_repo).await?;
             }
-            
+
             ChangeType::NoChange => {
-                debug!("⏭️ No change detected for: {} ({})", 
-                       item.name.as_deref().unwrap_or("unnamed"), item.id);
+                debug!(
+                    "⏭️ No change detected for: {} ({})",
+                    item.name.as_deref().unwrap_or("unnamed"),
+                    item.id
+                );
             }
         }
-        
+
         Ok(())
     }
 
@@ -240,13 +262,18 @@ impl SyncCycle {
     ) -> Result<()> {
         // Store new item
         drive_item_repo.store_drive_item(item, None).await?;
-        
+
         // Add to download queue if it matches download folders
         if self.should_download(item, download_folders) {
             let local_file_path = local_path.join(item.id.clone());
-            download_queue_repo.add_to_download_queue(&item.id, &local_file_path).await?;
-            info!("📥 Added new file to download queue: {} ({})", 
-                  item.name.as_deref().unwrap_or("unnamed"), item.id);
+            download_queue_repo
+                .add_to_download_queue(&item.id, &local_file_path)
+                .await?;
+            info!(
+                "📥 Added new file to download queue: {} ({})",
+                item.name.as_deref().unwrap_or("unnamed"),
+                item.id
+            );
         }
         Ok(())
     }
@@ -263,14 +290,19 @@ impl SyncCycle {
     ) -> Result<()> {
         // Update existing item
         drive_item_repo.store_drive_item(item, None).await?;
-        
+
         // Check if etag changed and file should be downloaded
         if let Some(existing) = existing_item {
             if self.etag_changed(existing, item) && self.should_download(item, download_folders) {
                 let local_file_path = local_path.join(item.id.clone());
-                download_queue_repo.add_to_download_queue(&item.id, &local_file_path).await?;
-                info!("📥 Added modified file to download queue: {} ({})", 
-                      item.name.as_deref().unwrap_or("unnamed"), item.id);
+                download_queue_repo
+                    .add_to_download_queue(&item.id, &local_file_path)
+                    .await?;
+                info!(
+                    "📥 Added modified file to download queue: {} ({})",
+                    item.name.as_deref().unwrap_or("unnamed"),
+                    item.id
+                );
             }
         }
         Ok(())
@@ -284,10 +316,13 @@ impl SyncCycle {
     ) -> Result<()> {
         // Mark as deleted in DB
         drive_item_repo.store_drive_item(item, None).await?;
-        
+
         // TODO: Delete local file if it exists
-        info!("🗑️ File deleted: {} ({})", 
-              item.name.as_deref().unwrap_or("unnamed"), item.id);
+        info!(
+            "🗑️ File deleted: {} ({})",
+            item.name.as_deref().unwrap_or("unnamed"),
+            item.id
+        );
         Ok(())
     }
 
@@ -299,45 +334,55 @@ impl SyncCycle {
     ) -> Result<()> {
         // Update parent reference
         drive_item_repo.store_drive_item(item, None).await?;
-        
+
         // TODO: Handle move logic for "download on demand" later
-        info!("📁 File moved: {} ({})", 
-              item.name.as_deref().unwrap_or("unnamed"), item.id);
+        info!(
+            "📁 File moved: {} ({})",
+            item.name.as_deref().unwrap_or("unnamed"),
+            item.id
+        );
         Ok(())
     }
 
     /// Ensure downloads directory exists
     fn ensure_downloads_directory(path: &std::path::Path) -> Result<()> {
         if !path.exists() {
-            std::fs::create_dir_all(path)
-                .with_context(|| format!("Failed to create downloads directory: {}", path.display()))?;
+            std::fs::create_dir_all(path).with_context(|| {
+                format!("Failed to create downloads directory: {}", path.display())
+            })?;
         }
         Ok(())
     }
 
     /// Process download queue
     async fn process_download_queue(&self) -> Result<()> {
-        let download_queue_repo = DownloadQueueRepository::new(
-            self.app_state.persistency_manager.pool().clone()
-        );
+        let download_queue_repo =
+            DownloadQueueRepository::new(self.app_state.persistency().pool().clone());
         let pending_downloads = download_queue_repo.get_pending_downloads().await?;
-        
-        info!("📋 Processing {} pending downloads", pending_downloads.len());
-        
+
+        info!(
+            "📋 Processing {} pending downloads",
+            pending_downloads.len()
+        );
+
         for (queue_id, drive_item_id, local_path) in pending_downloads {
             match self.download_file(&drive_item_id, &local_path).await {
                 Ok(_) => {
-                    download_queue_repo.mark_download_completed(queue_id).await?;
+                    download_queue_repo
+                        .mark_download_completed(queue_id)
+                        .await?;
                     info!("✅ Download completed: {}", drive_item_id);
                 }
                 Err(e) => {
-                    download_queue_repo.mark_download_failed(queue_id, 0).await?;
+                    download_queue_repo
+                        .mark_download_failed(queue_id, 0)
+                        .await?;
                     error!("❌ Download failed for {}: {}", drive_item_id, e);
                     // Skip and retry next cycle as per your strategy
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -350,7 +395,7 @@ impl SyncCycle {
             .get_item_by_id(drive_item_id)
             .await
             .context("Failed to get item by ID")?;
-        
+
         if let Some(download_url) = full_item.download_url {
             // Download file using OneDrive API
             let filename = full_item.name.as_deref().unwrap_or("unnamed");
@@ -360,37 +405,47 @@ impl SyncCycle {
                 .download_file(&download_url, drive_item_id, filename)
                 .await
                 .context("Failed to download file")?;
-            
+
             // Get the length before moving the data
             let data_len = download_result.file_data.len();
-            
+
             // Write downloaded data to local file
-            std::fs::write(local_path, download_result.file_data)
-                .with_context(|| format!("Failed to write file {}: {}", local_path.display(), drive_item_id))?;
-            
-            info!("📥 Downloaded file: {} -> {} ({} bytes)", 
-                  drive_item_id, local_path.display(), data_len);
+            std::fs::write(local_path, download_result.file_data).with_context(|| {
+                format!(
+                    "Failed to write file {}: {}",
+                    local_path.display(),
+                    drive_item_id
+                )
+            })?;
+
+            info!(
+                "📥 Downloaded file: {} -> {} ({} bytes)",
+                drive_item_id,
+                local_path.display(),
+                data_len
+            );
             Ok(())
         } else {
-            Err(anyhow::anyhow!("No download URL available for {}", drive_item_id))
+            Err(anyhow::anyhow!(
+                "No download URL available for {}",
+                drive_item_id
+            ))
         }
     }
 
     /// Run the complete sync cycle
     pub async fn run(&self) -> Result<()> {
-        let download_folders = self
-            .app_state
-            .project_config
-            .settings
-            .download_folders
-            .clone();
-        
-        info!("🔄 Starting sync cycle with download folders: {:?}", download_folders);
-        
+        let download_folders = self.app_state.config().settings.download_folders.clone();
+
+        info!(
+            "🔄 Starting sync cycle with download folders: {:?}",
+            download_folders
+        );
+
         // Get delta changes from OneDrive
         let items = self.get_delta_changes().await?;
         info!("📊 Retrieved {} delta items", items.len());
-        
+
         // Process each delta item
         for item in &items {
             if let Err(e) = self.process_delta_item(item, &download_folders).await {
@@ -398,10 +453,10 @@ impl SyncCycle {
                 // Continue processing other items
             }
         }
-        
+
         // Process download queue
         self.process_download_queue().await?;
-        
+
         info!("✅ Sync cycle completed");
         Ok(())
     }

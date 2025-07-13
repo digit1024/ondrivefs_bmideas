@@ -8,7 +8,7 @@
             "type": "lldb",
             "request": "launch",
             "program": "${workspaceFolder}/target/debug/onedrive-sync-daemon",
-            "args": ["--mountpoint",  "/home/digit1024/OneDrive"],
+            "args": ["--mount",  "/home/digit1024/od"],
             "cwd": "${workspaceFolder}",
             "sourceLanguages": ["rust"],
             "env": {

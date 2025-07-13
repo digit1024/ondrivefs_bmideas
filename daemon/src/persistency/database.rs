@@ -4,7 +4,7 @@
 //! OneDrive metadata, sync state, and queue management.
 
 use crate::onedrive_service::onedrive_models::{DriveItem, ParentReference, UserProfile};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use log::{debug, info, warn};
 use sqlx::{Pool, Row, Sqlite};
 use std::path::PathBuf;
@@ -82,7 +82,7 @@ impl DriveItemRepository {
             Ok(None)
         }
     }
-
+    #[allow(dead_code)]
     /// Get all drive items
     pub async fn get_all_drive_items(&self) -> Result<Vec<DriveItem>> {
         let rows = sqlx::query(
@@ -104,6 +104,46 @@ impl DriveItemRepository {
         Ok(items)
     }
 
+    pub async fn get_drive_items_by_parent_path(
+        &self,
+        parent_path: &str,
+    ) -> Result<Vec<DriveItem>> {
+        let rows = if parent_path.eq("/") {
+            sqlx::query(
+                r#"
+                SELECT id, name, etag, last_modified, created_date, size, is_folder,
+                       mime_type, download_url, is_deleted, parent_id, parent_path
+                FROM drive_items where parent_path = '/drive/root:'  ORDER BY name
+    
+                "#,
+            )
+            .bind(parent_path)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                r#"
+                SELECT id, name, etag, last_modified, created_date, size, is_folder,
+                       mime_type, download_url, is_deleted, parent_id, parent_path
+                FROM drive_items where REPLACE(parent_path , '/drive/root:' , '') = ? ORDER BY name
+    
+                "#,
+            )
+            .bind(parent_path)
+            .fetch_all(&self.pool)
+            .await?
+        };
+
+        let mut items = Vec::new();
+        for row in rows {
+            let item = self.row_to_drive_item(row).await?;
+            items.push(item);
+        }
+
+        Ok(items)
+    }
+
+    #[allow(dead_code)]
     /// Get drive items by parent ID (for folder contents)
     pub async fn get_drive_items_by_parent(&self, parent_id: &str) -> Result<Vec<DriveItem>> {
         let rows = sqlx::query(
@@ -125,7 +165,7 @@ impl DriveItemRepository {
 
         Ok(items)
     }
-
+    #[allow(dead_code)]
     /// Delete a drive item by ID
     pub async fn delete_drive_item(&self, id: &str) -> Result<()> {
         sqlx::query("DELETE FROM drive_items WHERE id = ?")
@@ -959,5 +999,916 @@ impl ProcessingItemRepository {
             retry_count,
             priority,
         })
+    }
+}
+
+/// Local change status enumeration
+#[derive(Debug, Clone, PartialEq)]
+pub enum LocalChangeStatus {
+    New,
+    Implemented,
+    Reflected,
+    Failed,
+}
+
+impl LocalChangeStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LocalChangeStatus::New => "new",
+            LocalChangeStatus::Implemented => "implemented",
+            LocalChangeStatus::Reflected => "reflected",
+            LocalChangeStatus::Failed => "failed",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "new" => Some(LocalChangeStatus::New),
+            "implemented" => Some(LocalChangeStatus::Implemented),
+            "reflected" => Some(LocalChangeStatus::Reflected),
+            "failed" => Some(LocalChangeStatus::Failed),
+            _ => None,
+        }
+    }
+}
+
+/// Local change type enumeration
+#[derive(Debug, Clone, PartialEq)]
+pub enum LocalChangeType {
+    CreateFile,
+    CreateFolder,
+    Modify,
+    Delete,
+    Move,
+}
+
+impl LocalChangeType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LocalChangeType::CreateFile => "create_file",
+            LocalChangeType::CreateFolder => "create_folder",
+            LocalChangeType::Modify => "modify",
+            LocalChangeType::Delete => "delete",
+            LocalChangeType::Move => "move",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "create_file" => Some(LocalChangeType::CreateFile),
+            "create_folder" => Some(LocalChangeType::CreateFolder),
+            "modify" => Some(LocalChangeType::Modify),
+            "delete" => Some(LocalChangeType::Delete),
+            "move" => Some(LocalChangeType::Move),
+            _ => None,
+        }
+    }
+}
+
+/// Local change item representing a local file system change
+#[derive(Debug, Clone)]
+pub struct LocalChange {
+    pub id: Option<i64>,
+    pub temporary_id: String,
+    pub onedrive_id: Option<String>,
+    pub change_type: LocalChangeType,
+    pub virtual_path: String,
+    pub old_virtual_path: Option<String>,
+    pub parent_id: Option<String>,
+    pub file_name: Option<String>,
+    pub content_file_id: Option<String>,
+    pub base_etag: Option<String>,
+    pub status: LocalChangeStatus,
+    pub file_hash: Option<String>,
+    pub file_size: Option<i64>,
+    pub mime_type: Option<String>,
+    pub temp_name: Option<String>,
+    pub temp_size: Option<i64>,
+    pub temp_mime_type: Option<String>,
+    pub temp_created_date: Option<String>,
+    pub temp_last_modified: Option<String>,
+    pub temp_is_folder: Option<bool>,
+    pub error_message: Option<String>,
+    pub retry_count: i32,
+    pub priority: i32,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+impl LocalChange {
+    /// Create a new local change
+    pub fn new(
+        temporary_id: String,
+        change_type: LocalChangeType,
+        virtual_path: String,
+        parent_id: Option<String>,
+        file_name: Option<String>,
+        content_file_id: Option<String>,
+        temp_is_folder: Option<bool>,
+    ) -> Self {
+        Self {
+            id: None,
+            temporary_id,
+            onedrive_id: None,
+            change_type,
+            virtual_path,
+            old_virtual_path: None,
+            parent_id,
+            file_name: file_name.clone(),
+            content_file_id,
+            base_etag: None,
+            status: LocalChangeStatus::New,
+            file_hash: None,
+            file_size: None,
+            mime_type: None,
+            temp_name: file_name,
+            temp_size: None,
+            temp_mime_type: None,
+            temp_created_date: None,
+            temp_last_modified: None,
+            temp_is_folder,
+            error_message: None,
+            retry_count: 0,
+            priority: 0,
+            created_at: None,
+            updated_at: None,
+        }
+    }
+}
+
+/// Database operations for local changes
+pub struct LocalChangesRepository {
+    pool: Pool<Sqlite>,
+}
+
+impl LocalChangesRepository {
+    /// Create a new local changes repository
+    pub fn new(pool: Pool<Sqlite>) -> Self {
+        Self { pool }
+    }
+
+    /// Store a local change in the database
+    pub async fn store_local_change(&self, change: &LocalChange) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT OR REPLACE INTO local_changes (
+                id, temporary_id, onedrive_id, change_type, virtual_path, old_virtual_path,
+                parent_id, file_name, content_file_id, base_etag, status, file_hash,
+                file_size, mime_type, temp_name, temp_size, temp_mime_type,
+                temp_created_date, temp_last_modified, temp_is_folder, error_message,
+                retry_count, priority, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(change.id)
+        .bind(&change.temporary_id)
+        .bind(&change.onedrive_id)
+        .bind(change.change_type.as_str())
+        .bind(&change.virtual_path)
+        .bind(&change.old_virtual_path)
+        .bind(&change.parent_id)
+        .bind(&change.file_name)
+        .bind(&change.content_file_id)
+        .bind(&change.base_etag)
+        .bind(change.status.as_str())
+        .bind(&change.file_hash)
+        .bind(change.file_size)
+        .bind(&change.mime_type)
+        .bind(&change.temp_name)
+        .bind(change.temp_size)
+        .bind(&change.temp_mime_type)
+        .bind(&change.temp_created_date)
+        .bind(&change.temp_last_modified)
+        .bind(change.temp_is_folder)
+        .bind(&change.error_message)
+        .bind(change.retry_count)
+        .bind(change.priority)
+        .bind(&change.created_at)
+        .bind(&change.updated_at)
+        .execute(&self.pool)
+        .await?;
+
+        debug!(
+            "Stored local change: {} ({})",
+            change.virtual_path, change.temporary_id
+        );
+        Ok(())
+    }
+
+    /// Get a local change by temporary ID
+    pub async fn get_local_change_by_temporary_id(
+        &self,
+        temporary_id: &str,
+    ) -> Result<Option<LocalChange>> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, temporary_id, onedrive_id, change_type, virtual_path, old_virtual_path,
+                   parent_id, file_name, content_file_id, base_etag, status, file_hash,
+                   file_size, mime_type, temp_name, temp_size, temp_mime_type,
+                   temp_created_date, temp_last_modified, temp_is_folder, error_message,
+                   retry_count, priority, created_at, updated_at
+            FROM local_changes WHERE temporary_id = ?
+            "#,
+        )
+        .bind(temporary_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some(row) = row {
+            let local_change = self.row_to_local_change(row).await?;
+            Ok(Some(local_change))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Get a local change by OneDrive ID
+    pub async fn get_local_change_by_onedrive_id(
+        &self,
+        onedrive_id: &str,
+    ) -> Result<Option<LocalChange>> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, temporary_id, onedrive_id, change_type, virtual_path, old_virtual_path,
+                   parent_id, file_name, content_file_id, base_etag, status, file_hash,
+                   file_size, mime_type, temp_name, temp_size, temp_mime_type,
+                   temp_created_date, temp_last_modified, temp_is_folder, error_message,
+                   retry_count, priority, created_at, updated_at
+            FROM local_changes WHERE onedrive_id = ?
+            "#,
+        )
+        .bind(onedrive_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some(row) = row {
+            let local_change = self.row_to_local_change(row).await?;
+            Ok(Some(local_change))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Get all local changes by status
+    pub async fn get_local_changes_by_status(
+        &self,
+        status: LocalChangeStatus,
+    ) -> Result<Vec<LocalChange>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, temporary_id, onedrive_id, change_type, virtual_path, old_virtual_path,
+                   parent_id, file_name, content_file_id, base_etag, status, file_hash,
+                   file_size, mime_type, temp_name, temp_size, temp_mime_type,
+                   temp_created_date, temp_last_modified, temp_is_folder, error_message,
+                   retry_count, priority, created_at, updated_at
+            FROM local_changes WHERE status = ? ORDER BY priority DESC, created_at ASC
+            "#,
+        )
+        .bind(status.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut changes = Vec::new();
+        for row in rows {
+            let change = self.row_to_local_change(row).await?;
+            changes.push(change);
+        }
+
+        Ok(changes)
+    }
+
+    /// Get all local changes that are not reflected (not confirmed by delta API)
+    pub async fn get_pending_local_changes(&self) -> Result<Vec<LocalChange>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, temporary_id, onedrive_id, change_type, virtual_path, old_virtual_path,
+                   parent_id, file_name, content_file_id, base_etag, status, file_hash,
+                   file_size, mime_type, temp_name, temp_size, temp_mime_type,
+                   temp_created_date, temp_last_modified, temp_is_folder, error_message,
+                   retry_count, priority, created_at, updated_at
+            FROM local_changes WHERE status != 'reflected' ORDER BY priority DESC, created_at ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut changes = Vec::new();
+        for row in rows {
+            let change = self.row_to_local_change(row).await?;
+            changes.push(change);
+        }
+
+        Ok(changes)
+    }
+
+    /// Update the OneDrive ID for a local change
+    pub async fn update_onedrive_id(&self, temporary_id: &str, onedrive_id: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE local_changes SET onedrive_id = ?, updated_at = CURRENT_TIMESTAMP WHERE temporary_id = ?",
+        )
+        .bind(onedrive_id)
+        .bind(temporary_id)
+        .execute(&self.pool)
+        .await?;
+
+        debug!(
+            "Updated OneDrive ID for local change: {} -> {}",
+            temporary_id, onedrive_id
+        );
+        Ok(())
+    }
+
+    /// Update the status of a local change
+    pub async fn update_status(&self, temporary_id: &str, status: LocalChangeStatus) -> Result<()> {
+        sqlx::query(
+            "UPDATE local_changes SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE temporary_id = ?",
+        )
+        .bind(status.as_str())
+        .bind(temporary_id)
+        .execute(&self.pool)
+        .await?;
+
+        debug!(
+            "Updated status for local change: {} -> {}",
+            temporary_id,
+            status.as_str()
+        );
+        Ok(())
+    }
+
+    /// Update the ETag for a local change
+    pub async fn update_etag(&self, temporary_id: &str, etag: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE local_changes SET base_etag = ?, updated_at = CURRENT_TIMESTAMP WHERE temporary_id = ?",
+        )
+        .bind(etag)
+        .bind(temporary_id)
+        .execute(&self.pool)
+        .await?;
+
+        debug!(
+            "Updated ETag for local change: {} -> {}",
+            temporary_id, etag
+        );
+        Ok(())
+    }
+
+    /// Increment retry count for a local change
+    pub async fn increment_retry_count(&self, temporary_id: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE local_changes SET retry_count = retry_count + 1, updated_at = CURRENT_TIMESTAMP WHERE temporary_id = ?",
+        )
+        .bind(temporary_id)
+        .execute(&self.pool)
+        .await?;
+
+        debug!("Incremented retry count for local change: {}", temporary_id);
+        Ok(())
+    }
+
+    /// Delete a local change
+    pub async fn delete_local_change(&self, temporary_id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM local_changes WHERE temporary_id = ?")
+            .bind(temporary_id)
+            .execute(&self.pool)
+            .await?;
+
+        debug!("Deleted local change: {}", temporary_id);
+        Ok(())
+    }
+
+    /// Generate a new temporary ID
+    pub async fn generate_temporary_id(&self) -> Result<String> {
+        let count = sqlx::query("SELECT COUNT(1) as c FROM local_changes")
+            .fetch_one(&self.pool)
+            .await?;
+        let c: i64 = count.try_get("c")?;
+        Ok(format!("temp_{:03}", c + 1))
+    }
+
+    /// Convert database row to LocalChange
+    async fn row_to_local_change(&self, row: sqlx::sqlite::SqliteRow) -> Result<LocalChange> {
+        let id: Option<i64> = row.try_get("id")?;
+        let temporary_id: String = row.try_get("temporary_id")?;
+        let onedrive_id: Option<String> = row.try_get("onedrive_id")?;
+        let change_type_str: String = row.try_get("change_type")?;
+        let virtual_path: String = row.try_get("virtual_path")?;
+        let old_virtual_path: Option<String> = row.try_get("old_virtual_path")?;
+        let parent_id: Option<String> = row.try_get("parent_id")?;
+        let file_name: Option<String> = row.try_get("file_name")?;
+        let content_file_id: Option<String> = row.try_get("content_file_id")?;
+        let base_etag: Option<String> = row.try_get("base_etag")?;
+        let status_str: String = row.try_get("status")?;
+        let file_hash: Option<String> = row.try_get("file_hash")?;
+        let file_size: Option<i64> = row.try_get("file_size")?;
+        let mime_type: Option<String> = row.try_get("mime_type")?;
+        let temp_name: Option<String> = row.try_get("temp_name")?;
+        let temp_size: Option<i64> = row.try_get("temp_size")?;
+        let temp_mime_type: Option<String> = row.try_get("temp_mime_type")?;
+        let temp_created_date: Option<String> = row.try_get("temp_created_date")?;
+        let temp_last_modified: Option<String> = row.try_get("temp_last_modified")?;
+        let temp_is_folder: Option<bool> = row.try_get("temp_is_folder")?;
+        let error_message: Option<String> = row.try_get("error_message")?;
+        let retry_count: i32 = row.try_get("retry_count")?;
+        let priority: i32 = row.try_get("priority")?;
+        let created_at: Option<String> = row.try_get("created_at")?;
+        let updated_at: Option<String> = row.try_get("updated_at")?;
+
+        let change_type =
+            LocalChangeType::from_str(&change_type_str).unwrap_or(LocalChangeType::Modify);
+        let status = LocalChangeStatus::from_str(&status_str).unwrap_or(LocalChangeStatus::New);
+
+        Ok(LocalChange {
+            id,
+            temporary_id,
+            onedrive_id,
+            change_type,
+            virtual_path,
+            old_virtual_path,
+            parent_id,
+            file_name,
+            content_file_id,
+            base_etag,
+            status,
+            file_hash,
+            file_size,
+            mime_type,
+            temp_name,
+            temp_size,
+            temp_mime_type,
+            temp_created_date,
+            temp_last_modified,
+            temp_is_folder,
+            error_message,
+            retry_count,
+            priority,
+            created_at,
+            updated_at,
+        })
+    }
+}
+
+/// Virtual file item representing a unified view of the filesystem
+#[derive(Debug, Clone)]
+pub struct VirtualFile {
+    pub ino: u64,                        // Inode number
+    pub name: String,                    // File name
+    pub virtual_path: String,            // Virtual path like "/Documents/file.txt"
+    pub parent_ino: Option<u64>,         // Parent inode number
+    pub is_folder: bool,                 // Whether this is a folder
+    pub size: u64,                       // File size in bytes
+    pub mime_type: Option<String>,       // MIME type
+    pub created_date: Option<String>,    // Creation date
+    pub last_modified: Option<String>,   // Last modification date
+    pub content_file_id: Option<String>, // Points to file in downloads/ or changes/
+    pub source: FileSource,              // Where this file comes from
+    pub sync_status: Option<String>,     // Sync status if applicable
+}
+
+/// Source of the file data
+#[derive(Debug, Clone, PartialEq)]
+pub enum FileSource {
+    Remote, // From OneDrive (DriveItems)
+    Local,  // From local changes (LocalChanges)
+    Merged, // Merged from both sources
+}
+
+impl FileSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FileSource::Remote => "remote",
+            FileSource::Local => "local",
+            FileSource::Merged => "merged",
+        }
+    }
+}
+
+/// FUSE repository for unified filesystem view
+pub struct FuseRepository {
+    pool: Pool<Sqlite>,
+    drive_items_repo: DriveItemRepository,
+    local_changes_repo: LocalChangesRepository,
+}
+
+impl FuseRepository {
+    /// Create a new FUSE repository
+    pub fn new(pool: Pool<Sqlite>) -> Self {
+        Self {
+            pool: pool.clone(),
+            drive_items_repo: DriveItemRepository::new(pool.clone()),
+            local_changes_repo: LocalChangesRepository::new(pool),
+        }
+    }
+
+    /// Get a virtual file by virtual path
+    pub async fn get_virtual_file(&self, virtual_path: &str) -> Result<Option<VirtualFile>> {
+        // First check if there's a pending local change for this path
+        let local_change = self.get_local_change_by_path(virtual_path).await?;
+
+        // Get the remote item if it exists
+        let remote_item = self.get_remote_item_by_path(virtual_path).await?;
+
+        // Merge the data
+        let virtual_file = self
+            .merge_file_data(virtual_path, remote_item, local_change)
+            .await?;
+
+        Ok(virtual_file)
+    }
+
+    /// List directory contents
+    pub async fn list_directory(&self, virtual_path: &str) -> Result<Vec<VirtualFile>> {
+        // Get remote items in this directory
+        let remote_items = self.get_remote_items_by_parent_path(virtual_path).await?;
+
+        // Get local changes in this directory
+        let local_changes = self.get_local_changes_by_parent_path(virtual_path).await?;
+
+        // Merge and deduplicate
+        let mut virtual_files = Vec::new();
+
+        // Add remote items
+        for item in remote_items {
+            if let Some(virtual_file) = self.remote_item_to_virtual_file(&item).await? {
+                virtual_files.push(virtual_file);
+            }
+        }
+
+        // Add local changes, overriding remote items if needed
+        for change in &local_changes {
+            if let Some(virtual_file) = self.local_change_to_virtual_file(change).await? {
+                // Remove any existing remote item with same name
+                virtual_files.retain(|f| f.name != virtual_file.name);
+                virtual_files.push(virtual_file);
+            }
+        }
+
+        // Remove items that have pending deletions
+        virtual_files.retain(|f| {
+            !local_changes.iter().any(|c| {
+                c.change_type == LocalChangeType::Delete && c.virtual_path == f.virtual_path
+            })
+        });
+
+        Ok(virtual_files)
+    }
+
+    /// Get file content by virtual path
+    pub async fn get_file_content(&self, virtual_path: &str) -> Result<Option<Vec<u8>>> {
+        if let Some(virtual_file) = self.get_virtual_file(virtual_path).await? {
+            if let Some(content_file_id) = virtual_file.content_file_id {
+                // Determine the storage location based on source
+                let content_path = match virtual_file.source {
+                    FileSource::Remote => {
+                        // Content is in downloads/ directory
+                        let downloads_dir = self.get_downloads_dir()?;
+                        downloads_dir.join(content_file_id)
+                    }
+                    FileSource::Local => {
+                        // Content is in changes/ directory
+                        let changes_dir = self.get_changes_dir()?;
+                        changes_dir.join(content_file_id)
+                    }
+                    FileSource::Merged => {
+                        // Prefer local content if available, otherwise remote
+                        let changes_dir = self.get_changes_dir()?;
+                        let local_path = changes_dir.join(&content_file_id);
+                        if local_path.exists() {
+                            local_path
+                        } else {
+                            let downloads_dir = self.get_downloads_dir()?;
+                            downloads_dir.join(content_file_id)
+                        }
+                    }
+                };
+
+                if content_path.exists() {
+                    let content = std::fs::read(&content_path).context(format!(
+                        "Failed to read file content: {}",
+                        content_path.display()
+                    ))?;
+                    Ok(Some(content))
+                } else {
+                    Ok(None)
+                }
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Create a new local change (for file creation/modification)
+    pub async fn create_local_change(
+        &self,
+        change_type: LocalChangeType,
+        virtual_path: String,
+        parent_path: Option<String>,
+        file_name: String,
+        content: Option<Vec<u8>>,
+        is_folder: bool,
+    ) -> Result<()> {
+        // Generate temporary ID
+        let temporary_id = self.local_changes_repo.generate_temporary_id().await?;
+
+        // Store content if provided
+        let content_file_id = if let Some(content_data) = content {
+            let changes_dir = self.get_changes_dir()?;
+            let content_path = changes_dir.join(&temporary_id);
+            std::fs::write(&content_path, content_data).context(format!(
+                "Failed to write content: {}",
+                content_path.display()
+            ))?;
+            Some(temporary_id.clone())
+        } else {
+            None
+        };
+
+        // Get parent ID if parent path is provided
+        let parent_id = if let Some(parent_path) = parent_path {
+            self.get_parent_id_by_path(&parent_path).await?
+        } else {
+            None
+        };
+
+        // Create local change
+        let local_change = LocalChange::new(
+            temporary_id,
+            change_type,
+            virtual_path,
+            parent_id,
+            Some(file_name),
+            content_file_id,
+            Some(is_folder),
+        );
+
+        // Store in database
+        self.local_changes_repo
+            .store_local_change(&local_change)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Get parent ID by virtual path
+    async fn get_parent_id_by_path(&self, parent_path: &str) -> Result<Option<String>> {
+        // Try to find the parent in remote items first
+        if let Some(parent_item) = self.get_remote_item_by_path(parent_path).await? {
+            return Ok(Some(parent_item.id));
+        }
+
+        // Try to find the parent in local changes
+        if let Some(parent_change) = self.get_local_change_by_path(parent_path).await? {
+            return Ok(parent_change.onedrive_id);
+        }
+
+        Ok(None)
+    }
+
+    /// Get local change by virtual path
+    async fn get_local_change_by_path(&self, virtual_path: &str) -> Result<Option<LocalChange>> {
+        let pending_changes = self.local_changes_repo.get_pending_local_changes().await?;
+
+        for change in pending_changes {
+            if change.virtual_path == virtual_path {
+                return Ok(Some(change));
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Get remote item by virtual path
+    async fn get_remote_item_by_path(&self, virtual_path: &str) -> Result<Option<DriveItem>> {
+        let all_items = self.drive_items_repo.get_all_drive_items().await?;
+
+        for item in all_items {
+            if let Some(item_path) = self.get_virtual_path_for_item(&item).await? {
+                if item_path == virtual_path {
+                    return Ok(Some(item));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Get remote items by parent path
+    async fn get_remote_items_by_parent_path(&self, parent_path: &str) -> Result<Vec<DriveItem>> {
+        let items_in_parent = self
+            .drive_items_repo
+            .get_drive_items_by_parent_path(parent_path)
+            .await?;
+        // let mut items_in_parent = Vec::new();
+
+        // for item in all_items {
+        //     if let Some(item_parent_path) = self.get_parent_path_for_item(&item).await? {
+        //         if item_parent_path == parent_path {
+        //             items_in_parent.push(item);
+        //         }
+        //     }
+        // }
+
+        Ok(items_in_parent)
+    }
+
+    /// Get local changes by parent path
+    async fn get_local_changes_by_parent_path(
+        &self,
+        parent_path: &str,
+    ) -> Result<Vec<LocalChange>> {
+        let pending_changes = self.local_changes_repo.get_pending_local_changes().await?;
+        let mut changes_in_parent = Vec::new();
+
+        for change in pending_changes {
+            if let Some(change_parent_path) = self.get_parent_path_for_change(&change).await? {
+                if change_parent_path == parent_path {
+                    changes_in_parent.push(change);
+                }
+            }
+        }
+
+        Ok(changes_in_parent)
+    }
+
+    /// Get virtual path for a DriveItem
+    async fn get_virtual_path_for_item(&self, item: &DriveItem) -> Result<Option<String>> {
+        if let Some(parent_ref) = &item.parent_reference {
+            if let Some(parent_path) = &parent_ref.path {
+                // Remove "/drive/root:" prefix to get virtual path
+                let virtual_parent_path = parent_path
+                    .strip_prefix("/drive/root:")
+                    .unwrap_or(parent_path);
+
+                if let Some(name) = &item.name {
+                    return Ok(Some(format!("{}/{}", virtual_parent_path, name)));
+                }
+            }
+        }
+
+        // Root level item
+        if let Some(name) = &item.name {
+            return Ok(Some(format!("/{}", name)));
+        }
+
+        Ok(None)
+    }
+
+    /// Get parent path for a DriveItem
+    async fn get_parent_path_for_item(&self, item: &DriveItem) -> Result<Option<String>> {
+        if let Some(parent_ref) = &item.parent_reference {
+            if let Some(parent_path) = &parent_ref.path {
+                // Remove "/drive/root:" prefix to get virtual path
+                let virtual_parent_path = parent_path
+                    .strip_prefix("/drive/root:")
+                    .unwrap_or(parent_path);
+                return Ok(Some(virtual_parent_path.to_string()));
+            }
+        }
+
+        Ok(Some("/".to_string())) // Root level
+    }
+
+    /// Get parent path for a LocalChange
+    async fn get_parent_path_for_change(&self, change: &LocalChange) -> Result<Option<String>> {
+        if let Some(parent_id) = &change.parent_id {
+            // Find the parent item to get its path
+            if let Some(parent_item) = self.drive_items_repo.get_drive_item(parent_id).await? {
+                return self.get_virtual_path_for_item(&parent_item).await;
+            }
+        }
+
+        // If no parent ID, assume root level
+        Ok(Some("/".to_string()))
+    }
+
+    /// Merge file data from remote and local sources
+    async fn merge_file_data(
+        &self,
+        _virtual_path: &str,
+        remote_item: Option<DriveItem>,
+        local_change: Option<LocalChange>,
+    ) -> Result<Option<VirtualFile>> {
+        match (remote_item, local_change) {
+            (Some(_remote), Some(local)) => {
+                // Both exist - local takes precedence
+                self.local_change_to_virtual_file(&local).await
+            }
+            (Some(remote), None) => {
+                // Only remote exists
+                self.remote_item_to_virtual_file(&remote).await
+            }
+            (None, Some(local)) => {
+                // Only local exists
+                self.local_change_to_virtual_file(&local).await
+            }
+            (None, None) => {
+                // Neither exists
+                Ok(None)
+            }
+        }
+    }
+
+    /// Convert DriveItem to VirtualFile
+    async fn remote_item_to_virtual_file(&self, item: &DriveItem) -> Result<Option<VirtualFile>> {
+        if let Some(virtual_path) = self.get_virtual_path_for_item(item).await? {
+            let ino = self.generate_inode(&virtual_path);
+            let parent_ino = if let Some(parent_path) = self.get_parent_path_for_item(item).await? {
+                Some(self.generate_inode(&parent_path))
+            } else {
+                None
+            };
+
+            // Check if file content exists locally
+            let content_exists = {
+                let downloads_dir = self.get_downloads_dir()?;
+                let content_path = downloads_dir.join(&item.id);
+                content_path.exists()
+            };
+
+            // Determine MIME type based on whether content exists locally
+            let mime_type = if content_exists {
+                item.file.as_ref().and_then(|f| f.mime_type.clone())
+            } else {
+                Some("application/onedrivedownload".to_string())
+            };
+
+            Ok(Some(VirtualFile {
+                ino,
+                name: item.name.clone().unwrap_or_else(|| "unnamed".to_string()),
+                virtual_path,
+                parent_ino,
+                is_folder: item.folder.is_some(),
+                size: item.size.unwrap_or(0),
+                mime_type,
+                created_date: item.created_date.clone(),
+                last_modified: item.last_modified.clone(),
+                content_file_id: Some(item.id.clone()),
+                source: FileSource::Remote,
+                sync_status: None,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Convert LocalChange to VirtualFile
+    async fn local_change_to_virtual_file(
+        &self,
+        change: &LocalChange,
+    ) -> Result<Option<VirtualFile>> {
+        let ino = self.generate_inode(&change.virtual_path);
+        let parent_ino = if let Some(parent_path) = self.get_parent_path_for_change(change).await? {
+            Some(self.generate_inode(&parent_path))
+        } else {
+            None
+        };
+
+        Ok(Some(VirtualFile {
+            ino,
+            name: change
+                .file_name
+                .clone()
+                .unwrap_or_else(|| "unnamed".to_string()),
+            virtual_path: change.virtual_path.clone(),
+            parent_ino,
+            is_folder: change.temp_is_folder.unwrap_or(false),
+            size: change.temp_size.unwrap_or(0) as u64,
+            mime_type: change.temp_mime_type.clone(),
+            created_date: change.temp_created_date.clone(),
+            last_modified: change.temp_last_modified.clone(),
+            content_file_id: change.content_file_id.clone(),
+            source: FileSource::Local,
+            sync_status: Some(change.status.as_str().to_string()),
+        }))
+    }
+
+    /// Generate inode number from virtual path
+    fn generate_inode(&self, virtual_path: &str) -> u64 {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+        virtual_path.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Get downloads directory path
+    fn get_downloads_dir(&self) -> Result<std::path::PathBuf> {
+        let home_dir = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .map_err(|_| anyhow::anyhow!("HOME environment variable not set"))?;
+
+        Ok(home_dir.join(".local/share/onedrive-sync/downloads"))
+    }
+
+    /// Get changes directory path
+    fn get_changes_dir(&self) -> Result<std::path::PathBuf> {
+        let home_dir = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .map_err(|_| anyhow::anyhow!("HOME environment variable not set"))?;
+
+        Ok(home_dir.join(".local/share/onedrive-sync/changes"))
     }
 }
