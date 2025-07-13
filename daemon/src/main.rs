@@ -17,13 +17,15 @@ mod tasks;
 
 use std::sync::Arc;
 use std::path::PathBuf;
+use std::thread;
+use std::process;
+use tokio::signal;
 
 use anyhow::{Context, Result};
 use clap::Arg;
 use clap::Command;
 use log::{error, info};
-use onedrive_sync_lib::notifications::NotificationSender;
-use onedrive_sync_lib::notifications::NotificationUrgency;
+use onedrive_sync_lib::notifications::{NotificationSender, NotificationUrgency};
 use serde_json;
 
 use crate::app_state::app_state_factory;
@@ -35,6 +37,7 @@ use crate::persistency::profile_repository::ProfileRepository;
 use crate::tasks::delta_update::SyncCycle;
 use fuser::MountOption;
 use crate::file_manager::{DefaultFileManager, FileManager};
+use std::fs;
 
 
 /// Application configuration and setup
@@ -196,65 +199,140 @@ async fn main() -> Result<()> {
         .version("01.0")
         .about("Mount OneDrive as a FUSE filesystem or handle OneDrive files")
         .arg(
-            Arg::new("mount")
-                .long("mount")
-                .short('m')
-                .num_args(1)
-                .help("Mount point for FUSE filesystem"),
-        )
-        .arg(
             Arg::new("file")
                 .num_args(1)
                 .help("File path to handle (for MIME type handler)"),
         )
         .get_matches();
 
-    // Check if this is a MIME type handler call
+    // If launched as a file handler, only handle the file and exit
     if let Some(file_path) = matches.get_one::<String>("file") {
         info!("📁 Handling file: {}", file_path);
         return handle_file_path(file_path).await;
     }
 
+    let _ = std::process::Command::new("fusermount").arg("-u").arg("~/OneDrive").status();
+    
+    // Set panic hook for user notification
+    std::panic::set_hook(Box::new(|panic_info| {
+        let _ = std::process::Command::new("fusermount").arg("-u").arg("~/OneDrive").status();
+
+        let msg = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
+            s.to_string()
+        } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "Unknown panic".to_string()
+        };
+        let _ = std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new();
+            if let Ok(rt) = rt {
+                let _ = rt.block_on(async {
+                    if let Ok(sender) = NotificationSender::new().await {
+                        let _ = sender.send_notification(
+                            "Open OneDrive",
+                            0,
+                            "dialog-error",
+                            "Open OneDrive",
+                            &format!("Open OneDrive experienced an unexpected error and has to shut down.\n\n{}", msg),
+                            vec![],
+                            vec![("urgency", &NotificationUrgency::Critical.to_u8().to_string())],
+                            10000,
+                        ).await;
+                    }
+                });
+            }
+        });
+    }));
+
     // Initialize application
     let app = AppSetup::initialize().await?;
-
-    // Authenticate with OneDrive
     app.authenticate().await?;
-
-    // Setup infrastructure
     app.setup_infrastructure().await?;
-
-    // Setup user profile
     app.setup_user_profile().await?;
-
-    // Display application information
     app.display_info();
 
-    // Check for mount argument
-    if let Some(mount_point) = matches.get_one::<String>("mount") {
-        info!("🔗 Mounting FUSE filesystem at {}", mount_point);
-        // Prepare repositories
-        let pool = app.app_state.persistency().pool().clone();
-        let download_queue_repo = DownloadQueueRepository::new(pool.clone());
-        let fuse_fs = OneDriveFuse::new_with_file_manager(
-            pool, 
-            download_queue_repo, 
-            app.app_state.file_manager.clone()
-        ).await?;
-        fuse_fs.initialize().await.ok();
-        info!("✅ FUSE filesystem initialized successfully");
-        fuser::mount2(
-            fuse_fs,
-            mount_point,
-            &[MountOption::FSName("onedrive".to_string())],
-        )?;
-        return Ok(());
+    // Prepare FUSE mount directory
+    let home_dir = std::env::var("HOME").expect("HOME not set");
+    let mount_point = PathBuf::from(format!("{}/OneDrive", home_dir));
+    if !mount_point.exists() {
+        info!("Creating mount directory: {}", mount_point.display());
+        fs::create_dir_all(&mount_point)?;
+    }
+    // Check if directory is empty
+    if fs::read_dir(&mount_point)?.next().is_some() {
+        error!("Mount directory {} is not empty", mount_point.display());
+        return Err(anyhow::anyhow!("Mount directory {} is not empty", mount_point.display()));
     }
 
-    // Start the main sync cycle
-    app.start_sync_cycle().await?;
+    // Prepare FUSE filesystem
+    let pool = app.app_state.persistency().pool().clone();
+    let download_queue_repo = DownloadQueueRepository::new(pool.clone());
+    let fuse_fs = OneDriveFuse::new_with_file_manager(
+        pool.clone(),
+        download_queue_repo,
+        app.app_state.file_manager.clone()
+    ).await?;
+    fuse_fs.initialize().await.ok();
+    info!("✅ FUSE filesystem initialized successfully");
 
-    info!("🎉 Daemon started successfully");
+    // Start FUSE in a separate thread
+    let mount_point_clone = mount_point.clone();
+    let (fuse_tx, fuse_rx) = std::sync::mpsc::channel();
+    let fuse_handle = thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            // If fuser::mount2 is synchronous, just call it here
+            let result = fuser::mount2(
+                fuse_fs,
+                &mount_point_clone,
+                &[MountOption::FSName("onedrive".to_string())],
+            );
+            let _ = fuse_tx.send(());
+            if let Err(e) = result {
+                error!("FUSE mount error: {}", e);
+            }
+        });
+    });
+    
+
+    // Start periodic sync scheduler
+    let sync_cycle = SyncCycle::new(app.app_state.clone());
+    let mut scheduler = crate::scheduler::periodic_scheduler::PeriodicScheduler::new();
+    let sync_task = sync_cycle.get_task().await?;
+    scheduler.add_task(sync_task);
+    let scheduler_handle = tokio::spawn(async move {
+        let _ = scheduler.start().await;
+    });
+
+    // Wait for Ctrl+C
+    info!("🟢 Open OneDrive is running. Press Ctrl+C to exit.");
+    signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
+    info!("🛑 Shutting down...");
+
+    // Stop scheduler
+    // (No explicit stop needed, but you can add logic if needed)
+    drop(scheduler_handle);
+
+    // Unmount FUSE
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("fusermount").arg("-u").arg(&mount_point).status();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("umount").arg(&mount_point).status();
+    }
+    // Wait for FUSE thread to finish
+    let _ = fuse_rx.recv();
+    let _ = fuse_handle.join();
+
+    // Remove mount directory
+    if mount_point.exists() {
+        let _ = fs::remove_dir_all(&mount_point);
+    }
+
+    info!("👋 Open OneDrive exited cleanly.");
     Ok(())
 }
 

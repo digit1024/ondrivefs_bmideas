@@ -8,11 +8,12 @@
             "type": "lldb",
             "request": "launch",
             "program": "${workspaceFolder}/target/debug/onedrive-sync-daemon",
-            "args": ["--mount",  "/home/digit1024/od"],
+            "args": [],
             "cwd": "${workspaceFolder}",
             "sourceLanguages": ["rust"],
             "env": {
-                "RUST_LOG": "debug"
+                "RUST_LOG": "debug",
+                "RUST_BACKTRACE": "1"
             },
             "terminal": "integrated",
             
