@@ -1,6 +1,6 @@
-use crate::persistency::database::{
-    DownloadQueueRepository, FileSource, FuseRepository, VirtualFile,
-};
+use crate::persistency::fuse_repository::FuseRepository;
+use crate::persistency::download_queue_repository::DownloadQueueRepository;
+use crate::persistency::types::{VirtualFile, FileSource};
 use anyhow::Result;
 use fuser::{
     FileAttr, FileType, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEntry, ReplyStatfs,

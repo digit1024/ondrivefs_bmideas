@@ -6,7 +6,9 @@ use log::{debug, error, info, warn};
 use crate::{
     app_state::AppState,
     onedrive_service::onedrive_models::DriveItem,
-    persistency::database::{DownloadQueueRepository, DriveItemRepository, SyncStateRepository},
+    persistency::download_queue_repository::DownloadQueueRepository,
+    persistency::drive_item_repository::DriveItemRepository,
+    persistency::sync_state_repository::SyncStateRepository,
     scheduler::{PeriodicTask, TaskMetrics},
 };
 
