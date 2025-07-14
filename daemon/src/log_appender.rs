@@ -84,6 +84,13 @@ fn build_log_config(stdout: ConsoleAppender, file: RollingFileAppender) -> Resul
     Config::builder()
         .appender(Appender::builder().build("stdout", Box::new(stdout)))
         .appender(Appender::builder().build("file", Box::new(file)))
+        .logger(
+            log4rs::config::Logger::builder()
+                .appender("stdout")
+                .appender("file")
+                .additive(false)
+                .build("sqlx_core::logger", LevelFilter::Off)
+        )
         .build(
             Root::builder()
                 .appender("stdout")

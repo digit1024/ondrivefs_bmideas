@@ -1,6 +1,6 @@
 //! LocalChangesRepository: Handles local_changes table operations 
 use anyhow::{Context, Result, anyhow};
-use log::debug;
+use log::{debug, error};
 use sqlx::{Pool, Row, Sqlite};
 use std::path::PathBuf;
 
@@ -140,6 +140,23 @@ impl LocalChange {
 
     // Constructor for create operations
     pub fn new_create(
+        temporary_id: String,
+        change_type: LocalChangeType,
+        parent_id: String,
+        file_name: String,
+        temp_is_folder: bool,
+    ) -> Self {
+        Self::new_create_with_attrs(
+            temporary_id,
+            change_type,
+            parent_id,
+            file_name,
+            temp_is_folder,
+        )
+    }
+
+    // Constructor for create operations with attributes
+    pub fn new_create_with_attrs(
         temporary_id: String,
         change_type: LocalChangeType,
         parent_id: String,
@@ -359,14 +376,15 @@ impl LocalChangesRepository {
     pub async fn store_local_change(&self, change: &LocalChange) -> Result<()> {
         change.validate()?;
 
-        sqlx::query(
+        let r = sqlx::query(
             r#"
             INSERT INTO local_changes (
                 temporary_id, onedrive_id, change_type, status,
                 parent_id, file_name, old_inode, new_inode,
                 old_name, new_name, old_etag, new_etag,
-                file_size, mime_type, temp_created_date, temp_last_modified, temp_is_folder
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                file_size, mime_type, temp_created_date, temp_last_modified, temp_is_folder,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&change.temporary_id)
@@ -386,9 +404,14 @@ impl LocalChangesRepository {
         .bind(&change.temp_created_date)
         .bind(&change.temp_last_modified)
         .bind(change.temp_is_folder)
+        .bind(&change.created_at)
+        .bind(&change.updated_at)
         .execute(&self.pool)
-        .await?;
-
+        .await;
+        if r.is_err() {
+            error!("Failed to store local change: {}", r.err().unwrap());
+            return Err(anyhow!("Failed to store local change"));
+        }
         debug!("Stored local change: {} ({})", change.temporary_id, change.change_type.as_str());
         Ok(())
     }

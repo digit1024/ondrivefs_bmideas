@@ -138,6 +138,24 @@ impl DriveItemRepository {
         Ok(items)
     }
 
+    pub async fn get_root_drive_item(&self) -> Result<DriveItem> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, name, etag, last_modified, created_date, size, is_folder,
+                   mime_type, download_url, is_deleted, parent_id, parent_path
+            FROM drive_items WHERE parent_id ='' and name = 'root'"#
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some(row) = row {
+            let drive_item = self.row_to_drive_item(row).await?;
+            Ok(drive_item)
+        } else {
+            Err(anyhow::anyhow!("Root drive item not found"))
+        }
+        
+    }
     #[allow(dead_code)]
     /// Get drive items by parent ID (for folder contents)
     pub async fn get_drive_items_by_parent(&self, parent_id: &str) -> Result<Vec<DriveItem>> {

@@ -12,8 +12,12 @@ use sqlx::Pool;
 #[derive(Debug)]
 struct InodeMapping {
     inode_to_source: HashMap<u64, FileSource>,
+    // Forward mappings (ID → inode)
     onedrive_id_to_inode: HashMap<String, u64>,
     temporary_id_to_inode: HashMap<String, u64>,
+    // Reverse mappings (inode → ID)
+    inode_to_onedrive_id: HashMap<u64, String>,
+    inode_to_temporary_id: HashMap<u64, String>,
 }
 
 impl InodeMapping {
@@ -22,6 +26,8 @@ impl InodeMapping {
             inode_to_source: HashMap::new(),
             onedrive_id_to_inode: HashMap::new(),
             temporary_id_to_inode: HashMap::new(),
+            inode_to_onedrive_id: HashMap::new(),
+            inode_to_temporary_id: HashMap::new(),
         }
     }
 }
@@ -63,6 +69,11 @@ impl FuseRepository {
         }
     }
 
+    /// Get the database pool
+    pub fn get_pool(&self) -> &Pool<sqlx::Sqlite> {
+        &self.pool
+    }
+
     /// Generate inode for remote items (OneDrive ID based)
     fn generate_inode_for_remote(&mut self, onedrive_id: &str) -> u64 {
         use std::collections::hash_map::DefaultHasher;
@@ -74,6 +85,7 @@ impl FuseRepository {
         // Store mapping
         self.inode_mapping.onedrive_id_to_inode.insert(onedrive_id.to_string(), ino);
         self.inode_mapping.inode_to_source.insert(ino, FileSource::Remote);
+        self.inode_mapping.inode_to_onedrive_id.insert(ino, onedrive_id.to_string());
         ino
     }
 
@@ -88,44 +100,47 @@ impl FuseRepository {
         // Store mapping
         self.inode_mapping.temporary_id_to_inode.insert(temporary_id.to_string(), ino);
         self.inode_mapping.inode_to_source.insert(ino, FileSource::Local);
+        self.inode_mapping.inode_to_temporary_id.insert(ino, temporary_id.to_string());
         ino
     }
 
     /// Get the source of an inode
-    fn get_inode_source(&self, ino: u64) -> Option<FileSource> {
+    pub fn get_inode_source(&self, ino: u64) -> Option<FileSource> {
         self.inode_mapping.inode_to_source.get(&ino).copied()
     }
 
     /// Check if inode belongs to a local change
-    fn is_local_change_inode(&self, ino: u64) -> bool {
+    pub fn is_local_change_inode(&self, ino: u64) -> bool {
         matches!(self.get_inode_source(ino), Some(FileSource::Local))
     }
 
     /// Check if inode belongs to a remote item
-    fn is_remote_item_inode(&self, ino: u64) -> bool {
+    pub fn is_remote_item_inode(&self, ino: u64) -> bool {
         matches!(self.get_inode_source(ino), Some(FileSource::Remote))
     }
+  
 
     /// Get OneDrive ID from inode (for remote items)
     fn get_onedrive_id_from_inode(&self, ino: u64) -> Option<String> {
         self.inode_mapping.inode_to_source.get(&ino)
             .filter(|&source| *source == FileSource::Remote)
-            .and_then(|_| {
-                self.inode_mapping.onedrive_id_to_inode.iter()
-                    .find(|&(_, &inode)| inode == ino)
-                    .map(|(id, _)| id.clone())
-            })
+            .and_then(|_| self.inode_mapping.inode_to_onedrive_id.get(&ino).cloned())
     }
 
     /// Get temporary ID from inode (for local changes)
-    fn get_temporary_id_from_inode(&self, ino: u64) -> Option<String> {
+    pub fn get_temporary_id_from_inode(&self, ino: u64) -> Option<String> {
         self.inode_mapping.inode_to_source.get(&ino)
             .filter(|&source| *source == FileSource::Local)
-            .and_then(|_| {
-                self.inode_mapping.temporary_id_to_inode.iter()
-                    .find(|&(_, &inode)| inode == ino)
-                    .map(|(id, _)| id.clone())
-            })
+            .and_then(|_| self.inode_mapping.inode_to_temporary_id.get(&ino).cloned())
+    }
+
+    /// Get ID from inode (works for both remote and local items)
+    pub fn get_id_from_inode(&self, ino: u64) -> Option<String> {
+        match self.get_inode_source(ino) {
+            Some(FileSource::Remote) | Some(FileSource::Merged) => self.get_onedrive_id_from_inode(ino),
+            Some(FileSource::Local) => self.get_temporary_id_from_inode(ino),
+            None => None,
+        }
     }
 
     /// List all virtual files in a directory (unified view)
