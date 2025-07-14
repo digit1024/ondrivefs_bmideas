@@ -5,13 +5,33 @@ use crate::onedrive_service::onedrive_models::DriveItem;
 use crate::file_manager::SyncFileManager;
 use anyhow::{Context, Result};
 use std::path::PathBuf;
+use std::collections::HashMap;
 use sqlx::Pool;
+
+/// Inode mapping for tracking source of each inode
+#[derive(Debug)]
+struct InodeMapping {
+    inode_to_source: HashMap<u64, FileSource>,
+    onedrive_id_to_inode: HashMap<String, u64>,
+    temporary_id_to_inode: HashMap<String, u64>,
+}
+
+impl InodeMapping {
+    fn new() -> Self {
+        Self {
+            inode_to_source: HashMap::new(),
+            onedrive_id_to_inode: HashMap::new(),
+            temporary_id_to_inode: HashMap::new(),
+        }
+    }
+}
 
 pub struct FuseRepository {
     pool: Pool<sqlx::Sqlite>,
     drive_items_repo: DriveItemRepository,
     local_changes_repo: LocalChangesRepository,
     file_manager: Option<Box<dyn SyncFileManager + Send + Sync>>,
+    inode_mapping: InodeMapping,
 }
 
 impl FuseRepository {
@@ -23,6 +43,7 @@ impl FuseRepository {
             drive_items_repo,
             local_changes_repo,
             file_manager: None,
+            inode_mapping: InodeMapping::new(),
         }
     }
 
@@ -38,15 +59,81 @@ impl FuseRepository {
             drive_items_repo,
             local_changes_repo,
             file_manager: Some(file_manager),
+            inode_mapping: InodeMapping::new(),
         }
     }
 
+    /// Generate inode for remote items (OneDrive ID based)
+    fn generate_inode_for_remote(&mut self, onedrive_id: &str) -> u64 {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        format!("REMOTE_{}", onedrive_id).hash(&mut hasher);
+        let ino = hasher.finish();
+        
+        // Store mapping
+        self.inode_mapping.onedrive_id_to_inode.insert(onedrive_id.to_string(), ino);
+        self.inode_mapping.inode_to_source.insert(ino, FileSource::Remote);
+        ino
+    }
+
+    /// Generate inode for local changes (Temporary ID based)
+    fn generate_inode_for_local(&mut self, temporary_id: &str) -> u64 {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        format!("LOCAL_{}", temporary_id).hash(&mut hasher);
+        let ino = hasher.finish();
+        
+        // Store mapping
+        self.inode_mapping.temporary_id_to_inode.insert(temporary_id.to_string(), ino);
+        self.inode_mapping.inode_to_source.insert(ino, FileSource::Local);
+        ino
+    }
+
+    /// Get the source of an inode
+    fn get_inode_source(&self, ino: u64) -> Option<FileSource> {
+        self.inode_mapping.inode_to_source.get(&ino).copied()
+    }
+
+    /// Check if inode belongs to a local change
+    fn is_local_change_inode(&self, ino: u64) -> bool {
+        matches!(self.get_inode_source(ino), Some(FileSource::Local))
+    }
+
+    /// Check if inode belongs to a remote item
+    fn is_remote_item_inode(&self, ino: u64) -> bool {
+        matches!(self.get_inode_source(ino), Some(FileSource::Remote))
+    }
+
+    /// Get OneDrive ID from inode (for remote items)
+    fn get_onedrive_id_from_inode(&self, ino: u64) -> Option<String> {
+        self.inode_mapping.inode_to_source.get(&ino)
+            .filter(|&source| *source == FileSource::Remote)
+            .and_then(|_| {
+                self.inode_mapping.onedrive_id_to_inode.iter()
+                    .find(|&(_, &inode)| inode == ino)
+                    .map(|(id, _)| id.clone())
+            })
+    }
+
+    /// Get temporary ID from inode (for local changes)
+    fn get_temporary_id_from_inode(&self, ino: u64) -> Option<String> {
+        self.inode_mapping.inode_to_source.get(&ino)
+            .filter(|&source| *source == FileSource::Local)
+            .and_then(|_| {
+                self.inode_mapping.temporary_id_to_inode.iter()
+                    .find(|&(_, &inode)| inode == ino)
+                    .map(|(id, _)| id.clone())
+            })
+    }
+
     /// List all virtual files in a directory (unified view)
-    pub async fn list_directory(&self, virtual_path: &str) -> Result<Vec<VirtualFile>> {
+    pub async fn list_directory(&mut self, virtual_path: &str) -> Result<Vec<VirtualFile>> {
         // Get remote items in this directory
         let remote_items = self.drive_items_repo.get_drive_items_by_parent_path(virtual_path).await?;
         // Get local changes in this directory
-        let local_changes = self.local_changes_repo.get_local_changes_by_parent_path(virtual_path).await?;
+        let local_changes = self.local_changes_repo.get_changes_by_parent_id(virtual_path).await?;
         // Merge remote and local changes into a unified view
         let mut files = Vec::new();
         for item in remote_items {
@@ -59,10 +146,10 @@ impl FuseRepository {
     }
 
     /// Convert a remote DriveItem to a VirtualFile
-    async fn remote_item_to_virtual_file(&self, item: &DriveItem) -> Result<VirtualFile> {
-        // Generate inode from virtual path
+    async fn remote_item_to_virtual_file(&mut self, item: &DriveItem) -> Result<VirtualFile> {
+        // Generate inode from OneDrive ID
         let virtual_path = self.get_virtual_path(item);
-        let ino = self.generate_inode(&virtual_path);
+        let ino = self.generate_inode_for_remote(&item.id);
         
         // Determine the display name based on whether file is downloaded locally
         let display_name = if item.folder.is_some() {
@@ -135,20 +222,70 @@ impl FuseRepository {
     }
 
     /// Convert a local change to a VirtualFile
-    fn local_change_to_virtual_file(&self, change: &crate::persistency::local_changes_repository::LocalChange) -> VirtualFile {
-        let ino = self.generate_inode(&change.virtual_path);
+    fn local_change_to_virtual_file(&mut self, change: &crate::persistency::local_changes_repository::LocalChange) -> VirtualFile {
+        // For local changes, we need to construct the virtual path based on the change type
+        let virtual_path = match change.change_type {
+            crate::persistency::local_changes_repository::LocalChangeType::CreateFile | 
+            crate::persistency::local_changes_repository::LocalChangeType::CreateFolder => {
+                // For create operations, construct path from parent_id and file_name
+                if let (Some(parent_id), Some(file_name)) = (&change.parent_id, &change.file_name) {
+                    // This is a simplified path construction - in a real implementation,
+                    // you'd need to resolve parent_id to parent path
+                    format!("/temp/{}", file_name)
+                } else {
+                    format!("/temp/{}", change.temporary_id)
+                }
+            },
+            crate::persistency::local_changes_repository::LocalChangeType::Move => {
+                // For move operations, use the new parent path
+                if let Some(new_inode) = change.new_inode {
+                    format!("/temp/moved_{}", new_inode)
+                } else {
+                    format!("/temp/{}", change.temporary_id)
+                }
+            },
+            crate::persistency::local_changes_repository::LocalChangeType::Rename => {
+                // For rename operations, use the new name
+                if let Some(new_name) = &change.new_name {
+                    format!("/temp/{}", new_name)
+                } else {
+                    format!("/temp/{}", change.temporary_id)
+                }
+            },
+            _ => {
+                // For other operations, use temporary ID
+                format!("/temp/{}", change.temporary_id)
+            }
+        };
+
+        let ino = self.generate_inode_for_local(&change.temporary_id);
+        
+        // Determine the name based on change type
+        let name = match change.change_type {
+            crate::persistency::local_changes_repository::LocalChangeType::CreateFile | 
+            crate::persistency::local_changes_repository::LocalChangeType::CreateFolder => {
+                change.file_name.clone().unwrap_or_else(|| change.temporary_id.clone())
+            },
+            crate::persistency::local_changes_repository::LocalChangeType::Rename => {
+                change.new_name.clone().unwrap_or_else(|| change.temporary_id.clone())
+            },
+            _ => {
+                change.temporary_id.clone()
+            }
+        };
+
         VirtualFile {
             ino,
-            name: change.file_name.clone().or_else(|| change.temp_name.clone()).unwrap_or_default(),
-            virtual_path: change.virtual_path.clone(),
-            display_path: Some(change.virtual_path.clone()), // Local files use same path for display
+            name,
+            virtual_path: virtual_path.clone(),
+            display_path: Some(virtual_path), // Local files use same path for display
             parent_ino: None,
             is_folder: change.temp_is_folder.unwrap_or(false),
-            size: change.temp_size.unwrap_or(0) as u64,
-            mime_type: change.temp_mime_type.clone(),
+            size: change.file_size.unwrap_or(0) as u64,
+            mime_type: change.mime_type.clone(),
             created_date: change.temp_created_date.clone(),
             last_modified: change.temp_last_modified.clone(),
-            content_file_id: change.content_file_id.clone(),
+            content_file_id: change.onedrive_id.clone(),
             source: FileSource::Local,
             sync_status: Some(change.status.as_str().into()),
         }
@@ -173,14 +310,5 @@ impl FuseRepository {
         } else {
             format!("/{}", item.name.as_deref().unwrap_or(""))
         }
-    }
-
-    /// Generate an inode from a virtual path
-    fn generate_inode(&self, virtual_path: &str) -> u64 {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let mut hasher = DefaultHasher::new();
-        virtual_path.hash(&mut hasher);
-        hasher.finish()
     }
 } 

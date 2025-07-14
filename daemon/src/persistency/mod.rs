@@ -268,27 +268,33 @@ impl PersistencyManager {
             CREATE TABLE IF NOT EXISTS local_changes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 temporary_id TEXT NOT NULL,     -- "temp_001", "temp_002", etc.
-                onedrive_id TEXT,              -- Assigned during API call, not delta confirmation
-                change_type TEXT NOT NULL,     -- 'create_file', 'create_folder', 'modify', 'delete', 'move'
-                virtual_path TEXT NOT NULL,    -- Target path after change
-                old_virtual_path TEXT,         -- Original path (for moves)
-                parent_id TEXT,                -- OneDrive parent folder ID
-                file_name TEXT,
-                content_file_id TEXT,          -- Points to file in changes/
-                base_etag TEXT,                -- ETag when change was detected
+                onedrive_id TEXT,              -- Assigned during API call
+                change_type TEXT NOT NULL,     -- 'create_file', 'create_folder', 'modify', 'delete', 'move', 'rename'
                 status TEXT DEFAULT 'new',     -- 'new', 'implemented', 'reflected', 'failed'
-                file_hash TEXT,
+                
+                -- For CREATE operations
+                parent_id TEXT,                -- OneDrive parent folder ID
+                file_name TEXT,                -- Name for new files/folders
+                
+                -- For MOVE operations  
+                old_inode INTEGER,            -- Original inode
+                new_inode INTEGER,            -- New inode
+                
+                -- For RENAME operations
+                old_name TEXT,                 -- Original name
+                new_name TEXT,                 -- New name
+                
+                -- For UPDATE operations
+                old_etag TEXT,                 -- Original ETag
+                new_etag TEXT,                 -- New ETag
+                
+                -- File metadata (for all operations)
                 file_size INTEGER,
                 mime_type TEXT,
-                temp_name TEXT,                -- Temporary attributes (like DriveItems)
-                temp_size INTEGER,
-                temp_mime_type TEXT,
                 temp_created_date TEXT,
                 temp_last_modified TEXT,
                 temp_is_folder BOOLEAN,
-                error_message TEXT,
-                retry_count INTEGER DEFAULT 0,
-                priority INTEGER DEFAULT 0,
+                
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
@@ -297,32 +303,14 @@ impl PersistencyManager {
         .execute(&self.pool)
         .await?;
 
-        // Create indexes for efficient queries
+        // Create indexes for performance
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_local_changes_status ON local_changes(status)")
             .execute(&self.pool)
             .await?;
-
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_local_changes_temporary_id ON local_changes(temporary_id)")
+        
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_local_changes_type ON local_changes(change_type)")
             .execute(&self.pool)
             .await?;
-
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_local_changes_onedrive_id ON local_changes(onedrive_id)")
-            .execute(&self.pool)
-            .await?;
-
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_local_changes_virtual_path ON local_changes(virtual_path)")
-            .execute(&self.pool)
-            .await?;
-
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_local_changes_change_type ON local_changes(change_type)")
-            .execute(&self.pool)
-            .await?;
-
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_local_changes_priority ON local_changes(priority)",
-        )
-        .execute(&self.pool)
-        .await?;
 
         Ok(())
     }

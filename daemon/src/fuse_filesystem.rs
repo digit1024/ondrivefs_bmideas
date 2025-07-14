@@ -20,7 +20,7 @@ use sqlx::Pool;
 
 /// OneDrive FUSE filesystem implementation
 pub struct OneDriveFuse {
-    fuse_repo: Arc<FuseRepository>,
+    fuse_repo: Arc<Mutex<FuseRepository>>,
     download_queue_repo: Arc<DownloadQueueRepository>,
     file_manager: Arc<DefaultFileManager>,
     inode_map: Arc<Mutex<HashMap<u64, VirtualFile>>>,
@@ -37,7 +37,7 @@ impl OneDriveFuse {
     /// Create a new OneDrive FUSE filesystem
     pub async fn new(fuse_repo: FuseRepository, download_queue_repo: DownloadQueueRepository, file_manager: Arc<DefaultFileManager>) -> Result<Self> {
         Ok(Self {
-            fuse_repo: Arc::new(fuse_repo),
+            fuse_repo: Arc::new(Mutex::new(fuse_repo)),
             download_queue_repo: Arc::new(download_queue_repo),
             file_manager,
             inode_map: Arc::new(Mutex::new(HashMap::new())),
@@ -58,7 +58,7 @@ impl OneDriveFuse {
         );
         
         Ok(Self {
-            fuse_repo: Arc::new(fuse_repo),
+            fuse_repo: Arc::new(Mutex::new(fuse_repo)),
             download_queue_repo: Arc::new(download_queue_repo),
             file_manager,
             inode_map: Arc::new(Mutex::new(HashMap::new())),
@@ -97,7 +97,10 @@ impl OneDriveFuse {
         info!("Initializing OneDrive FUSE filesystem...");
 
         // Load root directory
-        let root_files = self.fuse_repo.list_directory("/").await?;
+        let root_files = {
+            let mut fuse_repo = self.fuse_repo.lock().unwrap();
+            fuse_repo.list_directory("/").await?
+        };
 
         let mut inode_map = self.inode_map.lock().unwrap();
         let mut path_map = self.path_map.lock().unwrap();
@@ -338,7 +341,10 @@ impl fuser::Filesystem for OneDriveFuse {
             "..",
         );
         let mut entries = vec![onedot_entry, two_dot_entry];
-        let dir_items = sync_await(self.fuse_repo.list_directory(&item.virtual_path)).unwrap();
+        let dir_items = {
+            let mut fuse_repo = self.fuse_repo.lock().unwrap();
+            sync_await(fuse_repo.list_directory(&item.virtual_path)).unwrap()
+        };
         self.cache_virtual_files(&dir_items);
         dir_items.iter().for_each(|item| {
             entries.push((

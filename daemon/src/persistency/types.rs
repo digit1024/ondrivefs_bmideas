@@ -17,7 +17,7 @@ pub struct VirtualFile {
     pub sync_status: Option<String>,     // Sync status if applicable
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Copy)]
 pub enum FileSource {
     Remote, // From OneDrive (DriveItems)
     Local,  // From local changes (LocalChanges)

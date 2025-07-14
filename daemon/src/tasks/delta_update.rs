@@ -12,6 +12,8 @@ use crate::{
     scheduler::{PeriodicTask, TaskMetrics},
 };
 
+use onedrive_sync_lib::notifications::{NotificationSender, NotificationUrgency};
+
 /// Default sync interval in seconds
 const DEFAULT_SYNC_INTERVAL_SECS: u64 = 30; // 5 minutes
 
@@ -374,6 +376,25 @@ impl SyncCycle {
                         .mark_download_completed(queue_id)
                         .await?;
                     info!("✅ Download completed: {}", drive_item_id);
+
+                    let drive_item_repo = DriveItemRepository::new(self.app_state.persistency().pool().clone());
+                    let name = drive_item_repo.get_drive_item(&drive_item_id).await?.unwrap().name.unwrap_or("unnamed".to_string());
+
+                    
+                    let notification_sender = NotificationSender::new().await;
+                    if let Ok(sender) = notification_sender {
+                        let filename = name;
+                        let _ = sender.send_notification(
+                            "Open OneDrive",
+                            0,
+                            "open-onedrive", 
+                            "Open OneDrive",
+                            &format!("File {} finished downloading", filename),
+                            vec![],
+                            vec![("urgency", &NotificationUrgency::Normal.to_u8().to_string())],
+                            5000,
+                        ).await;
+                    }
                 }
                 Err(e) => {
                     download_queue_repo
