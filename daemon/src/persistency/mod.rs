@@ -4,6 +4,7 @@
 //! sync state, and other persistent data using SQLx with SQLite.
 
 pub mod drive_item_repository;
+pub mod drive_item_with_fuse_repository;
 pub mod sync_state_repository;
 pub mod download_queue_repository;
 pub mod upload_queue_repository;
@@ -69,6 +70,7 @@ impl PersistencyManager {
 
         // Create tables for OneDrive models
         self.create_drive_items_table().await?;
+        self.create_drive_items_with_fuse_table().await?;
         self.create_sync_state_table().await?;
         self.create_download_queue_table().await?;
         self.create_upload_queue_table().await?;
@@ -98,6 +100,41 @@ impl PersistencyManager {
                 parent_id TEXT,
                 parent_path TEXT,
                 local_path TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Create the drive_items_with_fuse table for storing OneDrive file/folder metadata with Fuse data
+    async fn create_drive_items_with_fuse_table(&self) -> Result<()> {
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS drive_items_with_fuse (
+                id TEXT PRIMARY KEY,
+                name TEXT,
+                etag TEXT,
+                last_modified TEXT,
+                created_date TEXT,
+                size INTEGER,
+                is_folder BOOLEAN,
+                mime_type TEXT,
+                download_url TEXT,
+                is_deleted BOOLEAN DEFAULT FALSE,
+                parent_id TEXT,
+                parent_path TEXT,
+                local_path TEXT,
+                virtual_ino INTEGER,
+                parent_ino INTEGER,
+                virtual_path TEXT,
+                display_path TEXT,
+                file_source TEXT,
+                sync_status TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
