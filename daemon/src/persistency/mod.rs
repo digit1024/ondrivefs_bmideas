@@ -116,7 +116,8 @@ impl PersistencyManager {
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS drive_items_with_fuse (
-                id TEXT PRIMARY KEY,
+                virtual_ino INTEGER PRIMARY KEY AUTOINCREMENT,
+                onedrive_id TEXT UNIQUE NOT NULL,
                 name TEXT,
                 etag TEXT,
                 last_modified TEXT,
@@ -129,7 +130,6 @@ impl PersistencyManager {
                 parent_id TEXT,
                 parent_path TEXT,
                 local_path TEXT,
-                virtual_ino INTEGER,
                 parent_ino INTEGER,
                 virtual_path TEXT,
                 display_path TEXT,
@@ -139,6 +139,31 @@ impl PersistencyManager {
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
             "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Create indexes for efficient lookups
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_drive_items_with_fuse_onedrive_id ON drive_items_with_fuse(onedrive_id)",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_drive_items_with_fuse_parent_ino ON drive_items_with_fuse(parent_ino)",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_drive_items_with_fuse_virtual_path ON drive_items_with_fuse(virtual_path)",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_drive_items_with_fuse_file_source ON drive_items_with_fuse(file_source)",
         )
         .execute(&self.pool)
         .await?;
