@@ -9,7 +9,7 @@ use fuser::{
     FileAttr, FileType, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEntry, ReplyStatfs,
     ReplyWrite,
 };
-use log::{debug, info, warn};
+use log::{debug, info, warn, error};
 use sqlx::types::chrono;
 use std::collections::HashMap;
 use std::ffi::OsStr;
@@ -278,15 +278,29 @@ impl OneDriveFuse {
         if parent_ino == 1 {
             // we need to get the root id from the DriveItemRepository
             let drive_item_repo = DriveItemRepository::new(self.fuse_repo.lock().unwrap().get_pool().clone());
-             let drive_item = sync_await(drive_item_repo.get_root_drive_item()).unwrap();
-            return Some(drive_item.id);
+            match sync_await(drive_item_repo.get_root_drive_item()) {
+                Ok(drive_item) => {
+                    debug!("Found root drive item with ID: {}", drive_item.id);
+                    return Some(drive_item.id);
+                }
+                Err(e) => {
+                    error!("Failed to get root drive item: {}", e);
+                    return None;
+                }
+            }
         }
-        let id = self.fuse_repo.lock().unwrap().get_id_from_inode(parent_ino);
-        if id.is_none() {
-            return None;
-        }
-        Some(id.unwrap())
         
+        let id = self.fuse_repo.lock().unwrap().get_id_from_inode(parent_ino);
+        match &id {
+            Some(id_str) => {
+                debug!("Found ID {} for inode {}", id_str, parent_ino);
+                Some(id_str.clone())
+            }
+            None => {
+                error!("No ID found for inode {}", parent_ino);
+                None
+            }
+        }
     }
 
     /// Create a local change record
@@ -307,10 +321,22 @@ impl OneDriveFuse {
         match change_type {
             crate::persistency::local_changes_repository::LocalChangeType::CreateFile |
             crate::persistency::local_changes_repository::LocalChangeType::CreateFolder => {
+                // For create operations, parent_id is required
+                if parent_id.is_none() {
+                    error!("Cannot create file/folder: parent_id is missing for inode");
+                    // Return a default change that will fail validation
+                    return crate::persistency::local_changes_repository::LocalChange::new_create(
+                        temporary_id.clone(),
+                        change_type,
+                        "unknown".to_string(),
+                        file_name.unwrap_or_else(|| temporary_id),
+                        temp_is_folder.unwrap_or(false),
+                    );
+                }
                 crate::persistency::local_changes_repository::LocalChange::new_create(
                     temporary_id.clone(),
                     change_type,
-                    parent_id.unwrap_or_else(|| "unknown".to_string()),
+                    parent_id.unwrap(),
                     file_name.unwrap_or_else(|| temporary_id),
                     temp_is_folder.unwrap_or(false),
                 )
@@ -445,6 +471,7 @@ impl fuser::Filesystem for OneDriveFuse {
             fuser::FileType::Directory,
             "..",
         );
+        
         let mut entries = vec![onedot_entry, two_dot_entry];
         let dir_items = {
             let mut fuse_repo = self.fuse_repo.lock().unwrap();
@@ -652,21 +679,133 @@ impl fuser::Filesystem for OneDriveFuse {
             data.len()
         );
 
-        // Create a modify local change
-        let change = self.create_local_change(
-            crate::persistency::local_changes_repository::LocalChangeType::Modify,
-            None,
-            None,
-            None, // TODO: Get OneDrive ID from inode mapping
-            None,
-            None,
-            None,
-            None,
-            None,
-        );
-        self.store_local_change(&change);
+        let mut fuse_repo = self.fuse_repo.lock().unwrap();
+        let virtual_file = match self.get_virtual_file_by_ino(ino) {
+            Some(vf) => vf,
+            None => {
+                reply.error(libc::ENOENT);
+                return;
+            }
+        };
 
-        reply.written(data.len() as u32);
+        // If this is a remote/downloaded file, copy to uploads on first write
+        if virtual_file.source == FileSource::Remote {
+            let onedrive_id = match &virtual_file.content_file_id {
+                Some(id) => id.clone(),
+                None => {
+                    reply.error(libc::EIO);
+                    return;
+                }
+            };
+            let upload_path = self.file_manager.get_upload_dir().join(&onedrive_id);
+            let download_path = self.file_manager.get_download_dir().join(&onedrive_id);
+            if !self.file_manager.file_exists_in_upload(&onedrive_id) {
+                // Copy from downloads to uploads
+                if let Err(e) = std::fs::copy(&download_path, &upload_path) {
+                    error!("Failed to copy file from downloads to uploads: {}", e);
+                    reply.error(libc::EIO);
+                    return;
+                }
+            }
+            // Write data to uploads file
+            let write_result = if offset == 0 {
+                std::fs::write(&upload_path, data)
+            } else {
+                let file_result = std::fs::OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .open(&upload_path);
+                match file_result {
+                    Ok(mut file) => {
+                        use std::io::Seek;
+                        use std::io::SeekFrom;
+                        use std::io::Write;
+                        if let Err(e) = file.seek(SeekFrom::Start(offset as u64)) {
+                            return reply.error(libc::EIO);
+                        }
+                        file.write_all(data)
+                    }
+                    Err(e) => Err(e),
+                }
+            };
+            if let Err(e) = write_result {
+                error!("Failed to write to uploads: {}", e);
+                reply.error(libc::EIO);
+                return;
+            }
+            // Create a modify local change with OneDrive ID as temporary_id
+            let change = self.create_local_change(
+                crate::persistency::local_changes_repository::LocalChangeType::Modify,
+                None,
+                None,
+                Some(onedrive_id.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+            self.store_local_change(&change);
+            // Update inode mapping to treat this as a local change from now on
+            fuse_repo.add_local_inode_mapping(&onedrive_id, ino);
+            reply.written(data.len() as u32);
+            return;
+        }
+
+        // If this is already a local change (uploads), write to it
+        if virtual_file.source == FileSource::Local {
+            let temporary_id = match fuse_repo.get_temporary_id_from_inode(ino) {
+                Some(id) => id,
+                None => {
+                    reply.error(libc::ENOENT);
+                    return;
+                }
+            };
+            let upload_path = self.file_manager.get_upload_dir().join(&temporary_id);
+            let write_result = if offset == 0 {
+                std::fs::write(&upload_path, data)
+            } else {
+                let file_result = std::fs::OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .open(&upload_path);
+                match file_result {
+                    Ok(mut file) => {
+                        use std::io::Seek;
+                        use std::io::SeekFrom;
+                        use std::io::Write;
+                        if let Err(e) = file.seek(SeekFrom::Start(offset as u64)) {
+                            return reply.error(libc::EIO);
+                        }
+                        file.write_all(data)
+                    }
+                    Err(e) => Err(e),
+                }
+            };
+            if let Err(e) = write_result {
+                error!("Failed to write to uploads: {}", e);
+                reply.error(libc::EIO);
+                return;
+            }
+            // Create a modify local change with temporary_id (could be OneDrive ID for modified remote files)
+            let change = self.create_local_change(
+                crate::persistency::local_changes_repository::LocalChangeType::Modify,
+                None,
+                None,
+                Some(temporary_id.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+            self.store_local_change(&change);
+            reply.written(data.len() as u32);
+            return;
+        }
+
+        // Otherwise, error
+        reply.error(libc::EIO);
     }
 
     fn create(
@@ -682,6 +821,9 @@ impl fuser::Filesystem for OneDriveFuse {
         let name_str = name.to_string_lossy();
         debug!("CREATE: parent={}, name={}", parent, name_str);
 
+        // Generate temporary ID for the new file
+        let temporary_id = self.generate_temporary_id();
+        
         // Create a new inode for the file
         let new_ino = 1000
             + (SystemTime::now()
@@ -690,6 +832,14 @@ impl fuser::Filesystem for OneDriveFuse {
                 .as_nanos()
                 % 10000) as u64;
         let attr = self.create_default_attr(new_ino, false);
+
+        // Create actual file in uploads folder
+        let upload_path = self.file_manager.get_upload_dir().join(&temporary_id);
+        if let Err(e) = std::fs::write(&upload_path, &[]) {
+            error!("Failed to create file in uploads: {}", e);
+            reply.error(libc::EIO);
+            return;
+        }
 
         // Create a local change for file creation
         let parent_id = self.get_id_from_inode(parent);
@@ -706,6 +856,12 @@ impl fuser::Filesystem for OneDriveFuse {
         );
         self.store_local_change(&change);
 
+        // Add to inode mapping
+        {
+            let mut fuse_repo = self.fuse_repo.lock().unwrap();
+            fuse_repo.add_local_inode_mapping(&temporary_id, new_ino);
+        }
+
         reply.created(&Duration::from_secs(1), &attr, 0, 0, 0);
     }
 
@@ -721,6 +877,9 @@ impl fuser::Filesystem for OneDriveFuse {
         let name_str = name.to_string_lossy();
         info!("MKDIR: parent={}, name={}", parent, name_str);
 
+        // Generate temporary ID for the new directory
+        let temporary_id = self.generate_temporary_id();
+        
         // Create a new inode for the directory
         let new_ino = 1000
             + (SystemTime::now()
@@ -729,6 +888,14 @@ impl fuser::Filesystem for OneDriveFuse {
                 .as_nanos()
                 % 10000) as u64;
         let attr = self.create_default_attr(new_ino, true);
+
+        // Create actual directory in uploads folder
+        let upload_path = self.file_manager.get_upload_dir().join(&temporary_id);
+        if let Err(e) = std::fs::create_dir(&upload_path) {
+            error!("Failed to create directory in uploads: {}", e);
+            reply.error(libc::EIO);
+            return;
+        }
 
         // Create a local change for folder creation
         let parent_id = self.get_id_from_inode(parent);
@@ -744,6 +911,12 @@ impl fuser::Filesystem for OneDriveFuse {
             Some(true),
         );
         self.store_local_change(&change);
+
+        // Add to inode mapping
+        {
+            let mut fuse_repo = self.fuse_repo.lock().unwrap();
+            fuse_repo.add_local_inode_mapping(&temporary_id, new_ino);
+        }
 
         reply.entry(&Duration::from_secs(1), &attr, 0);
     }

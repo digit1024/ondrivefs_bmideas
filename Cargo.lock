@@ -850,6 +850,7 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "serde",
  "wasm-bindgen",
  "windows-link",
 ]
@@ -4214,6 +4215,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "base64",
+ "chrono",
  "clap",
  "ctrlc",
  "fuser",

@@ -1,7 +1,7 @@
 use crate::persistency::drive_item_repository::DriveItemRepository;
-use crate::persistency::local_changes_repository::LocalChangesRepository;
+use crate::persistency::local_changes_repository::{LocalChange, LocalChangeType, LocalChangesRepository};
 use crate::persistency::types::{VirtualFile, FileSource};
-use crate::onedrive_service::onedrive_models::DriveItem;
+use crate::onedrive_service::onedrive_models::{DriveItem, FileFacet, FolderFacet, ParentReference};
 use crate::file_manager::SyncFileManager;
 use anyhow::{Context, Result};
 use std::path::PathBuf;
@@ -143,22 +143,91 @@ impl FuseRepository {
         }
     }
 
+    /// Add a local inode mapping (for newly created files/directories)
+    pub fn add_local_inode_mapping(&mut self, temporary_id: &str, ino: u64) {
+        self.inode_mapping.temporary_id_to_inode.insert(temporary_id.to_string(), ino);
+        self.inode_mapping.inode_to_source.insert(ino, FileSource::Local);
+        self.inode_mapping.inode_to_temporary_id.insert(ino, temporary_id.to_string());
+    }
+
     /// List all virtual files in a directory (unified view)
     pub async fn list_directory(&mut self, virtual_path: &str) -> Result<Vec<VirtualFile>> {
         // Get remote items in this directory
-        let remote_items = self.drive_items_repo.get_drive_items_by_parent_path(virtual_path).await?;
+        let mut remote_items = self.drive_items_repo.get_drive_items_by_parent_path(virtual_path).await?;
         // Get local changes in this directory
-        let local_changes = self.local_changes_repo.get_changes_by_parent_id(virtual_path).await?;
+        let mut local_changes = self.local_changes_repo.get_all_pending_changes().await?;
+        self.patch_drive_items_with_local_changes(&mut remote_items, local_changes).await?;
+
         // Merge remote and local changes into a unified view
         let mut files = Vec::new();
         for item in remote_items {
             files.push(self.remote_item_to_virtual_file(&item).await?);
         }
-        for change in local_changes {
-            files.push(self.local_change_to_virtual_file(&change));
-        }
+
+
         Ok(files)
     }
+    async fn patch_drive_items_with_local_changes(&mut self, DriveItems: &mut Vec<DriveItem> , local_changes: Vec<LocalChange>) -> Result<()> {
+        for local_change in local_changes {
+            match local_change.change_type {
+                LocalChangeType::Delete => self.apply_delete_drive_item(DriveItems, local_change).await?,
+                LocalChangeType::CreateFile | LocalChangeType::CreateFolder => self.apply_create_drive_item(DriveItems, local_change).await?,
+                LocalChangeType::Rename | LocalChangeType::Move => self.apply_modify_drive_item(DriveItems, local_change).await?,
+                LocalChangeType::Modify => self.apply_move_drive_item(DriveItems, local_change).await?,
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+    async fn apply_modify_drive_item(&mut self, drive_items: &mut Vec<DriveItem> , local_change: LocalChange) -> Result<()> {
+        
+        Ok(())
+    }
+    async fn apply_move_drive_item(&mut self, drive_items: &mut Vec<DriveItem> , local_change: LocalChange) -> Result<()> {
+        Ok(())
+    }
+    async fn apply_delete_drive_item(&mut self, drive_items: &mut Vec<DriveItem> , local_change: LocalChange) -> Result<()> {
+        for i in 0..drive_items.len() {
+            let file = &drive_items[i];
+            let id = file.id.clone();
+            if local_change.onedrive_id.is_some() && local_change.onedrive_id.as_ref().unwrap() == &id {// it will do nothing if the file is in VirtualFiles
+                drive_items.remove(i);
+            }
+        }
+        Ok(())
+    }
+    async fn apply_create_drive_item(&mut self, drive_items: &mut Vec<DriveItem> , local_change: LocalChange) -> Result<()> {
+        let id = if local_change.onedrive_id.is_some() {
+            local_change.onedrive_id.clone().unwrap()
+        } else {
+            local_change.temporary_id.clone()
+        };
+        let folder =  local_change.temp_is_folder.unwrap_or(false);
+        let option_folder = if folder { Some(FolderFacet{child_count:0}) } else{ None };
+        let option_file = if !folder { Some(FileFacet{mime_type:None}) } else{ None };
+        
+         
+        let parent_id = local_change.parent_id.clone().unwrap();
+
+
+        let virtual_drive_item = DriveItem {
+            id: id,
+            name: local_change.file_name.clone(),
+            etag: local_change.new_etag.clone(),
+            last_modified: local_change.temp_last_modified.clone(),
+            created_date: local_change.temp_created_date.clone(),
+            size: Some(local_change.file_size.unwrap_or(0) as u64),
+            folder: option_folder, 
+            file: option_file,
+            download_url: None,
+            deleted: None,
+            parent_reference: Some(ParentReference{id:parent_id, path:None}),
+        };
+        drive_items.push(virtual_drive_item);
+        Ok(())
+    }
+    
+    
 
     /// Convert a remote DriveItem to a VirtualFile
     async fn remote_item_to_virtual_file(&mut self, item: &DriveItem) -> Result<VirtualFile> {

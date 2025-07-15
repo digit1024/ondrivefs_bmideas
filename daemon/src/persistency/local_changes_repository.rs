@@ -114,6 +114,7 @@ impl LocalChange {
         content_file_id: Option<String>,
         temp_is_folder: Option<bool>,
     ) -> Self {
+        let now = chrono::Utc::now().to_rfc3339();
         Self {
             id: None,
             temporary_id,
@@ -133,8 +134,8 @@ impl LocalChange {
             temp_created_date: None,
             temp_last_modified: None,
             temp_is_folder,
-            created_at: None,
-            updated_at: None,
+            created_at: Some(now.clone()),
+            updated_at: Some(now),
         }
     }
 
@@ -163,6 +164,7 @@ impl LocalChange {
         file_name: String,
         temp_is_folder: bool,
     ) -> Self {
+        let now = chrono::Utc::now().to_rfc3339();
         Self {
             id: None,
             temporary_id,
@@ -182,8 +184,8 @@ impl LocalChange {
             temp_created_date: None,
             temp_last_modified: None,
             temp_is_folder: Some(temp_is_folder),
-            created_at: None,
-            updated_at: None,
+            created_at: Some(now.clone()),
+            updated_at: Some(now),
         }
     }
 
@@ -194,6 +196,7 @@ impl LocalChange {
         old_inode: i64,
         new_inode: i64,
     ) -> Self {
+        let now = chrono::Utc::now().to_rfc3339();
         Self {
             id: None,
             temporary_id,
@@ -213,8 +216,8 @@ impl LocalChange {
             temp_created_date: None,
             temp_last_modified: None,
             temp_is_folder: None,
-            created_at: None,
-            updated_at: None,
+            created_at: Some(now.clone()),
+            updated_at: Some(now),
         }
     }
 
@@ -225,6 +228,7 @@ impl LocalChange {
         old_name: String,
         new_name: String,
     ) -> Self {
+        let now = chrono::Utc::now().to_rfc3339();
         Self {
             id: None,
             temporary_id,
@@ -244,8 +248,8 @@ impl LocalChange {
             temp_created_date: None,
             temp_last_modified: None,
             temp_is_folder: None,
-            created_at: None,
-            updated_at: None,
+            created_at: Some(now.clone()),
+            updated_at: Some(now),
         }
     }
 
@@ -256,6 +260,7 @@ impl LocalChange {
         old_etag: String,
         new_etag: String,
     ) -> Self {
+        let now = chrono::Utc::now().to_rfc3339();
         Self {
             id: None,
             temporary_id,
@@ -275,8 +280,8 @@ impl LocalChange {
             temp_created_date: None,
             temp_last_modified: None,
             temp_is_folder: None,
-            created_at: None,
-            updated_at: None,
+            created_at: Some(now.clone()),
+            updated_at: Some(now),
         }
     }
 
@@ -285,6 +290,7 @@ impl LocalChange {
         temporary_id: String,
         onedrive_id: String,
     ) -> Self {
+        let now = chrono::Utc::now().to_rfc3339();
         Self {
             id: None,
             temporary_id,
@@ -304,8 +310,8 @@ impl LocalChange {
             temp_created_date: None,
             temp_last_modified: None,
             temp_is_folder: None,
-            created_at: None,
-            updated_at: None,
+            created_at: Some(now.clone()),
+            updated_at: Some(now),
         }
     }
 
@@ -315,6 +321,12 @@ impl LocalChange {
             LocalChangeType::CreateFile | LocalChangeType::CreateFolder => {
                 if self.parent_id.is_none() || self.file_name.is_none() {
                     return Err(anyhow!("Create operations require parent_id and file_name"));
+                }
+                // Additional validation for create operations
+                if let Some(parent_id) = &self.parent_id {
+                    if parent_id == "unknown" {
+                        return Err(anyhow!("Create operations cannot have 'unknown' parent_id"));
+                    }
                 }
             }
             LocalChangeType::Move => {
@@ -382,9 +394,8 @@ impl LocalChangesRepository {
                 temporary_id, onedrive_id, change_type, status,
                 parent_id, file_name, old_inode, new_inode,
                 old_name, new_name, old_etag, new_etag,
-                file_size, mime_type, temp_created_date, temp_last_modified, temp_is_folder,
-                created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                file_size, mime_type, temp_created_date, temp_last_modified, temp_is_folder
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&change.temporary_id)
@@ -404,8 +415,6 @@ impl LocalChangesRepository {
         .bind(&change.temp_created_date)
         .bind(&change.temp_last_modified)
         .bind(change.temp_is_folder)
-        .bind(&change.created_at)
-        .bind(&change.updated_at)
         .execute(&self.pool)
         .await;
         if r.is_err() {
@@ -452,12 +461,31 @@ impl LocalChangesRepository {
         Ok(())
     }
 
+    pub async fn get_all_pending_changes(&self) -> Result<Vec<LocalChange>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT * FROM local_changes 
+            WHERE  status != 'failed' AND status != 'reflected'
+            ORDER BY created_at ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut changes = Vec::new();
+        for row in rows {
+            changes.push(self.row_to_local_change(row)?);
+        }
+        Ok(changes)
+    }
+
     /// Get local changes by parent ID (for move operations)
     pub async fn get_changes_by_parent_id(&self, parent_id: &str) -> Result<Vec<LocalChange>> {
         let rows = sqlx::query(
             r#"
             SELECT * FROM local_changes 
             WHERE parent_id = ?
+            AND status != 'failed' AND status != 'reflected'
             ORDER BY created_at ASC
             "#,
         )
@@ -488,6 +516,45 @@ impl LocalChangesRepository {
             changes.push(self.row_to_local_change(row)?);
         }
         Ok(changes)
+    }
+
+    /// Get local changes that need parent_id resolution (have 'unknown' parent_id)
+    pub async fn get_changes_with_unknown_parent(&self) -> Result<Vec<LocalChange>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT * FROM local_changes 
+            WHERE parent_id = 'unknown' 
+            AND (change_type = 'create_file' OR change_type = 'create_folder')
+            AND status = 'new'
+            ORDER BY created_at ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut changes = Vec::new();
+        for row in rows {
+            changes.push(self.row_to_local_change(row)?);
+        }
+        Ok(changes)
+    }
+
+    /// Update parent_id for a local change
+    pub async fn update_parent_id(&self, id: i64, parent_id: String) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE local_changes 
+            SET parent_id = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            "#,
+        )
+        .bind(&parent_id)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        debug!("Updated parent_id for change: {} -> {}", id, parent_id);
+        Ok(())
     }
 
     /// Delete a local change

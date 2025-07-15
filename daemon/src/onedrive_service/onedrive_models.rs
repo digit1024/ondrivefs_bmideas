@@ -47,6 +47,7 @@ pub struct DriveItem {
     pub deleted: Option<DeletedFacet>,
     #[serde(rename = "parentReference")]
     pub parent_reference: Option<ParentReference>,
+    
 }
 
 /// FolderFacet: Represents the folder facet of a drive item.
