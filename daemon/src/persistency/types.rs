@@ -43,6 +43,7 @@ pub struct FuseMetadata {
     pub parent_ino: Option<u64>,
     pub virtual_path: Option<String>,
     pub display_path: Option<String>,
+    pub local_path: Option<String>,
     pub file_source: Option<FileSource>,
     pub sync_status: Option<String>,
 }
@@ -64,6 +65,7 @@ impl DriveItemWithFuse {
                 parent_ino: None,
                 virtual_path: None,
                 display_path: None,
+                local_path: None,
                 file_source: Some(FileSource::Remote),
                 sync_status: None,
             },
@@ -121,6 +123,11 @@ impl DriveItemWithFuse {
         self.fuse_metadata.display_path = Some(path);
     }
 
+    /// Set local path
+    pub fn set_local_path(&mut self, path: String) {
+        self.fuse_metadata.local_path = Some(path);
+    }
+
     /// Set sync status
     pub fn set_sync_status(&mut self, status: String) {
         self.fuse_metadata.sync_status = Some(status);
@@ -144,6 +151,11 @@ impl DriveItemWithFuse {
     /// Get display path
     pub fn display_path(&self) -> Option<&str> {
         self.fuse_metadata.display_path.as_deref()
+    }
+
+    /// Get local path
+    pub fn local_path(&self) -> Option<&str> {
+        self.fuse_metadata.local_path.as_deref()
     }
 
     /// Get file source

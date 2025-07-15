@@ -105,7 +105,7 @@ impl OneDriveFuse {
             let root_item = sync_await(self.drive_item_with_fuse_repo.get_drive_item_with_fuse_by_virtual_ino(1))?;
             if root_item.is_some() {
                 Ok(root_item)
-            } else {
+        } else {
                 // Return temporary stub for root
                 Ok(Some(self.create_temp_root_stub()))
             }
@@ -135,12 +135,54 @@ impl OneDriveFuse {
         sync_await(self.drive_item_with_fuse_repo.get_children_by_parent_ino(parent_ino))
     }
 
-    /// Generate placeholder content for remote files
+    /// Check if file exists locally with upload folder priority
+    fn file_exists_locally(&self, onedrive_id: &str) -> Option<PathBuf> {
+        // Priority 1: Check upload folder first
+        let upload_path = self.file_manager.get_upload_dir().join(onedrive_id);
+        if upload_path.exists() && upload_path.is_file() {
+            return Some(upload_path);
+        }
+        
+        // Priority 2: Check download folder
+        let download_path = self.file_manager.get_download_dir().join(onedrive_id);
+        if download_path.exists() && download_path.is_file() {
+            return Some(download_path);
+        }
+        
+            None
+        }
+
+    /// Read data from a local file with upload folder priority
+    fn read_local_file(&self, item: &DriveItemWithFuse, offset: i64, size: u32) -> Result<Vec<u8>> {
+        let onedrive_id = item.id();
+        
+        // Get local file path with upload folder priority
+        let local_path = self.file_exists_locally(onedrive_id)
+            .ok_or_else(|| anyhow::anyhow!("Local file not found for OneDrive ID: {}", onedrive_id))?;
+
+        // Read file data
+        let file_data = std::fs::read(&local_path)?;
+        
+        // Handle offset and size
+        let start = offset as usize;
+        let end = std::cmp::min(start + size as usize, file_data.len());
+        
+        if start >= file_data.len() {
+            return Ok(vec![]);
+        }
+        
+        Ok(file_data[start..end].to_vec())
+    }
+
+    /// Generate placeholder content for remote files with .onedrivedownload extension
     fn generate_placeholder_content(&self, item: &DriveItemWithFuse) -> Vec<u8> {
         let placeholder = serde_json::json!({
             "onedrive_id": item.id(),
             "name": item.name().unwrap_or("unknown"),
-            "message": "remote file - not downloaded locally"
+            "virtual_path": item.virtual_path().unwrap_or("unknown"),
+            "message": "This is a remote OneDrive file that has not been downloaded locally.",
+            "instructions": "Double-click this file to download it from OneDrive.",
+            "file_extension": ".onedrivedownload"
         });
 
         serde_json::to_string_pretty(&placeholder)
@@ -204,36 +246,6 @@ impl OneDriveFuse {
         }
     }
 
-    /// Read data from a local file
-    fn read_local_file(&self, item: &DriveItemWithFuse, offset: i64, size: u32) -> Result<Vec<u8>> {
-        let onedrive_id = item.id();
-        
-        // Try to find the file in downloads first, then uploads
-        let download_path = self.file_manager.get_download_dir().join(onedrive_id);
-        let upload_path = self.file_manager.get_upload_dir().join(onedrive_id);
-        
-        let local_path = if download_path.exists() && download_path.is_file() {
-            download_path
-        } else if upload_path.exists() && upload_path.is_file() {
-            upload_path
-        } else {
-            return Err(anyhow::anyhow!("Local file not found for OneDrive ID: {}", onedrive_id));
-        };
-
-        // Read file data
-        let file_data = std::fs::read(&local_path)?;
-        
-        // Handle offset and size
-        let start = offset as usize;
-        let end = std::cmp::min(start + size as usize, file_data.len());
-        
-        if start >= file_data.len() {
-            return Ok(vec![]);
-        }
-        
-        Ok(file_data[start..end].to_vec())
-    }
-
     /// Generate a unique temporary ID for local changes
     fn generate_temporary_id(&self) -> String {
         use std::collections::hash_map::DefaultHasher;
@@ -247,6 +259,11 @@ impl OneDriveFuse {
     async fn apply_local_change(&self, change_type: &str, parent_ino: u64, name: &str, is_folder: bool) -> Result<u64> {
         let temporary_id = self.generate_temporary_id();
         
+        // Get parent item to extract parent_id and parent_path
+        let parent_item = sync_await(self.get_item_by_ino(parent_ino))?;
+        let parent_id = parent_item.as_ref().map(|p| p.id().to_string());
+        let parent_path = parent_item.as_ref().and_then(|p| p.virtual_path()).map(|p| p.to_string());
+        
         // Create a new DriveItem for the local change
         let drive_item = DriveItem {
             id: temporary_id.clone(),
@@ -257,7 +274,7 @@ impl OneDriveFuse {
             size: Some(0),
             folder: if is_folder { 
                 Some(crate::onedrive_service::onedrive_models::FolderFacet { child_count: 0 }) 
-            } else { 
+        } else {
                 None 
             },
             file: if !is_folder { 
@@ -267,18 +284,37 @@ impl OneDriveFuse {
             },
             download_url: None,
             deleted: None,
-            parent_reference: None, // We'll handle parent relationship via parent_ino
+            parent_reference: parent_id.as_ref().map(|id| crate::onedrive_service::onedrive_models::ParentReference {
+                id: id.clone(),
+                path: parent_path.clone(),
+            }),
         };
 
         let mut item_with_fuse = self.drive_item_with_fuse_repo.create_from_drive_item(drive_item);
         item_with_fuse.set_parent_ino(parent_ino);
         item_with_fuse.set_file_source(FileSource::Local);
         item_with_fuse.set_sync_status("pending".to_string());
+        
+        // Set local path for local items (they go to uploads folder)
+        let local_path = self.file_manager.get_upload_dir().join(&temporary_id);
+        item_with_fuse.set_local_path(local_path.to_string_lossy().to_string());
+        
+        // Set display path
+        let display_path = if let Some(parent_virtual_path) = parent_path {
+            if parent_virtual_path == "/" {
+                format!("/{}", name)
+            } else {
+                format!("{}/{}", parent_virtual_path, name)
+            }
+        } else {
+            format!("/{}", name)
+        };
+        item_with_fuse.set_display_path(display_path);
 
         // Store and get auto-generated inode
-        let inode = sync_await(self.drive_item_with_fuse_repo.store_drive_item_with_fuse(&item_with_fuse, None))?;
+        let inode = sync_await(self.drive_item_with_fuse_repo.store_drive_item_with_fuse(&item_with_fuse, Some(local_path)))?;
         
-        debug!("Applied local change: {} {} with inode {}", change_type, name, inode);
+        debug!("Applied local change: {} {} with inode {} (parent: {:?})", change_type, name, inode, parent_id);
         Ok(inode)
     }
 
@@ -288,8 +324,13 @@ impl OneDriveFuse {
             item.set_file_source(FileSource::Local);
             item.set_sync_status("pending".to_string());
             
+            // Preserve the existing local_path if it exists
+            let existing_local_path = item.local_path().map(|p| p.to_string());
+            
             // Update the item in database
-            sync_await(self.drive_item_with_fuse_repo.store_drive_item_with_fuse(&item, None))?;
+            // Pass the existing local_path to preserve it
+            let local_path_option = existing_local_path.map(PathBuf::from);
+            sync_await(self.drive_item_with_fuse_repo.store_drive_item_with_fuse(&item, local_path_option))?;
         }
         Ok(())
     }
@@ -451,12 +492,8 @@ impl fuser::Filesystem for OneDriveFuse {
                     return;
                 }
 
-            // Check if file exists locally
-            let onedrive_id = item.id();
-            let download_path = self.file_manager.get_download_dir().join(onedrive_id);
-                let upload_path = self.file_manager.get_upload_dir().join(onedrive_id);
-            
-            if download_path.exists() || upload_path.exists() {
+            // Check if file exists locally with upload folder priority
+            if let Some(_) = self.file_exists_locally(item.id()) {
                 // File exists locally - read it
                 match self.read_local_file(&item, offset, size) {
                     Ok(data) => reply.data(&data),
@@ -466,7 +503,7 @@ impl fuser::Filesystem for OneDriveFuse {
                     }
                 }
                         } else {
-                // File doesn't exist locally - return placeholder
+                // File doesn't exist locally - return placeholder with .onedrivedownload extension
                 let placeholder_content = self.generate_placeholder_content(&item);
             let start = offset as usize;
             let end = std::cmp::min(start + size as usize, placeholder_content.len());
@@ -494,10 +531,12 @@ impl fuser::Filesystem for OneDriveFuse {
         _lock_owner: Option<u64>,
         reply: ReplyWrite,
     ) {
-        debug!("WRITE: ino={}, offset={}, data_size={}", ino, offset, data.len());
+        info!("WRITE: ino={}, offset={}, data_size={}", ino, offset, data.len());
 
         if let Ok(Some(item)) = sync_await(self.get_item_by_ino(ino)) {
             let onedrive_id = item.id();
+            
+            // Always write to upload folder (priority 1)
             let upload_path = self.file_manager.get_upload_dir().join(onedrive_id);
             
             // Write data to uploads file
@@ -550,7 +589,7 @@ impl fuser::Filesystem for OneDriveFuse {
         reply: ReplyCreate,
     ) {
         let name_str = name.to_string_lossy();
-        debug!("CREATE: parent={}, name={}", parent, name_str);
+        info!("CREATE: parent={}, name={}", parent, name_str);
 
         match sync_await(self.apply_local_change("create_file", parent, &name_str, false)) {
             Ok(inode) => {
@@ -574,7 +613,7 @@ impl fuser::Filesystem for OneDriveFuse {
         reply: ReplyEntry,
     ) {
         let name_str = name.to_string_lossy();
-        debug!("MKDIR: parent={}, name={}", parent, name_str);
+        info!("MKDIR: parent={}, name={}", parent, name_str);
 
         match sync_await(self.apply_local_change("create_folder", parent, &name_str, true)) {
             Ok(inode) => {
@@ -611,7 +650,7 @@ impl fuser::Filesystem for OneDriveFuse {
         reply: fuser::ReplyEmpty,
     ) {
         let name_str = name.to_string_lossy();
-        debug!("RMDIR: parent={}, name={}", parent, name_str);
+        info!("RMDIR: parent={}, name={}", parent, name_str);
 
         // For now, just mark as deleted in the database
         // In a full implementation, you'd want to handle the actual deletion
@@ -630,12 +669,92 @@ impl fuser::Filesystem for OneDriveFuse {
     ) {
         let name_str = name.to_string_lossy();
         let newname_str = newname.to_string_lossy();
-        debug!("RENAME: parent={}, name={}, newparent={}, newname={}", 
+        info!("RENAME: parent={}, name={}, newparent={}, newname={}", 
                parent, name_str, newparent, newname_str);
 
-        // For now, just acknowledge the rename
-        // In a full implementation, you'd update the item in the database
+        // Find the item to rename
+        let old_path = if parent == 1 {
+            format!("/{}", name_str)
+        } else {
+            match sync_await(self.get_item_by_ino(parent)) {
+                Ok(Some(parent_item)) => {
+                    let parent_path = parent_item.virtual_path().unwrap_or("/");
+                    if parent_path == "/" {
+                        format!("/{}", name_str)
+                    } else {
+                        format!("{}/{}", parent_path, name_str)
+                    }
+                }
+                _ => {
+                    reply.error(libc::ENOENT);
+                    return;
+                }
+            }
+        };
+
+        // Get the item to rename
+        if let Ok(Some(mut item)) = sync_await(self.get_item_by_path(&old_path)) {
+            // Update the item with new name and parent
+            item.drive_item_mut().name = Some(newname_str.to_string());
+            
+            // Update parent reference if parent changed
+            if parent != newparent {
+                if let Ok(Some(new_parent_item)) = sync_await(self.get_item_by_ino(newparent)) {
+                    item.set_parent_ino(newparent);
+                    item.drive_item_mut().parent_reference = Some(crate::onedrive_service::onedrive_models::ParentReference {
+                        id: new_parent_item.id().to_string(),
+                        path: new_parent_item.virtual_path().map(|p| p.to_string()),
+                    });
+                }
+            }
+
+            // Update virtual path and display path
+            let new_virtual_path = if newparent == 1 {
+                format!("/{}", newname_str)
+        } else {
+                match sync_await(self.get_item_by_ino(newparent)) {
+                    Ok(Some(new_parent_item)) => {
+                        let parent_path = new_parent_item.virtual_path().unwrap_or("/");
+                        if parent_path == "/" {
+                            format!("/{}", newname_str)
+                        } else {
+                            format!("{}/{}", parent_path, newname_str)
+                        }
+                    }
+                    _ => {
+                        reply.error(libc::ENOENT);
+                        return;
+                    }
+                }
+            };
+            
+            item.set_virtual_path(new_virtual_path.clone());
+            item.set_display_path(new_virtual_path);
+            
+            // Mark as modified
+            item.set_file_source(FileSource::Local);
+            item.set_sync_status("pending".to_string());
+
+            // Preserve the existing local_path if it exists
+            let existing_local_path = item.local_path().map(|p| p.to_string());
+            
+            // Store the updated item (this will now use UPDATE instead of INSERT OR REPLACE)
+            // Pass the existing local_path to preserve it
+            let local_path_option = existing_local_path.map(PathBuf::from);
+            match sync_await(self.drive_item_with_fuse_repo.store_drive_item_with_fuse(&item, local_path_option)) {
+                Ok(_) => {
+                    info!("Successfully renamed {} to {} (inode: {})", 
+                          name_str, newname_str, item.virtual_ino().unwrap_or(0));
         reply.ok();
+                }
+                Err(e) => {
+                    error!("Failed to rename {} to {}: {}", name_str, newname_str, e);
+                    reply.error(libc::EIO);
+                }
+            }
+        } else {
+            reply.error(libc::ENOENT);
+        }
     }
 
     fn setattr(

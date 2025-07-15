@@ -24,7 +24,7 @@ use tokio::signal;
 use anyhow::{Context, Result};
 use clap::Arg;
 use clap::Command;
-use log::{error, info};
+use log::{error, info, warn};
 use onedrive_sync_lib::notifications::{NotificationSender, NotificationUrgency};
 use serde_json;
 
@@ -286,7 +286,7 @@ async fn main() -> Result<()> {
             let result = fuser::mount2(
                 fuse_fs,
                 &mount_point_clone,
-                &[MountOption::FSName("onedrive".to_string())],
+                &[MountOption::FSName("onedrive".to_string()),  MountOption::NoExec , MountOption::NoSuid , MountOption::NoDev , MountOption::DefaultPermissions , MountOption::NoAtime],
             );
             let _ = fuse_tx.send(());
             if let Err(e) = result {
@@ -336,7 +336,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Handle a file path when launched as a MIME type handler
+/// Handle a file path when launched as a MIME type handler using DriveItemWithFuse
 async fn handle_file_path(file_path: &str) -> Result<()> {
     info!("🚀 OneDrive file handler launched for: {}", file_path);
     
@@ -349,40 +349,63 @@ async fn handle_file_path(file_path: &str) -> Result<()> {
         Ok((onedrive_id, virtual_path)) => {
             info!("📥 Queuing download for OneDrive ID: {}", onedrive_id);
             
-            // Queue the download
+            // Get DriveItemWithFuse from database using virtual path
             let pool = app.app_state.persistency().pool().clone();
+            let drive_item_with_fuse_repo = crate::persistency::drive_item_with_fuse_repository::DriveItemWithFuseRepository::new(pool.clone());
             let download_queue_repo = DownloadQueueRepository::new(pool);
             
-            // Use file manager from app state
-            let file_manager = app.app_state.file_manager();
+            // Try to find the item by virtual path first, then by OneDrive ID
+            let item = if let Ok(Some(item)) = drive_item_with_fuse_repo.get_drive_item_with_fuse_by_virtual_path(&virtual_path).await {
+                Some(item)
+            } else {
+                drive_item_with_fuse_repo.get_drive_item_with_fuse(&onedrive_id).await.ok().flatten()
+            };
             
-            // Convert virtual path to local path
-            let virtual_path_buf = PathBuf::from(virtual_path.clone());
-            let local_path = file_manager.get_download_dir().join(onedrive_id.clone());
-            
-            // Add to download queue
-            download_queue_repo.add_to_download_queue(&onedrive_id, &local_path).await?;
-            
-            info!("✅ Download queued successfully for: {}", virtual_path);
-            info!("💾 Local path: {}", local_path.display());
+            if let Some(item_with_fuse) = item {
+                info!("📁 Found item: {} (OneDrive ID: {})", 
+                      item_with_fuse.name().unwrap_or("unnamed"), 
+                      item_with_fuse.id());
+                
+                // Use file manager from app state
+                let file_manager = app.app_state.file_manager();
+                
+                // Use the local path from the item if available, otherwise construct it
+                let local_path = if let Some(local_path_str) = item_with_fuse.local_path() {
+                    PathBuf::from(local_path_str)
+                } else {
+                    file_manager.get_download_dir().join(onedrive_id.clone())
+                };
+                
+                // Add to download queue
+                download_queue_repo.add_to_download_queue(&onedrive_id, &local_path).await?;
+                
+                info!("✅ Download queued successfully for: {}", virtual_path);
+                info!("💾 Local path: {}", local_path.display());
 
-            // Send desktop notification
-            let notification_sender = NotificationSender::new().await;
-            if let Ok(sender) = notification_sender {
-                let filename = std::path::Path::new(file_path)
-                    .file_name()
-                    .map(|f| f.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "file".to_string());
-                let _ = sender.send_notification(
-                    "Open OneDrive",
-                    0,
-                    "cloud-upload",
-                    "Open OneDrive",
-                    &format!("File {} added to download queue", filename),
-                    vec![],
-                    vec![("urgency", &NotificationUrgency::Normal.to_u8().to_string())],
-                    5000,
-                ).await;
+                // Send desktop notification
+                let notification_sender = NotificationSender::new().await;
+                if let Ok(sender) = notification_sender {
+                    let filename = item_with_fuse.name().unwrap_or("file");
+                    let _ = sender.send_notification(
+                        "Open OneDrive",
+                        0,
+                        "cloud-upload",
+                        "Open OneDrive",
+                        &format!("File {} added to download queue", filename),
+                        vec![],
+                        vec![("urgency", &NotificationUrgency::Normal.to_u8().to_string())],
+                        5000,
+                    ).await;
+                }
+            } else {
+                warn!("⚠️ Item not found in database for OneDrive ID: {} or virtual path: {}", onedrive_id, virtual_path);
+                
+                // Fallback: use the old approach
+                let file_manager = app.app_state.file_manager();
+                let local_path = file_manager.get_download_dir().join(onedrive_id.clone());
+                download_queue_repo.add_to_download_queue(&onedrive_id, &local_path).await?;
+                
+                info!("✅ Download queued using fallback method for: {}", virtual_path);
             }
         }
         Err(e) => {
@@ -394,24 +417,28 @@ async fn handle_file_path(file_path: &str) -> Result<()> {
     Ok(())
 }
 
-/// Parse a OneDrive file path to extract OneDrive ID and virtual path
+/// Parse a OneDrive file path to extract OneDrive ID and virtual path using DriveItemWithFuse
 fn parse_onedrive_file(file_path: &str) -> Result<(String, String)> {
     // Read the JSON placeholder file
     let content = std::fs::read_to_string(file_path)?;
     let json: serde_json::Value = serde_json::from_str(&content)?;
     
-    // Extract OneDrive ID and virtual path
+    // Extract OneDrive ID
     let onedrive_id = json["onedrive_id"]
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("Missing onedrive_id in file"))?
         .to_string();
     
-    // For now, we'll use the file path to reconstruct the virtual path
-    // In a real implementation, you might want to store the virtual path in the JSON
-    let virtual_path = format!("/{}", std::path::Path::new(file_path)
-        .file_name()
-        .ok_or_else(|| anyhow::anyhow!("Invalid file path"))?
-        .to_string_lossy());
+    // Extract virtual path from JSON if available, otherwise reconstruct from file path
+    let virtual_path = if let Some(path) = json["virtual_path"].as_str() {
+        path.to_string()
+    } else {
+        // Fallback: reconstruct from file path
+        format!("/{}", std::path::Path::new(file_path)
+            .file_name()
+            .ok_or_else(|| anyhow::anyhow!("Invalid file path"))?
+            .to_string_lossy())
+    };
     
     Ok((onedrive_id, virtual_path))
 }

@@ -81,11 +81,31 @@ impl SyncCycle {
 
         let sync_state = sync_state_repo.get_latest_sync_state().await?;
         let delta_token = sync_state
-            .map(|(_, _, delta_token)| delta_token)
+            .map(|(delta_link, _, _)| {
+                info!("🔗 Retrieved delta link from DB: {}", delta_link);
+                // Extract token from delta_link URL
+                if delta_link.starts_with("http") {
+                    // Extract just the token part from the full URL
+                    if let Some(token_start) = delta_link.find("token=") {
+                        let token = &delta_link[token_start + 6..];
+                        info!("🔑 Extracted token: {}", token);
+                        Some(token.to_string())
+                    } else {
+                        warn!("⚠️ Could not extract token from delta link: {}", delta_link);
+                        None
+                    }
+                } else {
+                    // Already just a token
+                    info!("🔑 Using token directly: {}", delta_link);
+                    Some(delta_link)
+                }
+            })
             .unwrap_or(None);
 
         let mut all_items = Vec::new();
         let mut current_token = delta_token;
+
+        info!("🔄 Starting delta sync with token: {:?}", current_token);
 
         // Handle pagination and token expiration
         loop {
@@ -96,20 +116,25 @@ impl SyncCycle {
                 .await
             {
                 Ok(delta) => {
+                    info!("📥 Received {} items from delta API", delta.value.len());
                     all_items.extend(delta.value);
-                    info!("📊 Delta items count: {}", all_items.len());
+                    info!("📊 Total delta items count: {}", all_items.len());
 
                     if let Some(next_link) = delta.next_link {
                         // Continue pagination
+                        info!("⏭️ Continuing pagination with next_link: {}", next_link);
                         current_token = Some(next_link);
                         continue;
                     } else {
                         // Pagination complete, store delta_link for next cycle
                         if let Some(delta_link) = delta.delta_link {
+                            info!("💾 Storing delta link for next cycle: {}", delta_link);
                             sync_state_repo
-                                .store_sync_state(Some(delta_link), "syncing", None)
+                                .store_sync_state(Some(delta_link), "done", None)
                                 .await
                                 .context("Failed to store sync state")?;
+                        } else {
+                            warn!("⚠️ No delta_link received from API");
                         }
                         break;
                     }
@@ -125,6 +150,8 @@ impl SyncCycle {
                 Err(e) => return Err(e.context("Failed to get delta changes")),
             }
         }
+   
+
 
         Ok(all_items)
     }
@@ -258,6 +285,9 @@ impl SyncCycle {
         drive_item_with_fuse_repo: &DriveItemWithFuseRepository,
         local_path: &std::path::Path,
     ) -> Result<u64> {
+        // Check if item already exists to preserve its inode
+        let existing_item = drive_item_with_fuse_repo.get_drive_item_with_fuse(&item.id).await?;
+        
         // Create the item with basic FUSE metadata
         let mut item_with_fuse = drive_item_with_fuse_repo.create_from_drive_item(item.clone());
         
@@ -268,6 +298,13 @@ impl SyncCycle {
         // Set local path for downloaded files
         let local_file_path = local_path.join(item.id.clone());
         item_with_fuse.set_display_path(local_file_path.to_string_lossy().to_string());
+        
+        // Preserve existing inode if item already exists
+        if let Some(existing) = &existing_item {
+            if let Some(existing_ino) = existing.virtual_ino() {
+                item_with_fuse.set_virtual_ino(existing_ino);
+            }
+        }
         
         // Resolve parent inode if this item has a parent
         if let Some(parent_ref) = &item.parent_reference {
@@ -280,10 +317,8 @@ impl SyncCycle {
             }
         }
         
-        // Store the item and get the auto-generated inode
+        // Store the item and get the inode (preserved or new)
         let inode = drive_item_with_fuse_repo.store_drive_item_with_fuse(&item_with_fuse, Some(local_file_path.clone())).await?;
-        
-      
         
         Ok(inode)
     }
