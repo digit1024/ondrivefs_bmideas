@@ -205,7 +205,7 @@ impl PersistencyManager {
                 retry_count INTEGER DEFAULT 0,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (drive_item_id) REFERENCES drive_items (id)
+                FOREIGN KEY (drive_item_id) REFERENCES drive_items_with_fuse(onedrive_id)
             )
             "#,
         )

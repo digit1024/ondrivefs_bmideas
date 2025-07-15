@@ -268,7 +268,7 @@ async fn main() -> Result<()> {
     // Prepare FUSE filesystem
     let pool = app.app_state.persistency().pool().clone();
     let download_queue_repo = DownloadQueueRepository::new(pool.clone());
-    let fuse_fs = OneDriveFuse::new_with_file_manager(
+    let fuse_fs = OneDriveFuse::new(
         pool.clone(),
         download_queue_repo,
         app.app_state.file_manager.clone()
@@ -296,14 +296,14 @@ async fn main() -> Result<()> {
     });
     
 
-    // Start periodic sync scheduler
-    // let sync_cycle = SyncCycle::new(app.app_state.clone());
-    // let mut scheduler = crate::scheduler::periodic_scheduler::PeriodicScheduler::new();
-    // let sync_task = sync_cycle.get_task().await?;
-    // scheduler.add_task(sync_task);
-    // let scheduler_handle = tokio::spawn(async move {
-    //     let _ = scheduler.start().await;
-    // });
+    //Start periodic sync scheduler
+    let sync_cycle = SyncCycle::new(app.app_state.clone());
+    let mut scheduler = crate::scheduler::periodic_scheduler::PeriodicScheduler::new();
+    let sync_task = sync_cycle.get_task().await?;
+    scheduler.add_task(sync_task);
+    let scheduler_handle = tokio::spawn(async move {
+        let _ = scheduler.start().await;
+    });
 
     // Wait for Ctrl+C
     info!("🟢 Open OneDrive is running. Press Ctrl+C to exit.");
@@ -312,7 +312,7 @@ async fn main() -> Result<()> {
 
     // Stop scheduler
     // (No explicit stop needed, but you can add logic if needed)
-    //drop(scheduler_handle);
+    drop(scheduler_handle);
 
     // Unmount FUSE
     #[cfg(target_os = "linux")]

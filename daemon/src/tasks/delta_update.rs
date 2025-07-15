@@ -7,7 +7,7 @@ use crate::{
     app_state::AppState,
     onedrive_service::onedrive_models::DriveItem,
     persistency::download_queue_repository::DownloadQueueRepository,
-    persistency::drive_item_repository::DriveItemRepository,
+    persistency::drive_item_with_fuse_repository::DriveItemWithFuseRepository,
     persistency::sync_state_repository::SyncStateRepository,
     scheduler::{PeriodicTask, TaskMetrics},
 };
@@ -86,7 +86,6 @@ impl SyncCycle {
 
         let mut all_items = Vec::new();
         let mut current_token = delta_token;
-        let mut final_delta_link: Option<String> = None;
 
         // Handle pagination and token expiration
         loop {
@@ -106,7 +105,12 @@ impl SyncCycle {
                         continue;
                     } else {
                         // Pagination complete, store delta_link for next cycle
-                        final_delta_link = delta.delta_link;
+                        if let Some(delta_link) = delta.delta_link {
+                            sync_state_repo
+                                .store_sync_state(Some(delta_link), "syncing", None)
+                                .await
+                                .context("Failed to store sync state")?;
+                        }
                         break;
                     }
                 }
@@ -120,14 +124,6 @@ impl SyncCycle {
 
                 Err(e) => return Err(e.context("Failed to get delta changes")),
             }
-        }
-
-        // Store the delta_link for next sync cycle
-        if let Some(delta_link) = final_delta_link {
-            sync_state_repo
-                .store_sync_state(Some(delta_link), "syncing", None)
-                .await
-                .context("Failed to store sync state")?;
         }
 
         Ok(all_items)
@@ -192,15 +188,15 @@ impl SyncCycle {
         item: &DriveItem,
         download_folders: &[String],
     ) -> Result<()> {
-        let drive_item_repo = DriveItemRepository::new(self.app_state.persistency().pool().clone());
+        let drive_item_with_fuse_repo = DriveItemWithFuseRepository::new(self.app_state.persistency().pool().clone());
         let download_queue_repo =
             DownloadQueueRepository::new(self.app_state.persistency().pool().clone());
 
         // Get existing item from DB
-        let existing_item = drive_item_repo.get_drive_item(&item.id).await?;
+        let existing_item = drive_item_with_fuse_repo.get_drive_item_with_fuse(&item.id).await?;
 
         // Detect change type
-        let change_type = self.detect_change_type(item, existing_item.as_ref());
+        let change_type = self.detect_change_type(item, existing_item.as_ref().map(|i| &i.drive_item));
         let local_path = self
             .app_state
             .config()
@@ -215,7 +211,7 @@ impl SyncCycle {
             ChangeType::Create => {
                 self.handle_create_item(
                     item,
-                    &drive_item_repo,
+                    &drive_item_with_fuse_repo,
                     &download_queue_repo,
                     &local_path,
                     download_folders,
@@ -226,7 +222,7 @@ impl SyncCycle {
             ChangeType::Update => {
                 self.handle_update_item(
                     item,
-                    &drive_item_repo,
+                    &drive_item_with_fuse_repo,
                     &download_queue_repo,
                     &local_path,
                     download_folders,
@@ -236,11 +232,11 @@ impl SyncCycle {
             }
 
             ChangeType::Delete => {
-                self.handle_delete_item(item, &drive_item_repo).await?;
+                self.handle_delete_item(item, &drive_item_with_fuse_repo).await?;
             }
 
             ChangeType::Move => {
-                self.handle_move_item(item, &drive_item_repo).await?;
+                self.handle_move_item(item, &drive_item_with_fuse_repo).await?;
             }
 
             ChangeType::NoChange => {
@@ -255,17 +251,61 @@ impl SyncCycle {
         Ok(())
     }
 
+    /// Set up FUSE metadata for a delta item
+    async fn setup_fuse_metadata(
+        &self,
+        item: &DriveItem,
+        drive_item_with_fuse_repo: &DriveItemWithFuseRepository,
+        local_path: &std::path::Path,
+    ) -> Result<u64> {
+        // Create the item with basic FUSE metadata
+        let mut item_with_fuse = drive_item_with_fuse_repo.create_from_drive_item(item.clone());
+        
+        // Set file source to Remote since this comes from OneDrive
+        item_with_fuse.set_file_source(crate::persistency::types::FileSource::Remote);
+        item_with_fuse.set_sync_status("synced".to_string());
+        
+        // Set local path for downloaded files
+        let local_file_path = local_path.join(item.id.clone());
+        item_with_fuse.set_display_path(local_file_path.to_string_lossy().to_string());
+        
+        // Resolve parent inode if this item has a parent
+        if let Some(parent_ref) = &item.parent_reference {
+            let parent_id = &parent_ref.id;
+            // Get parent item to find its inode
+            if let Ok(Some(parent_item)) = drive_item_with_fuse_repo.get_drive_item_with_fuse(parent_id).await {
+                if let Some(parent_ino) = parent_item.virtual_ino() {
+                    item_with_fuse.set_parent_ino(parent_ino);
+                }
+            }
+        }
+        
+        // Store the item and get the auto-generated inode
+        let inode = drive_item_with_fuse_repo.store_drive_item_with_fuse(&item_with_fuse, Some(local_file_path.clone())).await?;
+        
+      
+        
+        Ok(inode)
+    }
+
     /// Handle creation of new items
     async fn handle_create_item(
         &self,
         item: &DriveItem,
-        drive_item_repo: &DriveItemRepository,
+        drive_item_with_fuse_repo: &DriveItemWithFuseRepository,
         download_queue_repo: &DownloadQueueRepository,
         local_path: &std::path::Path,
         download_folders: &[String],
     ) -> Result<()> {
-        // Store new item
-        drive_item_repo.store_drive_item(item, None).await?;
+        // Store new item with proper Fuse metadata
+        let inode = self.setup_fuse_metadata(item, drive_item_with_fuse_repo, local_path).await?;
+        
+        info!(
+            "📁 Created item: {} ({}) with inode {}",
+            item.name.as_deref().unwrap_or("unnamed"),
+            item.id,
+            inode
+        );
 
         // Add to download queue if it matches download folders
         if self.should_download(item, download_folders) {
@@ -286,18 +326,25 @@ impl SyncCycle {
     async fn handle_update_item(
         &self,
         item: &DriveItem,
-        drive_item_repo: &DriveItemRepository,
+        drive_item_with_fuse_repo: &DriveItemWithFuseRepository,
         download_queue_repo: &DownloadQueueRepository,
         local_path: &std::path::Path,
         download_folders: &[String],
-        existing_item: Option<&DriveItem>,
+        existing_item: Option<&crate::persistency::types::DriveItemWithFuse>,
     ) -> Result<()> {
-        // Update existing item
-        drive_item_repo.store_drive_item(item, None).await?;
+        // Update existing item with proper Fuse metadata
+        let inode = self.setup_fuse_metadata(item, drive_item_with_fuse_repo, local_path).await?;
+        
+        info!(
+            "📝 Updated item: {} ({}) with inode {}",
+            item.name.as_deref().unwrap_or("unnamed"),
+            item.id,
+            inode
+        );
 
         // Check if etag changed and file should be downloaded
         if let Some(existing) = existing_item {
-            if self.etag_changed(existing, item) && self.should_download(item, download_folders) {
+            if self.etag_changed(&existing.drive_item, item) && self.should_download(item, download_folders) {
                 let local_file_path = local_path.join(item.id.clone());
                 download_queue_repo
                     .add_to_download_queue(&item.id, &local_file_path)
@@ -316,16 +363,23 @@ impl SyncCycle {
     async fn handle_delete_item(
         &self,
         item: &DriveItem,
-        drive_item_repo: &DriveItemRepository,
+        drive_item_with_fuse_repo: &DriveItemWithFuseRepository,
     ) -> Result<()> {
-        // Mark as deleted in DB
-        drive_item_repo.store_drive_item(item, None).await?;
+        // Mark as deleted in DB with Fuse metadata
+        let local_path = self
+            .app_state
+            .config()
+            .project_dirs
+            .data_dir()
+            .join("downloads");
+        let inode = self.setup_fuse_metadata(item, drive_item_with_fuse_repo, &local_path).await?;
 
         // TODO: Delete local file if it exists
         info!(
-            "🗑️ File deleted: {} ({})",
+            "🗑️ File deleted: {} ({}) with inode {}",
             item.name.as_deref().unwrap_or("unnamed"),
-            item.id
+            item.id,
+            inode
         );
         Ok(())
     }
@@ -334,16 +388,23 @@ impl SyncCycle {
     async fn handle_move_item(
         &self,
         item: &DriveItem,
-        drive_item_repo: &DriveItemRepository,
+        drive_item_with_fuse_repo: &DriveItemWithFuseRepository,
     ) -> Result<()> {
-        // Update parent reference
-        drive_item_repo.store_drive_item(item, None).await?;
+        // Update parent reference with Fuse metadata
+        let local_path = self
+            .app_state
+            .config()
+            .project_dirs
+            .data_dir()
+            .join("downloads");
+        let inode = self.setup_fuse_metadata(item, drive_item_with_fuse_repo, &local_path).await?;
 
         // TODO: Handle move logic for "download on demand" later
         info!(
-            "📁 File moved: {} ({})",
+            "📁 File moved: {} ({}) with inode {}",
             item.name.as_deref().unwrap_or("unnamed"),
-            item.id
+            item.id,
+            inode
         );
         Ok(())
     }
@@ -377,8 +438,8 @@ impl SyncCycle {
                         .await?;
                     info!("✅ Download completed: {}", drive_item_id);
 
-                    let drive_item_repo = DriveItemRepository::new(self.app_state.persistency().pool().clone());
-                    let name = drive_item_repo.get_drive_item(&drive_item_id).await?.unwrap().name.unwrap_or("unnamed".to_string());
+                    let drive_item_with_fuse_repo = DriveItemWithFuseRepository::new(self.app_state.persistency().pool().clone());
+                    let name = drive_item_with_fuse_repo.get_drive_item_with_fuse(&drive_item_id).await?.unwrap().drive_item.name.unwrap_or("unnamed".to_string());
 
                     
                     let notification_sender = NotificationSender::new().await;

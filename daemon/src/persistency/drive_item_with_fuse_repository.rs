@@ -23,6 +23,8 @@ impl DriveItemWithFuseRepository {
         // Automatically compute and set the virtual path
         let virtual_path = item_with_fuse.compute_virtual_path();
         item_with_fuse.set_virtual_path(virtual_path);
+      
+        
         
         item_with_fuse
     }
