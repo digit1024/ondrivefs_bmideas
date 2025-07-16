@@ -6,9 +6,7 @@ use log::{debug, error, info, warn};
 use crate::{
     app_state::AppState,
     onedrive_service::onedrive_models::DriveItem,
-    persistency::download_queue_repository::DownloadQueueRepository,
-    persistency::drive_item_with_fuse_repository::DriveItemWithFuseRepository,
-    persistency::sync_state_repository::SyncStateRepository,
+    persistency::{download_queue_repository::DownloadQueueRepository, drive_item_with_fuse_repository::DriveItemWithFuseRepository, processing_item_repository::{ProcessingItem, ProcessingItemRepository}, sync_state_repository::SyncStateRepository},
     scheduler::{PeriodicTask, TaskMetrics},
 };
 
@@ -564,6 +562,10 @@ impl SyncCycle {
         // Get delta changes from OneDrive
         let items = self.get_delta_changes().await?;
         info!("📊 Retrieved {} delta items", items.len());
+        let processing_items_repo = ProcessingItemRepository::new(self.app_state.persistency().pool().clone());
+        for item in &items {
+            processing_items_repo.store_processing_item(&ProcessingItem::new(item.clone())).await?;
+        }
 
         // Process each delta item
         for item in &items {
