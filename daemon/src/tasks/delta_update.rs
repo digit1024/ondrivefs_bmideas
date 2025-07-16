@@ -398,6 +398,28 @@ impl SyncCycle {
         item: &DriveItem,
         drive_item_with_fuse_repo: &DriveItemWithFuseRepository,
     ) -> Result<()> {
+        // Remove from download queue if it's pending
+        let download_queue_repo = DownloadQueueRepository::new(self.app_state.persistency().pool().clone());
+        let local_path = self
+            .app_state
+            .config()
+            .project_dirs
+            .data_dir()
+            .join("downloads");
+        let local_file_path = local_path.join(item.id.clone());
+        
+        // Remove item from download queue if it exists
+        if let Err(e) = download_queue_repo.remove_by_drive_item_id(&item.id).await {
+            warn!("⚠️ Failed to remove item from download queue: {}", e);
+        } else {
+            info!("📋 Removed deleted item from download queue: {}", item.id);
+        }
+
+        // If it's a folder, also remove all child items from download queue and delete their local files
+        if item.folder.is_some() {
+            self.remove_child_items_from_download_queue(&item.id, &download_queue_repo).await?;
+            self.delete_child_local_files(&item.id, &local_path).await?;
+        }
         // Mark as deleted in DB with Fuse metadata
         let local_path = self
             .app_state
@@ -407,9 +429,35 @@ impl SyncCycle {
             .join("downloads");
         let inode = self.setup_fuse_metadata(item, drive_item_with_fuse_repo, &local_path).await?;
 
-        // TODO: Delete local file if it exists
+        // Delete local file if it exists
+        let local_file_path = local_path.join(item.id.clone());
+        if local_file_path.exists() {
+            match std::fs::remove_file(&local_file_path) {
+                Ok(_) => {
+                    info!(
+                        "🗑️ Deleted local file: {} -> {}",
+                        item.name.as_deref().unwrap_or("unnamed"),
+                        local_file_path.display()
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        "⚠️ Failed to delete local file {}: {}",
+                        local_file_path.display(),
+                        e
+                    );
+                    // Continue processing - don't fail the entire sync cycle
+                }
+            }
+        } else {
+            debug!(
+                "ℹ️ Local file doesn't exist, skipping deletion: {}",
+                local_file_path.display()
+            );
+        }
+
         info!(
-            "🗑️ File deleted: {} ({}) with inode {}",
+            "🗑️ File deleted from OneDrive: {} ({}) with inode {}",
             item.name.as_deref().unwrap_or("unnamed"),
             item.id,
             inode
@@ -579,6 +627,73 @@ impl SyncCycle {
         self.process_download_queue().await?;
 
         info!("✅ Sync cycle completed");
+        Ok(())
+    }
+
+    /// Remove all child items of a deleted folder from download queue
+    async fn remove_child_items_from_download_queue(
+        &self,
+        parent_id: &str,
+        download_queue_repo: &DownloadQueueRepository,
+    ) -> Result<()> {
+        // Get all items that have this parent_id
+        let drive_item_with_fuse_repo = DriveItemWithFuseRepository::new(self.app_state.persistency().pool().clone());
+        let child_items = drive_item_with_fuse_repo.get_drive_items_with_fuse_by_parent(parent_id).await?;
+        
+        let mut removed_count = 0;
+        for child_item in child_items {
+            if let Err(e) = download_queue_repo.remove_by_drive_item_id(&child_item.drive_item.id).await {
+                warn!("⚠️ Failed to remove child item from download queue: {}", e);
+            } else {
+                removed_count += 1;
+            }
+        }
+        
+        if removed_count > 0 {
+            info!("📋 Removed {} child items from download queue for deleted folder: {}", removed_count, parent_id);
+        }
+        
+        Ok(())
+    }
+
+    /// Delete local files for all child items of a deleted folder
+    async fn delete_child_local_files(
+        &self,
+        parent_id: &str,
+        local_path: &std::path::Path,
+    ) -> Result<()> {
+        // Get all items that have this parent_id
+        let drive_item_with_fuse_repo = DriveItemWithFuseRepository::new(self.app_state.persistency().pool().clone());
+        let child_items = drive_item_with_fuse_repo.get_drive_items_with_fuse_by_parent(parent_id).await?;
+        
+        let mut deleted_count = 0;
+        for child_item in child_items {
+            let child_local_path = local_path.join(child_item.drive_item.id.clone());
+            if child_local_path.exists() {
+                match std::fs::remove_file(&child_local_path) {
+                    Ok(_) => {
+                        deleted_count += 1;
+                        debug!(
+                            "🗑️ Deleted child local file: {} -> {}",
+                            child_item.drive_item.name.as_deref().unwrap_or("unnamed"),
+                            child_local_path.display()
+                        );
+                    }
+                    Err(e) => {
+                        warn!(
+                            "⚠️ Failed to delete child local file {}: {}",
+                            child_local_path.display(),
+                            e
+                        );
+                    }
+                }
+            }
+        }
+        
+        if deleted_count > 0 {
+            info!("🗑️ Deleted {} child local files for deleted folder: {}", deleted_count, parent_id);
+        }
+        
         Ok(())
     }
 }

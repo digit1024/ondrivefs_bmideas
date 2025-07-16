@@ -101,4 +101,20 @@ impl DownloadQueueRepository {
         );
         Ok(())
     }
+
+    /// Remove item from download queue by drive_item_id
+    pub async fn remove_by_drive_item_id(&self, drive_item_id: &str) -> Result<()> {
+        sqlx::query(
+            r#"
+            DELETE FROM download_queue 
+            WHERE drive_item_id = ?
+            "#,
+        )
+        .bind(drive_item_id)
+        .execute(&self.pool)
+        .await?;
+
+        debug!("Removed item from download queue: {}", drive_item_id);
+        Ok(())
+    }
 } 

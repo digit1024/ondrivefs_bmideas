@@ -32,7 +32,7 @@ use crate::app_state::app_state_factory;
 use crate::fuse_filesystem::OneDriveFuse;
 use crate::log_appender::setup_logging;
 use crate::persistency::download_queue_repository::DownloadQueueRepository;
-use crate::persistency::fuse_repository::FuseRepository;
+
 use crate::persistency::profile_repository::ProfileRepository;
 use crate::tasks::delta_update::SyncCycle;
 use fuser::MountOption;
