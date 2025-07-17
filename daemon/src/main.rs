@@ -13,6 +13,7 @@ mod log_appender;
 mod onedrive_service;
 mod persistency;
 mod scheduler;
+mod sync;
 mod tasks;
 
 use std::sync::Arc;
@@ -271,7 +272,8 @@ async fn main() -> Result<()> {
     let fuse_fs = OneDriveFuse::new(
         pool.clone(),
         download_queue_repo,
-        app.app_state.file_manager.clone()
+        app.app_state.file_manager.clone(),
+        app.app_state.clone(),
     ).await?;
     fuse_fs.initialize().await.ok();
     info!("✅ FUSE filesystem initialized successfully");

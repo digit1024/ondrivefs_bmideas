@@ -22,6 +22,7 @@ pub struct OneDriveFuse {
     drive_item_with_fuse_repo: Arc<DriveItemWithFuseRepository>,
     download_queue_repo: Arc<DownloadQueueRepository>,
     file_manager: Arc<DefaultFileManager>,
+    app_state: Arc<crate::app_state::AppState>,
 }
 
 fn sync_await<F, T>(future: F) -> T
@@ -36,7 +37,8 @@ impl OneDriveFuse {
     pub async fn new(
         pool: Pool<sqlx::Sqlite>, 
         download_queue_repo: DownloadQueueRepository, 
-        file_manager: Arc<DefaultFileManager>
+        file_manager: Arc<DefaultFileManager>,
+        app_state: Arc<crate::app_state::AppState>,
     ) -> Result<Self> {
         let drive_item_with_fuse_repo = DriveItemWithFuseRepository::new(pool);
         
@@ -44,6 +46,7 @@ impl OneDriveFuse {
             drive_item_with_fuse_repo: Arc::new(drive_item_with_fuse_repo),
             download_queue_repo: Arc::new(download_queue_repo),
             file_manager,
+            app_state,
         })
     }
 
@@ -290,7 +293,7 @@ impl OneDriveFuse {
             }),
         };
 
-        let mut item_with_fuse = self.drive_item_with_fuse_repo.create_from_drive_item(drive_item);
+        let mut item_with_fuse = self.drive_item_with_fuse_repo.create_from_drive_item(drive_item.clone());
         item_with_fuse.set_parent_ino(parent_ino);
         item_with_fuse.set_file_source(FileSource::Local);
         item_with_fuse.set_sync_status("pending".to_string());
@@ -312,7 +315,17 @@ impl OneDriveFuse {
         item_with_fuse.set_display_path(display_path);
 
         // Store and get auto-generated inode
-        let inode = sync_await(self.drive_item_with_fuse_repo.store_drive_item_with_fuse(&item_with_fuse, Some(local_path)))?;
+        let inode = sync_await(self.drive_item_with_fuse_repo.store_drive_item_with_fuse(&item_with_fuse, Some(local_path.clone())))?;
+        
+        // Create ProcessingItem for the local change
+        let processing_item = crate::persistency::processing_item_repository::ProcessingItem::new_local(
+            drive_item,
+            crate::persistency::processing_item_repository::ChangeOperation::Create,
+            local_path
+        );
+        
+        let processing_repo = crate::persistency::processing_item_repository::ProcessingItemRepository::new(self.app_state.persistency().pool().clone());
+        sync_await(processing_repo.store_processing_item(&processing_item))?;
         
         debug!("Applied local change: {} {} with inode {} (parent: {:?})", change_type, name, inode, parent_id);
         Ok(inode)
@@ -329,8 +342,24 @@ impl OneDriveFuse {
             
             // Update the item in database
             // Pass the existing local_path to preserve it
-            let local_path_option = existing_local_path.map(PathBuf::from);
+            let local_path_option = existing_local_path.clone().map(PathBuf::from);
             sync_await(self.drive_item_with_fuse_repo.store_drive_item_with_fuse(&item, local_path_option))?;
+            
+            // Create ProcessingItem for the local modification
+            let local_path = if let Some(path_str) = existing_local_path {
+                PathBuf::from(path_str)
+            } else {
+                self.file_manager.get_upload_dir().join(item.id())
+            };
+            
+            let processing_item = crate::persistency::processing_item_repository::ProcessingItem::new_local(
+                item.drive_item().clone(),
+                crate::persistency::processing_item_repository::ChangeOperation::Update,
+                local_path
+            );
+            
+            let processing_repo = crate::persistency::processing_item_repository::ProcessingItemRepository::new(self.app_state.persistency().pool().clone());
+            sync_await(processing_repo.store_processing_item(&processing_item))?;
         }
         Ok(())
     }

@@ -53,24 +53,40 @@ impl ProjectConfig {
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct Settings {
-    
     /// List of OneDrive folders to sync
     pub download_folders: Vec<String>,
     pub sync_config: SyncConfig,
-    // Add more settings as needed
+    /// Conflict resolution strategy
+    pub conflict_resolution_strategy: ConflictResolutionStrategy,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SyncConfig {
-    pub sync_interval: Duration,
-
+    pub sync_interval_seconds: u64,
+    pub max_retry_count: u32,
+    pub enable_notifications: bool,
 }
 
 impl Default for SyncConfig {
     fn default() -> Self {
         Self {
-            sync_interval: Duration::from_secs(30),
+            sync_interval_seconds: 30,
+            max_retry_count: 3,
+            enable_notifications: true,
         }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub enum ConflictResolutionStrategy {
+    AlwaysRemote,  // Always favor remote changes
+    AlwaysLocal,   // Always favor local changes
+    Manual,        // Wait for user decision
+}
+
+impl Default for ConflictResolutionStrategy {
+    fn default() -> Self {
+        ConflictResolutionStrategy::AlwaysRemote
     }
 }
 
@@ -127,26 +143,29 @@ mod tests {
     #[test]
     fn test_sync_config_default() {
         let config = SyncConfig::default();
-        assert_eq!(config.sync_interval, Duration::from_secs(30));
+        assert_eq!(config.sync_interval_seconds, 30);
     }
 
     #[test]
     fn test_sync_config_serialization() {
         let config = SyncConfig {
-            sync_interval: Duration::from_secs(60),
+            sync_interval_seconds: 60,
+            max_retry_count: 5,
+            enable_notifications: false,
         };
         
         let json = serde_json::to_string(&config).unwrap();
         let deserialized: SyncConfig = serde_json::from_str(&json).unwrap();
         
-        assert_eq!(deserialized.sync_interval, Duration::from_secs(60));
+        assert_eq!(deserialized.sync_interval_seconds, 60);
     }
 
     #[test]
     fn test_settings_default() {
         let settings = Settings::default();
         assert!(settings.download_folders.is_empty());
-        assert_eq!(settings.sync_config.sync_interval, Duration::from_secs(30));
+        assert_eq!(settings.sync_config.sync_interval_seconds, 30);
+        assert_eq!(settings.conflict_resolution_strategy, ConflictResolutionStrategy::AlwaysRemote);
     }
 
     #[test]
@@ -154,15 +173,19 @@ mod tests {
         let settings = Settings {
             download_folders: vec!["folder1".to_string(), "folder2".to_string()],
             sync_config: SyncConfig {
-                sync_interval: Duration::from_secs(120),
+                sync_interval_seconds: 120,
+                max_retry_count: 10,
+                enable_notifications: false,
             },
+            conflict_resolution_strategy: ConflictResolutionStrategy::AlwaysLocal,
         };
         
         let json = serde_json::to_string(&settings).unwrap();
         let deserialized: Settings = serde_json::from_str(&json).unwrap();
         
         assert_eq!(deserialized.download_folders, vec!["folder1", "folder2"]);
-        assert_eq!(deserialized.sync_config.sync_interval, Duration::from_secs(120));
+        assert_eq!(deserialized.sync_config.sync_interval_seconds, 120);
+        assert_eq!(deserialized.conflict_resolution_strategy, ConflictResolutionStrategy::AlwaysLocal);
     }
 
     #[test]
@@ -173,8 +196,11 @@ mod tests {
         let test_settings = Settings {
             download_folders: vec!["test_folder".to_string()],
             sync_config: SyncConfig {
-                sync_interval: Duration::from_secs(45),
+                sync_interval_seconds: 45,
+                max_retry_count: 2,
+                enable_notifications: true,
             },
+            conflict_resolution_strategy: ConflictResolutionStrategy::AlwaysRemote,
         };
         
         // Save test settings
@@ -183,7 +209,8 @@ mod tests {
         // Load and verify
         let loaded_settings = Settings::load_settings_from_file(&config_path).unwrap();
         assert_eq!(loaded_settings.download_folders, vec!["test_folder"]);
-        assert_eq!(loaded_settings.sync_config.sync_interval, Duration::from_secs(45));
+        assert_eq!(loaded_settings.sync_config.sync_interval_seconds, 45);
+        assert_eq!(loaded_settings.conflict_resolution_strategy, ConflictResolutionStrategy::AlwaysRemote);
     }
 
     #[test]
@@ -216,8 +243,11 @@ mod tests {
         let settings = Settings {
             download_folders: vec!["save_folder".to_string()],
             sync_config: SyncConfig {
-                sync_interval: Duration::from_secs(90),
+                sync_interval_seconds: 90,
+                max_retry_count: 4,
+                enable_notifications: false,
             },
+            conflict_resolution_strategy: ConflictResolutionStrategy::Manual,
         };
         
         // Save settings
@@ -255,7 +285,8 @@ mod tests {
         
         // Should create default settings
         assert!(settings.download_folders.is_empty());
-        assert_eq!(settings.sync_config.sync_interval, Duration::from_secs(30));
+        assert_eq!(settings.sync_config.sync_interval_seconds, 30);
+        assert_eq!(settings.conflict_resolution_strategy, ConflictResolutionStrategy::AlwaysRemote);
         
         // Should save default settings to file
         assert!(config_path.exists());
@@ -269,8 +300,11 @@ mod tests {
         let original_settings = Settings {
             download_folders: vec!["existing_folder".to_string()],
             sync_config: SyncConfig {
-                sync_interval: Duration::from_secs(180),
+                sync_interval_seconds: 180,
+                max_retry_count: 5,
+                enable_notifications: false,
             },
+            conflict_resolution_strategy: ConflictResolutionStrategy::AlwaysLocal,
         };
         
         // Save original settings
@@ -280,7 +314,8 @@ mod tests {
         let loaded_settings = Settings::new(&config_path).await.unwrap();
         
         assert_eq!(loaded_settings.download_folders, vec!["existing_folder"]);
-        assert_eq!(loaded_settings.sync_config.sync_interval, Duration::from_secs(180));
+        assert_eq!(loaded_settings.sync_config.sync_interval_seconds, 180);
+        assert_eq!(loaded_settings.conflict_resolution_strategy, ConflictResolutionStrategy::AlwaysLocal);
     }
 
     #[test]
@@ -312,25 +347,31 @@ mod tests {
         let settings = Settings {
             download_folders: vec!["clone_test".to_string()],
             sync_config: SyncConfig {
-                sync_interval: Duration::from_secs(300),
+                sync_interval_seconds: 300,
+                max_retry_count: 10,
+                enable_notifications: false,
             },
+            conflict_resolution_strategy: ConflictResolutionStrategy::Manual,
         };
         
         let cloned = settings.clone();
         
         assert_eq!(cloned.download_folders, settings.download_folders);
-        assert_eq!(cloned.sync_config.sync_interval, settings.sync_config.sync_interval);
+        assert_eq!(cloned.sync_config.sync_interval_seconds, settings.sync_config.sync_interval_seconds);
+        assert_eq!(cloned.conflict_resolution_strategy, settings.conflict_resolution_strategy);
     }
 
     #[test]
     fn test_sync_config_clone() {
         let config = SyncConfig {
-            sync_interval: Duration::from_secs(600),
+            sync_interval_seconds: 600,
+            max_retry_count: 15,
+            enable_notifications: false,
         };
         
         let cloned = config.clone();
         
-        assert_eq!(cloned.sync_interval, config.sync_interval);
+        assert_eq!(cloned.sync_interval_seconds, config.sync_interval_seconds);
     }
 
     #[test]
@@ -338,8 +379,11 @@ mod tests {
         let settings = Settings {
             download_folders: vec!["debug_test".to_string()],
             sync_config: SyncConfig {
-                sync_interval: Duration::from_secs(60),
+                sync_interval_seconds: 60,
+                max_retry_count: 2,
+                enable_notifications: true,
             },
+            conflict_resolution_strategy: ConflictResolutionStrategy::AlwaysRemote,
         };
         
         let debug_str = format!("{:?}", settings);
@@ -350,7 +394,9 @@ mod tests {
     #[test]
     fn test_sync_config_debug_format() {
         let config = SyncConfig {
-            sync_interval: Duration::from_secs(120),
+            sync_interval_seconds: 120,
+            max_retry_count: 5,
+            enable_notifications: false,
         };
         
         let debug_str = format!("{:?}", config);
@@ -362,6 +408,7 @@ mod tests {
         let settings = Settings {
             download_folders: vec![],
             sync_config: SyncConfig::default(),
+            conflict_resolution_strategy: ConflictResolutionStrategy::AlwaysRemote,
         };
         
         let json = serde_json::to_string(&settings).unwrap();
@@ -379,6 +426,7 @@ mod tests {
                 "folder3".to_string(),
             ],
             sync_config: SyncConfig::default(),
+            conflict_resolution_strategy: ConflictResolutionStrategy::AlwaysLocal,
         };
         
         let json = serde_json::to_string(&settings).unwrap();

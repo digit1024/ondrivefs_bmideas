@@ -603,31 +603,71 @@ impl SyncCycle {
         let download_folders = self.app_state.config().settings.download_folders.clone();
 
         info!(
-            "🔄 Starting sync cycle with download folders: {:?}",
+            "🔄 Starting two-way sync cycle with download folders: {:?}",
             download_folders
         );
 
         // Get delta changes from OneDrive
         let items = self.get_delta_changes().await?;
         info!("📊 Retrieved {} delta items", items.len());
+        
+        // Create ProcessingItems for remote changes
         let processing_items_repo = ProcessingItemRepository::new(self.app_state.persistency().pool().clone());
         for item in &items {
-            processing_items_repo.store_processing_item(&ProcessingItem::new(item.clone())).await?;
+            let change_operation = self.detect_change_operation(item);
+            let processing_item = ProcessingItem::new_remote(item.clone(), change_operation);
+            processing_items_repo.store_processing_item(&processing_item).await?;
         }
 
-        // Process each delta item
-        for item in &items {
-            if let Err(e) = self.process_delta_item(item, &download_folders).await {
-                error!("❌ Failed to process delta item {}: {}", item.id, e);
-                // Continue processing other items
-            }
-        }
+        // Process all items using the new two-way sync system
+        let sync_processor = crate::sync::sync_processor::SyncProcessor::new(self.app_state.clone());
+        sync_processor.process_all_items().await?;
 
-        // Process download queue
+        // Process download queue (for backward compatibility)
         self.process_download_queue().await?;
 
-        info!("✅ Sync cycle completed");
+        info!("✅ Two-way sync cycle completed");
         Ok(())
+    }
+
+    /// Detect change operation based on OneDrive delta response and existing DB state
+    fn detect_change_operation(&self, item: &DriveItem) -> crate::persistency::processing_item_repository::ChangeOperation {
+        let drive_item_with_fuse_repo = DriveItemWithFuseRepository::new(self.app_state.persistency().pool().clone());
+        
+        // Get existing item from DB
+        let existing_item = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(
+                drive_item_with_fuse_repo.get_drive_item_with_fuse(&item.id)
+            )
+        });
+
+        match existing_item {
+            Ok(Some(existing)) => {
+                if item.deleted.is_some() {
+                    crate::persistency::processing_item_repository::ChangeOperation::Delete
+                } else if self.parent_id_changed(&existing.drive_item, item) {
+                    crate::persistency::processing_item_repository::ChangeOperation::Move {
+                        old_path: existing.virtual_path().unwrap_or_default().to_string(),
+                        new_path: item.parent_reference.as_ref().and_then(|p| p.path.clone()).unwrap_or_default(),
+                    }
+                } else if self.etag_changed(&existing.drive_item, item) {
+                    crate::persistency::processing_item_repository::ChangeOperation::Update
+                } else {
+                    crate::persistency::processing_item_repository::ChangeOperation::Update
+                }
+            }
+            Ok(None) => {
+                if item.deleted.is_some() {
+                    crate::persistency::processing_item_repository::ChangeOperation::Delete
+                } else {
+                    crate::persistency::processing_item_repository::ChangeOperation::Create
+                }
+            }
+            Err(_) => {
+                // If we can't determine, assume it's a create
+                crate::persistency::processing_item_repository::ChangeOperation::Create
+            }
+        }
     }
 
     /// Remove all child items of a deleted folder from download queue

@@ -265,13 +265,12 @@ impl PersistencyManager {
         Ok(())
     }
 
-    /// Create the processing_items table for storing DriveItems with processing status
+    /// Create the processing_items table for storing items to be processed
     async fn create_processing_items_table(&self) -> Result<()> {
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS processing_items (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                drive_item_id TEXT UNIQUE NOT NULL,
+                drive_item_id TEXT PRIMARY KEY,
                 name TEXT,
                 etag TEXT,
                 last_modified TEXT,
@@ -283,36 +282,34 @@ impl PersistencyManager {
                 is_deleted BOOLEAN,
                 parent_id TEXT,
                 parent_path TEXT,
-                local_path TEXT,
                 status TEXT DEFAULT 'new',
+                local_path TEXT,
                 error_message TEXT,
-                last_status_update DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_status_update TEXT,
                 retry_count INTEGER DEFAULT 0,
                 priority INTEGER DEFAULT 0,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                change_type TEXT DEFAULT 'remote',
+                change_operation TEXT DEFAULT 'create',
+                conflict_resolution TEXT,
+                validation_errors TEXT,
+                user_decision TEXT,
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now'))
             )
             "#,
         )
         .execute(&self.pool)
         .await?;
 
-        // Create indexes for efficient queries
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_processing_items_status ON processing_items(status)",
-        )
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_processing_items_status ON processing_items(status)")
+            .execute(&self.pool)
+            .await?;
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_processing_items_change_type ON processing_items(change_type)")
+            .execute(&self.pool)
+            .await?;
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_processing_items_priority ON processing_items(priority)")
-            .execute(&self.pool)
-            .await?;
-
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_processing_items_status_update ON processing_items(last_status_update)")
-            .execute(&self.pool)
-            .await?;
-
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_processing_items_drive_item_id ON processing_items(drive_item_id)")
             .execute(&self.pool)
             .await?;
 
@@ -375,6 +372,11 @@ impl PersistencyManager {
             .await?;
 
         Ok(())
+    }
+
+    /// Get the processing item repository
+    pub fn processing_item_repository(&self) -> processing_item_repository::ProcessingItemRepository {
+        processing_item_repository::ProcessingItemRepository::new(self.pool.clone())
     }
 }
 
