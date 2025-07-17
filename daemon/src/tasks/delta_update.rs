@@ -616,7 +616,7 @@ impl SyncCycle {
         for item in &items {
             let change_operation = self.detect_change_operation(item);
             let processing_item = ProcessingItem::new_remote(item.clone(), change_operation);
-            processing_items_repo.store_processing_item(&processing_item).await?;
+            let _id = processing_items_repo.store_processing_item(&processing_item).await?;
         }
 
         // Process all items using the new two-way sync system

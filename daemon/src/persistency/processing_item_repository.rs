@@ -173,6 +173,7 @@ pub enum ValidationResult {
 
 #[derive(Debug, Clone)]
 pub struct ProcessingItem {
+    pub id: Option<i64>,  // Auto-incremented database ID
     pub drive_item: DriveItem,
     pub status: ProcessingStatus,
     pub local_path: Option<PathBuf>,
@@ -191,6 +192,7 @@ pub struct ProcessingItem {
 impl ProcessingItem {
     pub fn new(drive_item: DriveItem) -> Self {
         Self {
+            id: None,
             drive_item,
             status: ProcessingStatus::New,
             local_path: None,
@@ -208,6 +210,7 @@ impl ProcessingItem {
 
     pub fn new_remote(drive_item: DriveItem, operation: ChangeOperation) -> Self {
         Self {
+            id: None,
             drive_item,
             status: ProcessingStatus::New,
             local_path: None,
@@ -225,6 +228,7 @@ impl ProcessingItem {
 
     pub fn new_local(drive_item: DriveItem, operation: ChangeOperation, local_path: PathBuf) -> Self {
         Self {
+            id: None,
             drive_item,
             status: ProcessingStatus::New,
             local_path: Some(local_path),
@@ -263,16 +267,16 @@ impl ProcessingItemRepository {
     }
 
     /// Store a processing item in the database
-    pub async fn store_processing_item(&self, item: &ProcessingItem) -> Result<()> {
+    pub async fn store_processing_item(&self, item: &ProcessingItem) -> Result<i64> {
         let parent_id = item.drive_item.parent_reference.as_ref().map(|p| p.id.clone());
         let parent_path = item.drive_item.parent_reference.as_ref().and_then(|p| p.path.clone());
         let local_path_str = item.local_path.as_ref().map(|p| p.to_string_lossy().to_string());
         let validation_errors_json = serde_json::to_string(&item.validation_errors)?;
         let user_decision_json = item.user_decision.as_ref().map(|d| serde_json::to_string(d)).transpose()?;
 
-        sqlx::query(
+        let result = sqlx::query(
             r#"
-            INSERT OR REPLACE INTO processing_items (
+            INSERT INTO processing_items (
                 drive_item_id, name, etag, last_modified, created_date, size, is_folder,
                 mime_type, download_url, is_deleted, parent_id, parent_path,
                 status, local_path, error_message, last_status_update, retry_count, priority,
@@ -306,27 +310,53 @@ impl ProcessingItemRepository {
         .execute(&self.pool)
         .await?;
 
+        let id = result.last_insert_rowid();
+
         debug!(
-            "Stored processing item: {} ({}) with status: {:?}",
+            "Stored processing item: {} ({}) with ID: {} and status: {:?}",
             item.drive_item.name.as_deref().unwrap_or("unnamed"),
             item.drive_item.id,
+            id,
             item.status
         );
-        Ok(())
+        Ok(id)
     }
 
-    /// Get a processing item by ID
-    pub async fn get_processing_item(&self, id: &str) -> Result<Option<ProcessingItem>> {
+    /// Get a processing item by database ID
+    pub async fn get_processing_item_by_id(&self, id: i64) -> Result<Option<ProcessingItem>> {
         let row = sqlx::query(
             r#"
-            SELECT drive_item_id, name, etag, last_modified, created_date, size, is_folder,
+            SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
+                   mime_type, download_url, is_deleted, parent_id, parent_path,
+                   status, local_path, error_message, last_status_update, retry_count, priority,
+                   change_type, change_operation, conflict_resolution, validation_errors, user_decision
+            FROM processing_items WHERE id = ?
+            "#,
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some(row) = row {
+            let processing_item = self.row_to_processing_item(row).await?;
+            Ok(Some(processing_item))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Get a processing item by OneDrive ID
+    pub async fn get_processing_item(&self, drive_item_id: &str) -> Result<Option<ProcessingItem>> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path,
                    status, local_path, error_message, last_status_update, retry_count, priority,
                    change_type, change_operation, conflict_resolution, validation_errors, user_decision
             FROM processing_items WHERE drive_item_id = ?
             "#,
         )
-        .bind(id)
+        .bind(drive_item_id)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -342,11 +372,11 @@ impl ProcessingItemRepository {
     pub async fn get_all_processing_items(&self) -> Result<Vec<ProcessingItem>> {
         let rows = sqlx::query(
             r#"
-            SELECT drive_item_id, name, etag, last_modified, created_date, size, is_folder,
+            SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path,
                    status, local_path, error_message, last_status_update, retry_count, priority,
                    change_type, change_operation, conflict_resolution, validation_errors, user_decision
-            FROM processing_items ORDER BY priority DESC, name
+            FROM processing_items ORDER BY id ASC
             "#,
         )
         .fetch_all(&self.pool)
@@ -365,11 +395,11 @@ impl ProcessingItemRepository {
     pub async fn get_processing_items_by_status(&self, status: &ProcessingStatus) -> Result<Vec<ProcessingItem>> {
         let rows = sqlx::query(
             r#"
-            SELECT drive_item_id, name, etag, last_modified, created_date, size, is_folder,
+            SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path,
                    status, local_path, error_message, last_status_update, retry_count, priority,
                    change_type, change_operation, conflict_resolution, validation_errors, user_decision
-            FROM processing_items WHERE status = ? ORDER BY priority DESC, name
+            FROM processing_items WHERE status = ? ORDER BY id ASC
             "#,
         )
         .bind(status.as_str())
@@ -484,13 +514,14 @@ impl ProcessingItemRepository {
     pub async fn get_unprocessed_items_by_change_type(&self, change_type: &ChangeType) -> Result<Vec<ProcessingItem>> {
         let rows = sqlx::query(
             r#"
-            SELECT drive_item_id, name, etag, last_modified, created_date, size, is_folder,
+            SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path,
                    status, local_path, error_message, last_status_update, retry_count, priority,
                    change_type, change_operation, conflict_resolution, validation_errors, user_decision
             FROM processing_items 
             WHERE change_type = ? AND status IN ('new', 'validated')
-            ORDER BY priority DESC, name
+            AND ( parent_path  NOT LIKE '/root/.%' OR (name ='root' and parent_path is null))
+            ORDER BY id ASC
             "#,
         )
         .bind(change_type.as_str())
@@ -510,19 +541,13 @@ impl ProcessingItemRepository {
     pub async fn get_all_unprocessed_items(&self) -> Result<Vec<ProcessingItem>> {
         let rows = sqlx::query(
             r#"
-            SELECT drive_item_id, name, etag, last_modified, created_date, size, is_folder,
+            SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path,
                    status, local_path, error_message, last_status_update, retry_count, priority,
                    change_type, change_operation, conflict_resolution, validation_errors, user_decision
             FROM processing_items 
             WHERE status IN ('new', 'validated')
-            ORDER BY 
-                CASE change_type 
-                    WHEN 'remote' THEN 1 
-                    WHEN 'local' THEN 2 
-                    ELSE 3 
-                END,
-                priority DESC, name
+            ORDER BY id ASC
             "#,
         )
         .fetch_all(&self.pool)
@@ -557,6 +582,26 @@ impl ProcessingItemRepository {
         Ok(())
     }
 
+    /// Update validation errors for a processing item by database ID
+    pub async fn update_validation_errors_by_id(&self, id: i64, errors: &[String]) -> Result<()> {
+        let error_json = serde_json::to_string(errors)?;
+
+        sqlx::query(
+            r#"
+            UPDATE processing_items 
+            SET validation_errors = ?, last_status_update = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(&error_json)
+        .bind(&chrono::Utc::now().to_rfc3339())
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
     /// Update user decision for a processing item
     pub async fn update_user_decision(&self, id: &str, decision: &UserDecision) -> Result<()> {
         let decision_json = serde_json::to_string(decision)?;
@@ -577,9 +622,75 @@ impl ProcessingItemRepository {
         Ok(())
     }
 
+    // New methods that work with database IDs
+    /// Update status of a processing item by database ID
+    pub async fn update_status_by_id(&self, id: i64, status: &ProcessingStatus) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE processing_items 
+            SET status = ?, last_status_update = datetime('now')
+            WHERE id = ?
+            "#,
+        )
+        .bind(status.as_str())
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        debug!("Updated processing item {} status to {:?}", id, status);
+        Ok(())
+    }
+
+    /// Update error message of a processing item by database ID
+    pub async fn update_error_message_by_id(&self, id: i64, error_message: &str) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE processing_items 
+            SET error_message = ?, last_status_update = datetime('now')
+            WHERE id = ?
+            "#,
+        )
+        .bind(error_message)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        debug!("Updated processing item {} error message: {}", id, error_message);
+        Ok(())
+    }
+
+    /// Increment retry count for a processing item by database ID
+    pub async fn increment_retry_count_by_id(&self, id: i64) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE processing_items 
+            SET retry_count = retry_count + 1, last_status_update = datetime('now')
+            WHERE id = ?
+            "#,
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        debug!("Incremented retry count for processing item {}", id);
+        Ok(())
+    }
+
+    /// Delete a processing item by database ID
+    pub async fn delete_processing_item_by_id(&self, id: i64) -> Result<()> {
+        sqlx::query("DELETE FROM processing_items WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        debug!("Deleted processing item: {}", id);
+        Ok(())
+    }
+
     /// Convert database row to ProcessingItem
     async fn row_to_processing_item(&self, row: sqlx::sqlite::SqliteRow) -> Result<ProcessingItem> {
-        let id: String = row.try_get("drive_item_id")?;
+        let db_id: i64 = row.try_get("id")?;
+        let drive_item_id: String = row.try_get("drive_item_id")?;
         let name: Option<String> = row.try_get("name")?;
         let etag: Option<String> = row.try_get("etag")?;
         let last_modified: Option<String> = row.try_get("last_modified")?;
@@ -635,7 +746,7 @@ impl ProcessingItemRepository {
         };
 
         let drive_item = DriveItem {
-            id,
+            id: drive_item_id,
             name,
             etag,
             last_modified,
@@ -674,6 +785,7 @@ impl ProcessingItemRepository {
         };
 
         Ok(ProcessingItem {
+            id: Some(db_id),
             drive_item,
             status,
             local_path,

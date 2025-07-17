@@ -115,13 +115,46 @@ impl OneDriveClient {
         let item: DriveItem = response.json().await?;
 
         let result = UploadResult {
-            onedrive_id: item.id,
+            onedrive_id: item.id.clone(),
             etag: item.etag,
             web_url: None, // OneDrive API doesn't return web_url in this endpoint
             size: item.size,
         };
 
         info!("Uploaded file: {} -> {}", file_name, remote_path);
+        Ok(result)
+    }
+
+    /// Update an existing file on OneDrive and return the update result
+    #[allow(dead_code)]
+    pub async fn update_file(
+        &self,
+        file_data: &[u8],
+        item_id: &str,
+    ) -> Result<UploadResult> {
+        let auth_header = self.auth_header().await?;
+        let url = format!("/me/drive/items/{}/content", item_id);
+
+        let response = self
+            .http_client
+            .upload_file(&url, file_data, &auth_header)
+            .await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(anyhow!("Failed to update file: {}", error_text));
+        }
+
+        let item: DriveItem = response.json().await?;
+
+        let result = UploadResult {
+            onedrive_id: item.id.clone(),
+            etag: item.etag,
+            web_url: None,
+            size: item.size,
+        };
+
+        info!("Updated file: {} -> {}", item_id, item.id);
         Ok(result)
     }
 
@@ -223,6 +256,27 @@ impl OneDriveClient {
         Ok(result)
     }
 
+    /// Move an item to a new parent folder
+    #[allow(dead_code)]
+    pub async fn move_item(
+        &self,
+        item_id: &str,
+        new_parent_id: &str,
+    ) -> Result<DriveItem> {
+        let auth_header = self.auth_header().await?;
+        let url = format!("/me/drive/items/{}/move", item_id);
+        let body = self.build_move_item_body(new_parent_id);
+
+        let item: DriveItem = self
+            .http_client
+            .post(&url, &body, &auth_header)
+            .await
+            .context("Failed to move item")?;
+
+        info!("Moved item: {} to parent: {}", item_id, new_parent_id);
+        Ok(item)
+    }
+
     /// Build create folder URL
     #[allow(dead_code)]
     fn build_create_folder_url(&self, parent_path: &str) -> Result<String> {
@@ -243,6 +297,48 @@ impl OneDriveClient {
             "name": folder_name,
             "folder": {},
             "@microsoft.graph.conflictBehavior": "rename"
+        })
+    }
+
+    /// Build move item request body
+    #[allow(dead_code)]
+    fn build_move_item_body(&self, new_parent_id: &str) -> serde_json::Value {
+        serde_json::json!({
+            "parentReference": {
+                "id": new_parent_id
+            }
+        })
+    }
+
+    /// Rename an item (change its name)
+    #[allow(dead_code)]
+    pub async fn rename_item(
+        &self,
+        item_id: &str,
+        new_name: &str,
+    ) -> Result<DriveItem> {
+        let auth_header = self.auth_header().await?;
+        let url = format!("/me/drive/items/{}", item_id);
+        let body = self.build_rename_item_body(new_name);
+
+        // Send PATCH request to update the name
+        self.http_client
+            .patch::<serde_json::Value>(&url, &body, &auth_header)
+            .await
+            .context("Failed to rename item")?;
+
+        // Get the updated item to return
+        let updated_item = self.get_item_by_id(item_id).await?;
+
+        info!("Renamed item: {} to: {}", item_id, new_name);
+        Ok(updated_item)
+    }
+
+    /// Build rename item request body
+    #[allow(dead_code)]
+    fn build_rename_item_body(&self, new_name: &str) -> serde_json::Value {
+        serde_json::json!({
+            "name": new_name
         })
     }
 

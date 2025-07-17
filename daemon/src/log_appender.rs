@@ -29,6 +29,7 @@ const CONSOLE_LOG_PATTERN: &str = "{h({l})} {d(%Y-%m-%d %H:%M:%S)} {M} - {m}{n}"
 const FILE_LOG_PATTERN: &str = "{d} {l}::{m}{n}";
 
 /// Setup logging configuration for the application
+
 pub async fn setup_logging(log_dir: &PathBuf) -> Result<()> {
     // Ensure logs directory exists
     let logs_path = log_dir.join(LOG_DIR);
@@ -41,13 +42,32 @@ pub async fn setup_logging(log_dir: &PathBuf) -> Result<()> {
     // Create rolling file appender
     let file = create_rolling_file_appender(&logs_path)?;
 
-    // Build configuration
+    // Build configuration with dynamic log level
     let config = build_log_config(stdout, file)?;
 
     // Initialize logging
     log4rs::init_config(config).context("Failed to initialize logging configuration")?;
 
     Ok(())
+}
+
+/// Get the appropriate log level based on environment variables
+fn get_log_level() -> LevelFilter {
+    // Check for RUST_LOG environment variable first
+    if let Ok(rust_log) = std::env::var("RUST_LOG") {
+        match rust_log.to_lowercase().as_str() {
+            "trace" => LevelFilter::Trace,
+            "debug" => LevelFilter::Debug,
+            "info" => LevelFilter::Info,
+            "warn" => LevelFilter::Warn,
+            "error" => LevelFilter::Error,
+            "off" => LevelFilter::Off,
+            _ => LevelFilter::Info, // Default fallback
+        }
+    } else {
+        // Default to Info level to reduce noise
+        LevelFilter::Debug
+    }
 }
 
 /// Create console appender with custom pattern
@@ -91,11 +111,35 @@ fn build_log_config(stdout: ConsoleAppender, file: RollingFileAppender) -> Resul
                 .additive(false)
                 .build("sqlx_core::logger", LevelFilter::Off)
         )
+        // Reduce FUSE library noise
+        .logger(
+            log4rs::config::Logger::builder()
+                .appender("stdout")
+                .appender("file")
+                .additive(false)
+                .build("fuser", LevelFilter::Warn) // Only show warnings and errors from FUSE
+        )
+        // Reduce HTTP client noise
+        .logger(
+            log4rs::config::Logger::builder()
+                .appender("stdout")
+                .appender("file")
+                .additive(false)
+                .build("reqwest", LevelFilter::Warn) // Only show warnings and errors from HTTP client
+        )
+        // Reduce tokio noise
+        .logger(
+            log4rs::config::Logger::builder()
+                .appender("stdout")
+                .appender("file")
+                .additive(false)
+                .build("tokio", LevelFilter::Warn) // Only show warnings and errors from tokio
+        )
         .build(
             Root::builder()
                 .appender("stdout")
                 .appender("file")
-                .build(LevelFilter::Debug),
+                .build(get_log_level()), // Use dynamic log level
         )
         .map_err(|e| anyhow::anyhow!("Failed to build logging configuration: {}", e))
 }

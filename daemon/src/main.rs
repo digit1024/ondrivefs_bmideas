@@ -20,26 +20,47 @@ use std::sync::Arc;
 use std::path::PathBuf;
 use std::thread;
 use std::process;
-use tokio::signal;
-
+use std::fs;
 use anyhow::{Context, Result};
 use clap::Arg;
 use clap::Command;
-use log::{error, info, warn};
-use onedrive_sync_lib::notifications::{NotificationSender, NotificationUrgency};
-use serde_json;
-
-use crate::app_state::app_state_factory;
+use log::{info, error, warn};
+use tokio::signal;
+use tokio::sync::broadcast;
+use tokio::time::{sleep, Duration};
+use fuser::MountOption;
+use crate::app_state::{AppState, app_state_factory};
 use crate::fuse_filesystem::OneDriveFuse;
 use crate::log_appender::setup_logging;
 use crate::persistency::download_queue_repository::DownloadQueueRepository;
-
 use crate::persistency::profile_repository::ProfileRepository;
 use crate::tasks::delta_update::SyncCycle;
-use fuser::MountOption;
 use crate::file_manager::{DefaultFileManager, FileManager};
-use std::fs;
+use onedrive_sync_lib::notifications::{NotificationSender, NotificationUrgency};
 
+// Add shutdown signal handling
+use tokio::sync::oneshot;
+
+/// Shutdown manager for graceful application termination
+#[derive(Clone)]
+struct ShutdownManager {
+    shutdown_tx: broadcast::Sender<()>,
+}
+
+impl ShutdownManager {
+    fn new() -> Self {
+        let (shutdown_tx, _) = broadcast::channel(1);
+        Self { shutdown_tx }
+    }
+
+    fn subscribe(&self) -> broadcast::Receiver<()> {
+        self.shutdown_tx.subscribe()
+    }
+
+    async fn shutdown(&self) {
+        let _ = self.shutdown_tx.send(());
+    }
+}
 
 /// Application configuration and setup
 struct AppSetup {
@@ -246,6 +267,10 @@ async fn main() -> Result<()> {
         });
     }));
 
+    // Create shutdown manager
+    let shutdown_manager = ShutdownManager::new();
+    let mut shutdown_rx = shutdown_manager.subscribe();
+
     // Initialize application
     let app = AppSetup::initialize().await?;
     app.authenticate().await?;
@@ -278,53 +303,110 @@ async fn main() -> Result<()> {
     fuse_fs.initialize().await.ok();
     info!("✅ FUSE filesystem initialized successfully");
 
-    // Start FUSE in a separate thread
-    let mount_point_clone = mount_point.clone();
+    // Start FUSE in a separate thread with shutdown handling
+    let mount_point_for_mount = mount_point.clone();
+    let mount_point_for_unmount = mount_point.clone();
     let (fuse_tx, fuse_rx) = std::sync::mpsc::channel();
+    let mut fuse_shutdown_rx = shutdown_manager.subscribe();
     let fuse_handle = thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
-            // If fuser::mount2 is synchronous, just call it here
-            let result = fuser::mount2(
-                fuse_fs,
-                &mount_point_clone,
-                &[MountOption::FSName("onedrive".to_string()),  MountOption::NoExec , MountOption::NoSuid , MountOption::NoDev , MountOption::DefaultPermissions , MountOption::NoAtime],
-            );
-            let _ = fuse_tx.send(());
-            if let Err(e) = result {
-                error!("FUSE mount error: {}", e);
+        rt.block_on(async move {
+            // Start FUSE mount in a separate task
+            let mount_task = tokio::spawn(async move {
+                let result = fuser::mount2(
+                    fuse_fs,
+                    &mount_point_for_mount,
+                    &[MountOption::FSName("onedrive".to_string()), MountOption::NoExec, MountOption::NoSuid, MountOption::NoDev, MountOption::DefaultPermissions, MountOption::NoAtime],
+                );
+                if let Err(e) = result {
+                    error!("FUSE mount error: {}", e);
+                }
+            });
+
+            // Wait for shutdown signal
+            let _ = fuse_shutdown_rx.recv().await;
+            
+            // Gracefully unmount FUSE
+            #[cfg(target_os = "linux")]
+            {
+                let _ = std::process::Command::new("fusermount").arg("-u").arg(&mount_point_for_unmount).status();
             }
+            #[cfg(target_os = "macos")]
+            {
+                let _ = std::process::Command::new("umount").arg(&mount_point_for_unmount).status();
+            }
+            
+            // Cancel mount task
+            mount_task.abort();
+            let _ = fuse_tx.send(());
         });
     });
     
 
-    //Start periodic sync scheduler
+    // Start periodic sync scheduler with shutdown handling
     let sync_cycle = SyncCycle::new(app.app_state.clone());
     let mut scheduler = crate::scheduler::periodic_scheduler::PeriodicScheduler::new();
     let sync_task = sync_cycle.get_task().await?;
     scheduler.add_task(sync_task);
+    
+    let mut scheduler_shutdown_rx = shutdown_manager.subscribe();
     let scheduler_handle = tokio::spawn(async move {
-        let _ = scheduler.start().await;
+        let mut shutdown_rx = scheduler_shutdown_rx;
+        
+        // Start the scheduler
+        if let Err(e) = scheduler.start().await {
+            error!("Failed to start scheduler: {}", e);
+            return;
+        }
+        
+        // Wait for shutdown signal
+        let _ = shutdown_rx.recv().await;
+        info!("🛑 Scheduler received shutdown signal");
+        
+        // Stop the scheduler
+        scheduler.stop().await;
+        info!("✅ Scheduler shutdown complete");
     });
 
-    // Wait for Ctrl+C
-    info!("🟢 Open OneDrive is running. Press Ctrl+C to exit.");
-    signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
-    info!("🛑 Shutting down...");
+    // Start signal handling
+    let signal_shutdown_manager = shutdown_manager.clone();
+    let signal_handle = tokio::spawn(async move {
+        tokio::select! {
+            _ = signal::ctrl_c() => {
+                info!("🛑 Received Ctrl+C signal");
+                signal_shutdown_manager.shutdown().await;
+            }
+            _ = async {
+                if let Ok(mut sigterm) = signal::unix::signal(signal::unix::SignalKind::terminate()) {
+                    sigterm.recv().await;
+                }
+            } => {
+                info!("🛑 Received SIGTERM signal");
+                signal_shutdown_manager.shutdown().await;
+            }
+            _ = async {
+                if let Ok(mut sigint) = signal::unix::signal(signal::unix::SignalKind::interrupt()) {
+                    sigint.recv().await;
+                }
+            } => {
+                info!("🛑 Received SIGINT signal");
+                signal_shutdown_manager.shutdown().await;
+            }
+        }
+    });
 
-    // Stop scheduler
-    // (No explicit stop needed, but you can add logic if needed)
-    drop(scheduler_handle);
+    info!("🟢 Open OneDrive is running. Press Ctrl+C to exit gracefully.");
 
-    // Unmount FUSE
-    #[cfg(target_os = "linux")]
-    {
-        let _ = std::process::Command::new("fusermount").arg("-u").arg(&mount_point).status();
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let _ = std::process::Command::new("umount").arg(&mount_point).status();
-    }
+    // Wait for shutdown signal
+    let _ = shutdown_rx.recv().await;
+    info!("🛑 Shutdown initiated...");
+
+    // Wait for all tasks to complete
+    let _ = tokio::time::timeout(Duration::from_secs(30), async {
+        let _ = scheduler_handle.await;
+        let _ = signal_handle.await;
+    }).await;
+
     // Wait for FUSE thread to finish
     let _ = fuse_rx.recv();
     let _ = fuse_handle.join();

@@ -325,7 +325,7 @@ impl OneDriveFuse {
         );
         
         let processing_repo = crate::persistency::processing_item_repository::ProcessingItemRepository::new(self.app_state.persistency().pool().clone());
-        sync_await(processing_repo.store_processing_item(&processing_item))?;
+        let _id = sync_await(processing_repo.store_processing_item(&processing_item))?;
         
         debug!("Applied local change: {} {} with inode {} (parent: {:?})", change_type, name, inode, parent_id);
         Ok(inode)
@@ -359,7 +359,7 @@ impl OneDriveFuse {
             );
             
             let processing_repo = crate::persistency::processing_item_repository::ProcessingItemRepository::new(self.app_state.persistency().pool().clone());
-            sync_await(processing_repo.store_processing_item(&processing_item))?;
+            let _id = sync_await(processing_repo.store_processing_item(&processing_item))?;
         }
         Ok(())
     }
@@ -664,11 +664,89 @@ impl fuser::Filesystem for OneDriveFuse {
         reply: fuser::ReplyEmpty,
     ) {
         let name_str = name.to_string_lossy();
-        debug!("UNLINK: parent={}, name={}", parent, name_str);
+        info!("🗑️ UNLINK: parent={}, name={}", parent, name_str);
 
-        // For now, just mark as deleted in the database
-        // In a full implementation, you'd want to handle the actual deletion
-        reply.ok();
+        // Find the file to delete by constructing its path
+        let file_path = if parent == 1 {
+            format!("/{}", name_str)
+        } else {
+            match sync_await(self.get_item_by_ino(parent)) {
+                Ok(Some(parent_item)) => {
+                    let parent_path = parent_item.virtual_path().unwrap_or("/");
+                    if parent_path == "/" {
+                        format!("/{}", name_str)
+                    } else {
+                        format!("{}/{}", parent_path, name_str)
+                    }
+                }
+                _ => {
+                    reply.error(libc::ENOENT);
+                    return;
+                }
+            }
+        };
+
+        // Get the file item to delete
+        if let Ok(Some(file_item)) = sync_await(self.get_item_by_path(&file_path)) {
+            let onedrive_id = file_item.id();
+            
+            // Create a minimal DriveItem with only ID and deleted field (as per OneDrive API)
+            let deleted_drive_item = crate::onedrive_service::onedrive_models::DriveItem {
+                id: onedrive_id.to_string(),
+                name: None, // Not present in API response for deleted items
+                etag: None, // Not present in API response for deleted items
+                last_modified: None, // Not present in API response for deleted items
+                created_date: None, // Not present in API response for deleted items
+                size: None, // Not present in API response for deleted items
+                folder: None, // Not present in API response for deleted items
+                file: None, // Not present in API response for deleted items
+                download_url: None, // Not present in API response for deleted items
+                deleted: Some(crate::onedrive_service::onedrive_models::DeletedFacet {
+                    state: "deleted".to_string(),
+                }),
+                parent_reference: None, // Not present in API response for deleted items
+            };
+
+            // Create ProcessingItem for the local delete operation
+            let processing_item = crate::persistency::processing_item_repository::ProcessingItem::new_local(
+                deleted_drive_item,
+                crate::persistency::processing_item_repository::ChangeOperation::Delete,
+                PathBuf::new(), // No local path for delete operations
+            );
+
+            // Store the ProcessingItem in the database
+            let processing_repo = crate::persistency::processing_item_repository::ProcessingItemRepository::new(self.app_state.persistency().pool().clone());
+            match sync_await(processing_repo.store_processing_item(&processing_item)) {
+                Ok(db_id) => {
+                    info!("🗑️ Created ProcessingItem for file deletion: {} (DB ID: {})", file_path, db_id);
+                    
+                    // Mark the file as deleted in the FUSE database
+                    let mut updated_file_item = file_item.clone();
+                    updated_file_item.drive_item_mut().deleted = Some(crate::onedrive_service::onedrive_models::DeletedFacet {
+                        state: "deleted".to_string(),
+                    });
+                    updated_file_item.set_sync_status("pending".to_string());
+                    
+                    // Store the updated item (marked as deleted)
+                    let local_path_option = updated_file_item.local_path().map(|p| PathBuf::from(p));
+                    if let Err(e) = sync_await(self.drive_item_with_fuse_repo.store_drive_item_with_fuse(&updated_file_item, local_path_option)) {
+                        error!("Failed to update file as deleted in FUSE database: {}", e);
+                        reply.error(libc::EIO);
+                        return;
+                    }
+                    
+                    info!("🗑️ Successfully marked file as deleted: {} (inode: {})", file_path, file_item.virtual_ino().unwrap_or(0));
+                    reply.ok();
+                }
+                Err(e) => {
+                    error!("Failed to create ProcessingItem for file deletion: {}", e);
+                    reply.error(libc::EIO);
+                }
+            }
+        } else {
+            error!("File not found: {}", file_path);
+            reply.error(libc::ENOENT);
+        }
     }
 
     fn rmdir(
@@ -679,11 +757,89 @@ impl fuser::Filesystem for OneDriveFuse {
         reply: fuser::ReplyEmpty,
     ) {
         let name_str = name.to_string_lossy();
-        info!("RMDIR: parent={}, name={}", parent, name_str);
+        info!("🗑️ RMDIR: parent={}, name={}", parent, name_str);
 
-        // For now, just mark as deleted in the database
-        // In a full implementation, you'd want to handle the actual deletion
-        reply.ok();
+        // Find the directory to delete by constructing its path
+        let dir_path = if parent == 1 {
+            format!("/{}", name_str)
+        } else {
+            match sync_await(self.get_item_by_ino(parent)) {
+                Ok(Some(parent_item)) => {
+                    let parent_path = parent_item.virtual_path().unwrap_or("/");
+                    if parent_path == "/" {
+                        format!("/{}", name_str)
+                    } else {
+                        format!("{}/{}", parent_path, name_str)
+                    }
+                }
+                _ => {
+                    reply.error(libc::ENOENT);
+                    return;
+                }
+            }
+        };
+
+        // Get the directory item to delete
+        if let Ok(Some(dir_item)) = sync_await(self.get_item_by_path(&dir_path)) {
+            let onedrive_id = dir_item.id();
+            
+            // Create a minimal DriveItem with only ID and deleted field (as per OneDrive API)
+            let deleted_drive_item = crate::onedrive_service::onedrive_models::DriveItem {
+                id: onedrive_id.to_string(),
+                name: None, // Not present in API response for deleted items
+                etag: None, // Not present in API response for deleted items
+                last_modified: None, // Not present in API response for deleted items
+                created_date: None, // Not present in API response for deleted items
+                size: None, // Not present in API response for deleted items
+                folder: None, // Not present in API response for deleted items
+                file: None, // Not present in API response for deleted items
+                download_url: None, // Not present in API response for deleted items
+                deleted: Some(crate::onedrive_service::onedrive_models::DeletedFacet {
+                    state: "deleted".to_string(),
+                }),
+                parent_reference: None, // Not present in API response for deleted items
+            };
+
+            // Create ProcessingItem for the local delete operation
+            let processing_item = crate::persistency::processing_item_repository::ProcessingItem::new_local(
+                deleted_drive_item,
+                crate::persistency::processing_item_repository::ChangeOperation::Delete,
+                PathBuf::new(), // No local path for delete operations
+            );
+
+            // Store the ProcessingItem in the database
+            let processing_repo = crate::persistency::processing_item_repository::ProcessingItemRepository::new(self.app_state.persistency().pool().clone());
+            match sync_await(processing_repo.store_processing_item(&processing_item)) {
+                Ok(db_id) => {
+                    info!("🗑️ Created ProcessingItem for directory deletion: {} (DB ID: {})", dir_path, db_id);
+                    
+                    // Mark the directory as deleted in the FUSE database
+                    let mut updated_dir_item = dir_item.clone();
+                    updated_dir_item.drive_item_mut().deleted = Some(crate::onedrive_service::onedrive_models::DeletedFacet {
+                        state: "deleted".to_string(),
+                    });
+                    updated_dir_item.set_sync_status("pending".to_string());
+                    
+                    // Store the updated item (marked as deleted)
+                    let local_path_option = updated_dir_item.local_path().map(|p| PathBuf::from(p));
+                    if let Err(e) = sync_await(self.drive_item_with_fuse_repo.store_drive_item_with_fuse(&updated_dir_item, local_path_option)) {
+                        error!("Failed to update directory as deleted in FUSE database: {}", e);
+                        reply.error(libc::EIO);
+                        return;
+                    }
+                    
+                    info!("🗑️ Successfully marked directory as deleted: {} (inode: {})", dir_path, dir_item.virtual_ino().unwrap_or(0));
+                    reply.ok();
+                }
+                Err(e) => {
+                    error!("Failed to create ProcessingItem for directory deletion: {}", e);
+                    reply.error(libc::EIO);
+                }
+            }
+        } else {
+            error!("Directory not found: {}", dir_path);
+            reply.error(libc::ENOENT);
+        }
     }
 
     fn rename(
@@ -758,7 +914,7 @@ impl fuser::Filesystem for OneDriveFuse {
             };
             
             item.set_virtual_path(new_virtual_path.clone());
-            item.set_display_path(new_virtual_path);
+            item.set_display_path(new_virtual_path.clone());
             
             // Mark as modified
             item.set_file_source(FileSource::Local);
@@ -769,12 +925,50 @@ impl fuser::Filesystem for OneDriveFuse {
             
             // Store the updated item (this will now use UPDATE instead of INSERT OR REPLACE)
             // Pass the existing local_path to preserve it
-            let local_path_option = existing_local_path.map(PathBuf::from);
+            let local_path_option = existing_local_path.clone().map(PathBuf::from);
             match sync_await(self.drive_item_with_fuse_repo.store_drive_item_with_fuse(&item, local_path_option)) {
                 Ok(_) => {
                     info!("Successfully renamed {} to {} (inode: {})", 
                           name_str, newname_str, item.virtual_ino().unwrap_or(0));
-        reply.ok();
+                    
+                    // Create ProcessingItem for the rename/move operation
+                    let old_name = name_str.to_string();
+                    let new_name = newname_str.to_string();
+                    let is_move = parent != newparent;
+                    
+                    let change_operation = if is_move {
+                        crate::persistency::processing_item_repository::ChangeOperation::Move {
+                            old_path: old_path.clone(),
+                            new_path: new_virtual_path.clone(),
+                        }
+                    } else {
+                        crate::persistency::processing_item_repository::ChangeOperation::Rename {
+                            old_name,
+                            new_name,
+                        }
+                    };
+                    
+                    let processing_item = crate::persistency::processing_item_repository::ProcessingItem::new_local(
+                        item.drive_item().clone(),
+                        change_operation,
+                        existing_local_path.map(PathBuf::from).unwrap_or_else(|| PathBuf::new()),
+                    );
+                    
+                    // Store the ProcessingItem in the database
+                    let processing_repo = crate::persistency::processing_item_repository::ProcessingItemRepository::new(self.app_state.persistency().pool().clone());
+                    match sync_await(processing_repo.store_processing_item(&processing_item)) {
+                        Ok(db_id) => {
+                            let operation_type = if is_move { "move" } else { "rename" };
+                            info!("📁 Created ProcessingItem for {}: {} -> {} (DB ID: {})", 
+                                  operation_type, old_path, new_virtual_path, db_id);
+                        }
+                        Err(e) => {
+                            warn!("Failed to create ProcessingItem for rename/move: {}", e);
+                            // Don't fail the operation, just log the warning
+                        }
+                    }
+                    
+                    reply.ok();
                 }
                 Err(e) => {
                     error!("Failed to rename {} to {}: {}", name_str, newname_str, e);

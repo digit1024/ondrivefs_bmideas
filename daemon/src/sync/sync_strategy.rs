@@ -67,7 +67,12 @@ impl SyncStrategy {
 
     /// Check if parent folder exists and is accessible
     async fn check_tree_validity(&self, item: &ProcessingItem) -> Result<(), String> {
-        if let Some(parent_ref) = &item.drive_item.parent_reference {
+        //Parent reference for root exists at this point but it's equal to ""
+        if let Some(parent_ref)   = &item.drive_item.parent_reference {
+            if parent_ref.id == "" {
+                //handles root correctly
+                return Ok(());
+            }
             let drive_item_repo = DriveItemWithFuseRepository::new(self.app_state.persistency().pool().clone());
             
             // Check if parent exists in database

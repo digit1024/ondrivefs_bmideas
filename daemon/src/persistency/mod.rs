@@ -270,7 +270,8 @@ impl PersistencyManager {
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS processing_items (
-                drive_item_id TEXT PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                drive_item_id TEXT NOT NULL,
                 name TEXT,
                 etag TEXT,
                 last_modified TEXT,
@@ -314,6 +315,10 @@ impl PersistencyManager {
             .await?;
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_processing_items_retry_count ON processing_items(retry_count)")
+            .execute(&self.pool)
+            .await?;
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_processing_items_drive_item_id ON processing_items(drive_item_id)")
             .execute(&self.pool)
             .await?;
 
@@ -377,6 +382,21 @@ impl PersistencyManager {
     /// Get the processing item repository
     pub fn processing_item_repository(&self) -> processing_item_repository::ProcessingItemRepository {
         processing_item_repository::ProcessingItemRepository::new(self.pool.clone())
+    }
+
+    /// Get the drive item with fuse repository
+    pub fn drive_item_with_fuse_repository(&self) -> drive_item_with_fuse_repository::DriveItemWithFuseRepository {
+        drive_item_with_fuse_repository::DriveItemWithFuseRepository::new(self.pool.clone())
+    }
+
+    /// Get the download queue repository
+    pub fn download_queue_repository(&self) -> download_queue_repository::DownloadQueueRepository {
+        download_queue_repository::DownloadQueueRepository::new(self.pool.clone())
+    }
+
+    /// Get the upload queue repository
+    pub fn upload_queue_repository(&self) -> upload_queue_repository::UploadQueueRepository {
+        upload_queue_repository::UploadQueueRepository::new(self.pool.clone())
     }
 }
 

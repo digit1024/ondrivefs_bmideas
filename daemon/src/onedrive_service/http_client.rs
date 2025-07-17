@@ -115,6 +115,30 @@ impl HttpClient {
             .context("Failed to deserialize response to type T")?;
         Ok(response)
     }
+
+    /// Make a PATCH request with authorization header
+    #[allow(dead_code)]
+    pub async fn patch<T>(&self, url: &str, body: &T, auth_header: &str) -> Result<T>
+    where
+        T: Serialize + serde::de::DeserializeOwned + std::fmt::Debug,
+    {
+        let url = self.get_full_url(url)?;
+        let response = self
+            .client
+            .patch(&url)
+            .header("Authorization", auth_header)
+            .header("Content-Type", "application/json")
+            .json(body)
+            .send()
+            .await
+            .context("Failed to get response for patch")?
+            .error_for_status()
+            .context("Not a success status")?
+            .json::<T>()
+            .await
+            .context("Failed to deserialize response to type T")?;
+        Ok(response)
+    }
     #[allow(dead_code)]
     /// Download file content with custom headers
     pub async fn download_file(&self, download_url: &str) -> Result<reqwest::Response> {
@@ -137,6 +161,7 @@ impl HttpClient {
             "POST" => self.client.post(url),
             "PUT" => self.client.put(url),
             "DELETE" => self.client.delete(url),
+            "PATCH" => self.client.patch(url),
             _ => self.client.get(url), // Default to GET
         }
     }
