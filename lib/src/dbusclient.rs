@@ -1,7 +1,7 @@
 //! DBus client implementation for OneDrive sync
 
 use crate::dbus_interface::{DBUS_BUS_NAME, DBUS_OBJECT_PATH};
-use crate::types::{SyncError, SyncProgress, SyncStatus};
+use crate::types::{ SyncProgress, SyncStatus};
 use anyhow::Result;
 use zbus::{Connection, Proxy};
 

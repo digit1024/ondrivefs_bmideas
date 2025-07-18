@@ -405,6 +405,65 @@ impl DriveItemWithFuseRepository {
         Ok(())
     }
 
+    /// Update OneDrive ID for a drive item (used when temporary ID is replaced with real OneDrive ID)
+    pub async fn update_onedrive_id(&self, old_id: &str, new_id: &str) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE drive_items_with_fuse 
+            SET onedrive_id = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE onedrive_id = ?
+            "#,
+        )
+        .bind(new_id)
+        .bind(old_id)
+        .execute(&self.pool)
+        .await?;
+
+        debug!("Updated OneDrive ID: {} -> {}", old_id, new_id);
+        Ok(())
+    }
+
+    /// Update parent ID for all children of a specific parent (used when parent ID changes)
+    pub async fn update_parent_id_for_children(&self, old_parent_id: &str, new_parent_id: &str) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE drive_items_with_fuse 
+            SET parent_id = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE parent_id = ?
+            "#,
+        )
+        .bind(new_parent_id)
+        .bind(old_parent_id)
+        .execute(&self.pool)
+        .await?;
+
+        debug!("Updated parent ID for children: {} -> {}", old_parent_id, new_parent_id);
+        Ok(())
+    }
+
+    /// Get all items that have a specific parent ID
+    pub async fn get_items_by_parent_id(&self, parent_id: &str) -> Result<Vec<DriveItemWithFuse>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
+                   mime_type, download_url, is_deleted, parent_id, parent_path, local_path,
+                   parent_ino, virtual_path, display_path, file_source, sync_status
+            FROM drive_items_with_fuse WHERE parent_id = ?
+            "#,
+        )
+        .bind(parent_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            let item = self.row_to_drive_item_with_fuse(row).await?;
+            items.push(item);
+        }
+
+        Ok(items)
+    }
+
     /// Delete a drive item with Fuse metadata by virtual inode
     pub async fn delete_drive_item_with_fuse_by_ino(&self, virtual_ino: u64) -> Result<()> {
         sqlx::query("DELETE FROM drive_items_with_fuse WHERE virtual_ino = ?")

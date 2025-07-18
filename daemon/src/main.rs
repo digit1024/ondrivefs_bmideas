@@ -349,7 +349,7 @@ async fn main() -> Result<()> {
     let sync_task = sync_cycle.get_task().await?;
     scheduler.add_task(sync_task);
     
-    let mut scheduler_shutdown_rx = shutdown_manager.subscribe();
+    let scheduler_shutdown_rx = shutdown_manager.subscribe();
     let scheduler_handle = tokio::spawn(async move {
         let mut shutdown_rx = scheduler_shutdown_rx;
         

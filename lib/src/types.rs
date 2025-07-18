@@ -1,7 +1,7 @@
 //! Shared types for OneDrive sync DBus interface
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+
 
 /// Sync status enumeration
 #[derive(Debug, Clone, Serialize, Deserialize)]

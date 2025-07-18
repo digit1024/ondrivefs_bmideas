@@ -1,6 +1,6 @@
 //! DBus interface definition for OneDrive sync
 
-use crate::types::{SyncError, SyncProgress, SyncStatus};
+use crate::types::{SyncError};
 
 /// DBus bus name and object path constants
 pub const DBUS_BUS_NAME: &str = "org.freedesktop.OneDriveSync";

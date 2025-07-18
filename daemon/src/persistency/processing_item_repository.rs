@@ -687,6 +687,66 @@ impl ProcessingItemRepository {
         Ok(())
     }
 
+    /// Update OneDrive ID for a processing item (used when temporary ID is replaced with real OneDrive ID)
+    pub async fn update_onedrive_id(&self, old_id: &str, new_id: &str) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE processing_items 
+            SET drive_item_id = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE drive_item_id = ?
+            "#,
+        )
+        .bind(new_id)
+        .bind(old_id)
+        .execute(&self.pool)
+        .await?;
+
+        debug!("Updated OneDrive ID in processing item: {} -> {}", old_id, new_id);
+        Ok(())
+    }
+
+    /// Update parent ID for all processing items that have a specific parent ID
+    pub async fn update_parent_id_for_children(&self, old_parent_id: &str, new_parent_id: &str) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE processing_items 
+            SET parent_id = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE parent_id = ?
+            "#,
+        )
+        .bind(new_parent_id)
+        .bind(old_parent_id)
+        .execute(&self.pool)
+        .await?;
+
+        debug!("Updated parent ID for processing items: {} -> {}", old_parent_id, new_parent_id);
+        Ok(())
+    }
+
+    /// Get all processing items that have a specific parent ID
+    pub async fn get_processing_items_by_parent_id(&self, parent_id: &str) -> Result<Vec<ProcessingItem>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
+                   mime_type, download_url, is_deleted, parent_id, parent_path,
+                   status, local_path, error_message, last_status_update, retry_count, priority,
+                   change_type, change_operation, conflict_resolution, validation_errors, user_decision
+            FROM processing_items WHERE parent_id = ?
+            "#,
+        )
+        .bind(parent_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            let item = self.row_to_processing_item(row).await?;
+            items.push(item);
+        }
+
+        Ok(items)
+    }
+
     /// Convert database row to ProcessingItem
     async fn row_to_processing_item(&self, row: sqlx::sqlite::SqliteRow) -> Result<ProcessingItem> {
         let db_id: i64 = row.try_get("id")?;

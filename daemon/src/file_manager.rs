@@ -50,9 +50,9 @@ pub trait SyncFileManager {
     fn file_exists(&self, path: &Path) -> bool;
     
     /// Convert virtual path to downloaded file path
-    fn file_exists_in_download(&self, OneDriveId: &str) -> bool;
-    fn file_exists_in_upload(&self, OneDriveId: &str) -> bool;
-    fn file_exists_in_locally(&self, OneDriveId: &str) -> bool;// check both
+    fn file_exists_in_download(&self, onedirive_id: &str) -> bool;
+    fn file_exists_in_upload(&self, onedrive_id: &str) -> bool;
+    fn file_exists_in_locally(&self, onedrive_id: &str) -> bool;// check both
 
 }
 
@@ -93,17 +93,17 @@ impl DefaultFileManager {
     fn strip_path_prefix<'a>(path: &'a Path, prefix: &Path) -> &'a Path {
         path.strip_prefix(prefix).unwrap_or(path)
     }
-    pub fn file_exists_in_download(&self, OneDriveId: &str) -> bool {
-        let download_path = self.config.download_dir().join(OneDriveId);
+    pub fn file_exists_in_download(&self, onderive_id: &str) -> bool {
+        let download_path = self.config.download_dir().join(onderive_id);
         download_path.exists() && download_path.is_file()
     }
-    pub fn file_exists_in_upload(&self, OneDriveId: &str) -> bool {
-        let upload_path = self.config.upload_dir().join(OneDriveId);
+    pub fn file_exists_in_upload(&self, onedrive_id: &str) -> bool {
+        let upload_path = self.config.upload_dir().join(onedrive_id);
         upload_path.exists() && upload_path.is_file()
     }
-    pub fn file_exists_in_locally(&self, OneDriveId: &str) -> bool {
-        let download_path = self.config.download_dir().join(OneDriveId);
-        let upload_path = self.config.upload_dir().join(OneDriveId);
+    pub fn file_exists_in_locally(&self, onedrive_id: &str) -> bool {
+        let download_path = self.config.download_dir().join(onedrive_id);
+        let upload_path = self.config.upload_dir().join(onedrive_id);
         download_path.exists() && download_path.is_file() || upload_path.exists() && upload_path.is_file()
     }
 }
@@ -186,17 +186,17 @@ impl SyncFileManager for DefaultFileManager {
     fn file_exists(&self, path: &Path) -> bool {
         path.exists() && path.is_file()
     }
-    fn file_exists_in_download(&self, OneDriveId: &str) -> bool {
-        let download_path = self.config.download_dir().join(OneDriveId);
+    fn file_exists_in_download(&self, onedrive_id: &str) -> bool {
+        let download_path = self.config.download_dir().join(onedrive_id);
         download_path.exists() && download_path.is_file()
     }
-    fn file_exists_in_upload(&self, OneDriveId: &str) -> bool {
-        let upload_path = self.config.upload_dir().join(OneDriveId);
+    fn file_exists_in_upload(&self, onedrive_id: &str) -> bool {
+        let upload_path = self.config.upload_dir().join(onedrive_id);
         upload_path.exists() && upload_path.is_file()
     }
-    fn file_exists_in_locally(&self, OneDriveId: &str) -> bool {
-        let download_path = self.config.download_dir().join(OneDriveId);
-        let upload_path = self.config.upload_dir().join(OneDriveId);
+    fn file_exists_in_locally(&self, onedrive_id: &str) -> bool {
+        let download_path = self.config.download_dir().join(onedrive_id);
+        let upload_path = self.config.upload_dir().join(onedrive_id);
         download_path.exists() && download_path.is_file() || upload_path.exists() && upload_path.is_file()
     }
     

@@ -367,8 +367,8 @@ impl SyncProcessor {
     async fn handle_local_create(&self, item: &ProcessingItem) -> Result<()> {
         info!("📤 Processing local create: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
         
-        let upload_queue_repo = self.app_state.persistency().upload_queue_repository();
         let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
+        let processing_repo = self.app_state.persistency().processing_item_repository();
         
         // Get local path from the processing item
         let local_path = if let Some(local_path) = &item.local_path {
@@ -387,13 +387,27 @@ impl SyncProcessor {
                 Ok(result) => {
                     info!("📁 Created folder on OneDrive: {} -> {}", folder_name, result.onedrive_id);
                     
-                    // Update the processing item with the OneDrive ID
-                    let mut updated_item = item.drive_item.clone();
-                    updated_item.id = result.onedrive_id;
+                    // Update all database references from temporary ID to real OneDrive ID
+                    let temporary_id = &item.drive_item.id;
+                    let real_onedrive_id = &result.onedrive_id;
                     
-                    // Setup FUSE metadata for the created folder
+                    // Update DriveItemWithFuse
+                    drive_item_with_fuse_repo.update_onedrive_id(temporary_id, real_onedrive_id).await?;
+                    
+                    // Update ProcessingItems
+                    processing_repo.update_onedrive_id(temporary_id, real_onedrive_id).await?;
+                    
+                    // Update parent IDs for any children that reference this temporary ID
+                    drive_item_with_fuse_repo.update_parent_id_for_children(temporary_id, real_onedrive_id).await?;
+                    processing_repo.update_parent_id_for_children(temporary_id, real_onedrive_id).await?;
+                    
+                    info!("🔄 Updated database references: {} -> {}", temporary_id, real_onedrive_id);
+                    
+                    // Setup FUSE metadata for the created folder with real OneDrive ID
+                    let mut updated_drive_item = item.drive_item.clone();
+                    updated_drive_item.id = result.onedrive_id;
                     let local_downloads_path = self.app_state.config().project_dirs.data_dir().join("downloads");
-                    let _inode = self.setup_fuse_metadata(&updated_item, &drive_item_with_fuse_repo, &local_downloads_path).await?;
+                    let _inode = self.setup_fuse_metadata(&updated_drive_item, &drive_item_with_fuse_repo, &local_downloads_path).await?;
                 }
                 Err(e) => {
                     error!("❌ Failed to create folder on OneDrive: {}", e);
@@ -401,12 +415,57 @@ impl SyncProcessor {
                 }
             }
         } else {
-            // Handle file creation - add to upload queue
+            // Handle file creation - upload immediately and get real OneDrive ID
             let file_name = item.drive_item.name.as_deref().unwrap_or("unnamed");
-            let parent_id = item.drive_item.parent_reference.as_ref().map(|p| p.id.clone());
+            let parent_path = self.get_parent_path_from_item(&item.drive_item)?;
             
-            upload_queue_repo.add_to_upload_queue(&local_path, parent_id, file_name).await?;
-            info!("📤 Added new local file to upload queue: {} -> {}", local_path.display(), file_name);
+            // Read file data from local path
+            if local_path.exists() {
+                match std::fs::read(&local_path) {
+                    Ok(file_data) => {
+                        match self.app_state.onedrive_client.upload_file(&file_data, file_name, &parent_path).await {
+                            Ok(result) => {
+                                info!("📤 Uploaded file to OneDrive: {} -> {}", file_name, result.onedrive_id);
+                                
+                                // Update all database references from temporary ID to real OneDrive ID
+                                let temporary_id = &item.drive_item.id;
+                                let real_onedrive_id = &result.onedrive_id;
+                                
+                                // Update DriveItemWithFuse
+                                drive_item_with_fuse_repo.update_onedrive_id(temporary_id, real_onedrive_id).await?;
+                                
+                                // Update ProcessingItems
+                                processing_repo.update_onedrive_id(temporary_id, real_onedrive_id).await?;
+                                
+                                // Update parent IDs for any children that reference this temporary ID
+                                drive_item_with_fuse_repo.update_parent_id_for_children(temporary_id, real_onedrive_id).await?;
+                                processing_repo.update_parent_id_for_children(temporary_id, real_onedrive_id).await?;
+                                
+                                info!("🔄 Updated database references: {} -> {}", temporary_id, real_onedrive_id);
+                                
+                                // Setup FUSE metadata for the uploaded file with real OneDrive ID
+                                let mut updated_drive_item = item.drive_item.clone();
+                                updated_drive_item.id = result.onedrive_id;
+                                if let Some(etag) = result.etag {
+                                    updated_drive_item.etag = Some(etag);
+                                }
+                                let local_downloads_path = self.app_state.config().project_dirs.data_dir().join("downloads");
+                                let _inode = self.setup_fuse_metadata(&updated_drive_item, &drive_item_with_fuse_repo, &local_downloads_path).await?;
+                            }
+                            Err(e) => {
+                                error!("❌ Failed to upload file to OneDrive: {}", e);
+                                return Err(e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("❌ Failed to read local file for upload: {}", e);
+                        return Err(anyhow::anyhow!("Failed to read local file: {}", e));
+                    }
+                }
+            } else {
+                return Err(anyhow::anyhow!("Local file does not exist: {}", local_path.display()));
+            }
         }
         
         Ok(())
