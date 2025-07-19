@@ -723,6 +723,59 @@ impl ProcessingItemRepository {
         Ok(())
     }
 
+    /// Update a processing item with new drive item data (used after OneDrive operations)
+    pub async fn update_processing_item(&self, item: &ProcessingItem) -> Result<()> {
+        let db_id = item.id.ok_or_else(|| anyhow::anyhow!("ProcessingItem has no database ID"))?;
+        let parent_id = item.drive_item.parent_reference.as_ref().map(|p| p.id.clone());
+        let parent_path = item.drive_item.parent_reference.as_ref().and_then(|p| p.path.clone());
+        let local_path_str = item.local_path.as_ref().map(|p| p.to_string_lossy().to_string());
+        let validation_errors_json = serde_json::to_string(&item.validation_errors)?;
+        let user_decision_json = item.user_decision.as_ref().map(|d| serde_json::to_string(d)).transpose()?;
+
+        sqlx::query(
+            r#"
+            UPDATE processing_items SET
+                drive_item_id = ?, name = ?, etag = ?, last_modified = ?, created_date = ?, size = ?, is_folder = ?,
+                mime_type = ?, download_url = ?, is_deleted = ?, parent_id = ?, parent_path = ?,
+                status = ?, local_path = ?, error_message = ?, last_status_update = ?, retry_count = ?, priority = ?,
+                change_type = ?, change_operation = ?, conflict_resolution = ?, validation_errors = ?, user_decision = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            "#,
+        )
+        .bind(&item.drive_item.id)
+        .bind(&item.drive_item.name)
+        .bind(&item.drive_item.etag)
+        .bind(&item.drive_item.last_modified)
+        .bind(&item.drive_item.created_date)
+        .bind(item.drive_item.size.map(|s| s as i64))
+        .bind(item.drive_item.folder.is_some())
+        .bind(item.drive_item.file.as_ref().and_then(|f| f.mime_type.clone()))
+        .bind(&item.drive_item.download_url)
+        .bind(item.drive_item.deleted.is_some())
+        .bind(parent_id)
+        .bind(parent_path)
+        .bind(item.status.as_str())
+        .bind(local_path_str)
+        .bind(&item.error_message)
+        .bind(&item.last_status_update)
+        .bind(item.retry_count)
+        .bind(item.priority)
+        .bind(item.change_type.as_str())
+        .bind(item.change_operation.as_str())
+        .bind(&item.conflict_resolution)
+        .bind(&validation_errors_json)
+        .bind(&user_decision_json)
+        .bind(db_id)
+        .execute(&self.pool)
+        .await?;
+
+        debug!("Updated processing item: {} ({}) with new drive item data", 
+               item.drive_item.name.as_deref().unwrap_or("unnamed"),
+               item.drive_item.id);
+        Ok(())
+    }
+
     /// Get all processing items that have a specific parent ID
     pub async fn get_processing_items_by_parent_id(&self, parent_id: &str) -> Result<Vec<ProcessingItem>> {
         let rows = sqlx::query(

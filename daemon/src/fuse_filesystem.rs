@@ -183,6 +183,8 @@ impl OneDriveFuse {
             "onedrive_id": item.id(),
             "name": item.name().unwrap_or("unknown"),
             "virtual_path": item.virtual_path().unwrap_or("unknown"),
+            "mime_type": item.mime_type().unwrap_or("application/octet-stream"),
+            "size": item.size(),
             "message": "This is a remote OneDrive file that has not been downloaded locally.",
             "instructions": "Double-click this file to download it from OneDrive.",
             "file_extension": ".onedrivedownload"
@@ -265,7 +267,7 @@ impl OneDriveFuse {
         // Get parent item to extract parent_id and parent_path
         let parent_item = sync_await(self.get_item_by_ino(parent_ino))?;
         let parent_id = parent_item.as_ref().map(|p| p.id().to_string());
-        let parent_path = parent_item.as_ref().and_then(|p| p.virtual_path()).map(|p| p.to_string());
+        let parent_path = parent_item.as_ref().and_then(|p| p.virtual_path()).map(|p| format!("/drive/root:{}" , p.to_string()));
         
         // Create a new DriveItem for the local change
         let drive_item = DriveItem {
@@ -302,12 +304,19 @@ impl OneDriveFuse {
         let local_path = self.file_manager.get_upload_dir().join(&temporary_id);
         item_with_fuse.set_local_path(local_path.to_string_lossy().to_string());
         
-        // Set display path
-        let display_path = if let Some(parent_virtual_path) = parent_path {
-            if parent_virtual_path == "/" {
+        // Set display path - convert raw OneDrive path to virtual path for display
+        let display_path = if let Some(raw_parent_path) = &parent_path {
+            // Convert raw OneDrive path to virtual path for display
+            let virtual_parent_path = if raw_parent_path == "/drive/root:" {
+                "/".to_string()
+            } else {
+                raw_parent_path.replace("/drive/root:", "")
+            };
+            
+            if virtual_parent_path == "/" {
                 format!("/{}", name)
             } else {
-                format!("{}/{}", parent_virtual_path, name)
+                format!("{}/{}", virtual_parent_path, name)
             }
         } else {
             format!("/{}", name)
@@ -440,11 +449,18 @@ impl fuser::Filesystem for OneDriveFuse {
             }
         };
 
+        // Strip .onedrivedownload extension if present for lookup
+        let lookup_name = if name_str.ends_with(".onedrivedownload") {
+            &name_str[..name_str.len() - 17] // Remove ".onedrivedownload"
+        } else {
+            &name_str
+        };
+
         // Construct full path
         let full_path = if parent_path == "/" {
-            format!("/{}", name_str)
+            format!("/{}", lookup_name)
         } else {
-            format!("{}/{}", parent_path, name_str)
+            format!("{}/{}", parent_path, lookup_name)
         };
 
         // Try to get the item
@@ -497,7 +513,21 @@ impl fuser::Filesystem for OneDriveFuse {
                 } else {
                     fuser::FileType::RegularFile
                     };
-                    let name = child.name().unwrap_or_default().to_string();
+                    
+                    // For files that aren't available locally, append .onedrivedownload extension
+                    let name = if child.is_folder() {
+                        child.name().unwrap_or_default().to_string()
+                    } else {
+                        let base_name = child.name().unwrap_or_default();
+                        if self.file_exists_locally(child.id()).is_some() {
+                            // File exists locally - use original name
+                            base_name.to_string()
+                        } else {
+                            // File doesn't exist locally - append .onedrivedownload
+                            format!("{}.onedrivedownload", base_name)
+                        }
+                    };
+                    
                     entries.push((child.virtual_ino().unwrap_or(0), file_type, name));
                 }
             }
@@ -531,7 +561,21 @@ impl fuser::Filesystem for OneDriveFuse {
                     } else {
                         fuser::FileType::RegularFile
                     };
-                    let name = child.name().unwrap_or_default().to_string();
+                    
+                    // For files that aren't available locally, append .onedrivedownload extension
+                    let name = if child.is_folder() {
+                        child.name().unwrap_or_default().to_string()
+                    } else {
+                        let base_name = child.name().unwrap_or_default();
+                        if self.file_exists_locally(child.id()).is_some() {
+                            // File exists locally - use original name
+                            base_name.to_string()
+                        } else {
+                            // File doesn't exist locally - append .onedrivedownload
+                            format!("{}.onedrivedownload", base_name)
+                        }
+                    };
+                    
                     entries.push((child.virtual_ino().unwrap_or(0), file_type, name));
                 }
             }

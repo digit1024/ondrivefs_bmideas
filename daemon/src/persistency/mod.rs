@@ -307,8 +307,8 @@ impl PersistencyManager {
             .await?;
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_processing_items_change_type ON processing_items(change_type)")
-            .execute(&self.pool)
-            .await?;
+        .execute(&self.pool)
+        .await?;
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_processing_items_priority ON processing_items(priority)")
             .execute(&self.pool)

@@ -101,6 +101,7 @@ impl OneDriveClient {
     ) -> Result<UploadResult> {
         let auth_header = self.auth_header().await?;
         let upload_url = self.build_upload_url(file_name, remote_path)?;
+        info!("Uploading file: {} to {}", file_name, upload_url);
 
         let response = self
             .http_client
@@ -122,6 +123,40 @@ impl OneDriveClient {
         };
 
         info!("Uploaded file: {} -> {}", file_name, remote_path);
+        Ok(result)
+    }
+
+    /// Upload a file to a specific parent folder by parent ID (correct Microsoft Graph API format)
+    pub async fn upload_file_to_parent(
+        &self,
+        file_data: &[u8],
+        file_name: &str,
+        parent_id: &str,
+    ) -> Result<UploadResult> {
+        let auth_header = self.auth_header().await?;
+        let upload_url = format!("/me/drive/items/{}:/{}:/content", parent_id, file_name);
+        info!("Uploading file: {} to parent {} using URL: {}", file_name, parent_id, upload_url);
+
+        let response = self
+            .http_client
+            .upload_file(&upload_url, file_data, &auth_header)
+            .await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(anyhow!("Failed to upload file: {}", error_text));
+        }
+
+        let item: DriveItem = response.json().await?;
+
+        let result = UploadResult {
+            onedrive_id: item.id.clone(),
+            etag: item.etag,
+            web_url: None,
+            size: item.size,
+        };
+
+        info!("Uploaded file: {} to parent {} -> {}", file_name, parent_id, item.id);
         Ok(result)
     }
 
@@ -161,7 +196,7 @@ impl OneDriveClient {
     /// Build upload URL for file upload
     #[allow(dead_code)]
     fn build_upload_url(&self, file_name: &str, remote_path: &str) -> Result<String> {
-        let parent_path = if remote_path == "/" {
+        let parent_path = if remote_path == "/" || remote_path == "/drive/root:" {
             "/".to_string()
         } else {
             remote_path.to_string()
@@ -170,7 +205,14 @@ impl OneDriveClient {
         let url = if parent_path == "/" {
             format!("/me/drive/root:/{}:/content", file_name)
         } else {
-            let encoded_path = urlencoding::encode(&parent_path);
+            // Strip /drive/root: prefix and encode the relative path
+            let relative_path = if parent_path.starts_with("/drive/root:") {
+                &parent_path[12..] // Remove "/drive/root:" prefix
+            } else {
+                &parent_path
+            };
+            
+            let encoded_path = urlencoding::encode(relative_path);
             format!("/me/drive/root:{}:/{}:/content", encoded_path, file_name)
         };
 
@@ -181,7 +223,15 @@ impl OneDriveClient {
     #[allow(dead_code)]
     pub async fn get_item_by_path(&self, path: &str) -> Result<DriveItem> {
         let auth_header = self.auth_header().await?;
-        let encoded_path = urlencoding::encode(path);
+        
+        // Strip /drive/root: prefix if present and encode the relative path
+        let relative_path = if path.starts_with("/drive/root:") {
+            &path[12..] // Remove "/drive/root:" prefix
+        } else {
+            path
+        };
+        
+        let encoded_path = urlencoding::encode(relative_path);
         let url = format!("/me/drive/root:{}", encoded_path);
 
         let item: DriveItem = self
@@ -211,7 +261,15 @@ impl OneDriveClient {
     #[allow(dead_code)]
     pub async fn delete_item(&self, path: &str) -> Result<DeleteResult> {
         let auth_header = self.auth_header().await?;
-        let encoded_path = urlencoding::encode(path);
+        
+        // Strip /drive/root: prefix if present and encode the relative path
+        let relative_path = if path.starts_with("/drive/root:") {
+            &path[12..] // Remove "/drive/root:" prefix
+        } else {
+            path
+        };
+        
+        let encoded_path = urlencoding::encode(relative_path);
         let url = format!("/me/drive/root:{}", encoded_path);
 
         self.http_client
@@ -280,10 +338,17 @@ impl OneDriveClient {
     /// Build create folder URL
     #[allow(dead_code)]
     fn build_create_folder_url(&self, parent_path: &str) -> Result<String> {
-        let url = if parent_path == "/" {
+        let url = if parent_path == "/" || parent_path == "/drive/root:" {
             "/me/drive/root/children".to_string()
         } else {
-            let encoded_path = urlencoding::encode(parent_path);
+            // Strip /drive/root: prefix and encode the relative path
+            let relative_path = if parent_path.starts_with("/drive/root:") {
+                &parent_path[12..] // Remove "/drive/root:" prefix
+            } else {
+                parent_path
+            };
+            
+            let encoded_path = urlencoding::encode(relative_path);
             format!("/me/drive/root:{}:/children", encoded_path)
         };
 

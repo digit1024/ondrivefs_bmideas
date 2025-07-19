@@ -379,7 +379,7 @@ impl SyncProcessor {
         
         // Check if it's a folder or file
         if item.drive_item.folder.is_some() {
-            // Handle folder creation
+            // For folders, create on OneDrive and get real OneDrive ID
             let folder_name = item.drive_item.name.as_deref().unwrap_or("unnamed");
             let parent_path = self.get_parent_path_from_item(&item.drive_item)?;
             
@@ -403,11 +403,25 @@ impl SyncProcessor {
                     
                     info!("🔄 Updated database references: {} -> {}", temporary_id, real_onedrive_id);
                     
-                    // Setup FUSE metadata for the created folder with real OneDrive ID
-                    let mut updated_drive_item = item.drive_item.clone();
-                    updated_drive_item.id = result.onedrive_id;
-                    let local_downloads_path = self.app_state.config().project_dirs.data_dir().join("downloads");
-                    let _inode = self.setup_fuse_metadata(&updated_drive_item, &drive_item_with_fuse_repo, &local_downloads_path).await?;
+                    // Get the full DriveItem from OneDrive to update with complete metadata
+                    match self.app_state.onedrive_client.get_item_by_id(real_onedrive_id).await {
+                        Ok(full_drive_item) => {
+                            // Setup FUSE metadata for the created folder with real OneDrive data
+                            let local_downloads_path = self.app_state.config().project_dirs.data_dir().join("downloads");
+                            let _inode = self.setup_fuse_metadata(&full_drive_item, &drive_item_with_fuse_repo, &local_downloads_path).await?;
+                            
+                            // Update the processing item with the real OneDrive data
+                            let mut updated_processing_item = item.clone();
+                            updated_processing_item.drive_item = full_drive_item;
+                            processing_repo.update_processing_item(&updated_processing_item).await?;
+                            
+                            info!("✅ Updated processing item with real OneDrive data for folder: {}", folder_name);
+                        }
+                        Err(e) => {
+                            warn!("⚠️ Failed to get full DriveItem for created folder: {}", e);
+                            // Continue anyway since we have the basic info
+                        }
+                    }
                 }
                 Err(e) => {
                     error!("❌ Failed to create folder on OneDrive: {}", e);
@@ -417,13 +431,28 @@ impl SyncProcessor {
         } else {
             // Handle file creation - upload immediately and get real OneDrive ID
             let file_name = item.drive_item.name.as_deref().unwrap_or("unnamed");
-            let parent_path = self.get_parent_path_from_item(&item.drive_item)?;
+            
+            // Get parent ID for the correct API endpoint
+            let parent_id = if let Some(parent_ref) = &item.drive_item.parent_reference {
+                parent_ref.id.clone()
+            } else {
+                // If no parent reference, use root folder ID
+                // We need to get the root folder ID from OneDrive
+                match self.app_state.onedrive_client.get_item_by_path("/").await {
+                    Ok(root_item) => root_item.id,
+                    Err(e) => {
+                        error!("❌ Failed to get root folder ID: {}", e);
+                        return Err(e);
+                    }
+                }
+            };
             
             // Read file data from local path
             if local_path.exists() {
                 match std::fs::read(&local_path) {
                     Ok(file_data) => {
-                        match self.app_state.onedrive_client.upload_file(&file_data, file_name, &parent_path).await {
+                        // Use the correct API endpoint with parent ID
+                        match self.app_state.onedrive_client.upload_file_to_parent(&file_data, file_name, &parent_id).await {
                             Ok(result) => {
                                 info!("📤 Uploaded file to OneDrive: {} -> {}", file_name, result.onedrive_id);
                                 
@@ -443,14 +472,30 @@ impl SyncProcessor {
                                 
                                 info!("🔄 Updated database references: {} -> {}", temporary_id, real_onedrive_id);
                                 
-                                // Setup FUSE metadata for the uploaded file with real OneDrive ID
-                                let mut updated_drive_item = item.drive_item.clone();
-                                updated_drive_item.id = result.onedrive_id;
-                                if let Some(etag) = result.etag {
-                                    updated_drive_item.etag = Some(etag);
+                                // Get the full DriveItem from OneDrive to update with complete metadata
+                                match self.app_state.onedrive_client.get_item_by_id(real_onedrive_id).await {
+                                    Ok(full_drive_item) => {
+                                        // Move file from upload folder to download folder
+                                        if let Err(e) = self.move_file_to_download_folder(&local_path, real_onedrive_id).await {
+                                            warn!("⚠️ Failed to move file to download folder: {}", e);
+                                        }
+                                        
+                                        // Setup FUSE metadata for the uploaded file with real OneDrive data
+                                        let local_downloads_path = self.app_state.config().project_dirs.data_dir().join("downloads");
+                                        let _inode = self.setup_fuse_metadata(&full_drive_item, &drive_item_with_fuse_repo, &local_downloads_path).await?;
+                                        
+                                        // Update the processing item with the real OneDrive data
+                                        let mut updated_processing_item = item.clone();
+                                        updated_processing_item.drive_item = full_drive_item;
+                                        processing_repo.update_processing_item(&updated_processing_item).await?;
+                                        
+                                        info!("✅ Updated processing item with real OneDrive data for file: {}", file_name);
+                                    }
+                                    Err(e) => {
+                                        warn!("⚠️ Failed to get full DriveItem for uploaded file: {}", e);
+                                        // Continue anyway since we have the basic info
+                                    }
                                 }
-                                let local_downloads_path = self.app_state.config().project_dirs.data_dir().join("downloads");
-                                let _inode = self.setup_fuse_metadata(&updated_drive_item, &drive_item_with_fuse_repo, &local_downloads_path).await?;
                             }
                             Err(e) => {
                                 error!("❌ Failed to upload file to OneDrive: {}", e);
@@ -475,6 +520,7 @@ impl SyncProcessor {
         info!("📤 Processing local update: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
         
         let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
+        let processing_repo = self.app_state.persistency().processing_item_repository();
         
         // Get local path from the processing item
         let local_path = if let Some(local_path) = &item.local_path {
@@ -498,15 +544,46 @@ impl SyncProcessor {
                             Ok(result) => {
                                 info!("📤 Updated file on OneDrive: {} -> {}", local_path.display(), result.onedrive_id);
                                 
-                                // Update the processing item with new ETag
-                                let mut updated_item = item.drive_item.clone();
-                                if let Some(etag) = result.etag {
-                                    updated_item.etag = Some(etag);
+                                // Get the full DriveItem from OneDrive to update with complete metadata
+                                match self.app_state.onedrive_client.get_item_by_id(&result.onedrive_id).await {
+                                    Ok(full_drive_item) => {
+                                        // Move file from upload folder to download folder
+                                        let download_path = self.app_state.config().project_dirs.data_dir().join("downloads").join(&result.onedrive_id);
+                                        
+                                        // Remove existing file in download folder if it exists
+                                        if download_path.exists() {
+                                            if let Err(e) = std::fs::remove_file(&download_path) {
+                                                warn!("⚠️ Failed to remove existing file in download folder: {}: {}", 
+                                                      download_path.display(), e);
+                                            }
+                                        }
+                                        
+                                        // Move file from upload to download
+                                        if let Err(e) = std::fs::rename(&local_path, &download_path) {
+                                            warn!("⚠️ Failed to move file from upload to download: {} -> {}: {}", 
+                                                  local_path.display(), download_path.display(), e);
+                                        } else {
+                                            info!("📁 Moved file from upload to download: {} -> {}", 
+                                                  local_path.display(), download_path.display());
+                                        }
+                                        
+                                        // Setup FUSE metadata for the updated file with real OneDrive data
+                                        let local_downloads_path = self.app_state.config().project_dirs.data_dir().join("downloads");
+                                        let _inode = self.setup_fuse_metadata(&full_drive_item, &drive_item_with_fuse_repo, &local_downloads_path).await?;
+                                        
+                                        // Update the processing item with the real OneDrive data
+                                        let mut updated_processing_item = item.clone();
+                                        updated_processing_item.drive_item = full_drive_item;
+                                        processing_repo.update_processing_item(&updated_processing_item).await?;
+                                        
+                                        info!("✅ Updated processing item with real OneDrive data for file: {}", 
+                                              item.drive_item.name.as_deref().unwrap_or("unnamed"));
+                                    }
+                                    Err(e) => {
+                                        warn!("⚠️ Failed to get full DriveItem for updated file: {}", e);
+                                        // Continue anyway since we have the basic info
+                                    }
                                 }
-                                
-                                // Setup FUSE metadata for the updated file
-                                let local_downloads_path = self.app_state.config().project_dirs.data_dir().join("downloads");
-                                let _inode = self.setup_fuse_metadata(&updated_item, &drive_item_with_fuse_repo, &local_downloads_path).await?;
                             }
                             Err(e) => {
                                 error!("❌ Failed to update file on OneDrive: {}", e);
@@ -561,6 +638,7 @@ impl SyncProcessor {
         info!("📁 Processing local move: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
         
         let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
+        let processing_repo = self.app_state.persistency().processing_item_repository();
         
         // Get the new parent ID from the processing item
         let new_parent_id = if let Some(parent_ref) = &item.drive_item.parent_reference {
@@ -574,15 +652,17 @@ impl SyncProcessor {
             Ok(moved_item) => {
                 info!("📁 Moved item on OneDrive: {} -> parent: {}", item.drive_item.id, new_parent_id);
                 
-                // Update the processing item with the moved item data
-                let mut updated_item = item.drive_item.clone();
-                updated_item.id = moved_item.id;
-                updated_item.etag = moved_item.etag;
-                updated_item.parent_reference = moved_item.parent_reference;
-                
-                // Setup FUSE metadata for the moved item
+                // Setup FUSE metadata for the moved item with real OneDrive data
                 let local_downloads_path = self.app_state.config().project_dirs.data_dir().join("downloads");
-                let _inode = self.setup_fuse_metadata(&updated_item, &drive_item_with_fuse_repo, &local_downloads_path).await?;
+                let _inode = self.setup_fuse_metadata(&moved_item, &drive_item_with_fuse_repo, &local_downloads_path).await?;
+                
+                // Update the processing item with the real OneDrive data
+                let mut updated_processing_item = item.clone();
+                updated_processing_item.drive_item = moved_item;
+                processing_repo.update_processing_item(&updated_processing_item).await?;
+                
+                info!("✅ Updated processing item with real OneDrive data for moved item: {}", 
+                      item.drive_item.name.as_deref().unwrap_or("unnamed"));
             }
             Err(e) => {
                 error!("❌ Failed to move item on OneDrive: {}", e);
@@ -597,6 +677,7 @@ impl SyncProcessor {
         info!("🏷️ Processing local rename: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
         
         let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
+        let processing_repo = self.app_state.persistency().processing_item_repository();
         
         // Get the new name from the processing item
         let new_name = if let Some(name) = &item.drive_item.name {
@@ -610,15 +691,16 @@ impl SyncProcessor {
             Ok(renamed_item) => {
                 info!("🏷️ Renamed item on OneDrive: {} -> {}", item.drive_item.id, new_name);
                 
-                // Update the processing item with the renamed item data
-                let mut updated_item = item.drive_item.clone();
-                updated_item.id = renamed_item.id;
-                updated_item.etag = renamed_item.etag;
-                updated_item.name = renamed_item.name;
-                
-                // Setup FUSE metadata for the renamed item
+                // Setup FUSE metadata for the renamed item with real OneDrive data
                 let local_downloads_path = self.app_state.config().project_dirs.data_dir().join("downloads");
-                let _inode = self.setup_fuse_metadata(&updated_item, &drive_item_with_fuse_repo, &local_downloads_path).await?;
+                let _inode = self.setup_fuse_metadata(&renamed_item, &drive_item_with_fuse_repo, &local_downloads_path).await?;
+                
+                // Update the processing item with the real OneDrive data
+                let mut updated_processing_item = item.clone();
+                updated_processing_item.drive_item = renamed_item;
+                processing_repo.update_processing_item(&updated_processing_item).await?;
+                
+                info!("✅ Updated processing item with real OneDrive data for renamed item: {}", new_name);
             }
             Err(e) => {
                 error!("❌ Failed to rename item on OneDrive: {}", e);
@@ -828,5 +910,39 @@ impl SyncProcessor {
             parent_path = "/".to_string();
         }
         Ok(parent_path)
+    }
+
+    /// Safely move a file from upload folder to download folder
+    async fn move_file_to_download_folder(&self, upload_path: &PathBuf, onedrive_id: &str) -> Result<()> {
+        let download_path = self.app_state.config().project_dirs.data_dir().join("downloads").join(onedrive_id);
+        
+        // Remove existing file in download folder if it exists
+        if download_path.exists() {
+            if let Err(e) = std::fs::remove_file(&download_path) {
+                warn!("⚠️ Failed to remove existing file in download folder: {}: {}", 
+                      download_path.display(), e);
+            }
+        }
+        
+        // Move file from upload to download
+        match std::fs::rename(upload_path, &download_path) {
+            Ok(_) => {
+                info!("📁 Moved file from upload to download: {} -> {}", 
+                      upload_path.display(), download_path.display());
+                Ok(())
+            }
+            Err(e) => {
+                warn!("⚠️ Failed to move file from upload to download: {} -> {}: {}", 
+                      upload_path.display(), download_path.display(), e);
+                
+                // Try to clean up the upload file if move failed
+                if let Err(cleanup_err) = std::fs::remove_file(upload_path) {
+                    warn!("⚠️ Failed to clean up upload file after move failure: {}: {}", 
+                          upload_path.display(), cleanup_err);
+                }
+                
+                Err(anyhow::anyhow!("Failed to move file: {}", e))
+            }
+        }
     }
 } 

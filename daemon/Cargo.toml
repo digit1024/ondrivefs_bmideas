@@ -10,6 +10,7 @@ edition = "2024"
 dead_code = "allow"
 unused_variables = "allow"
 unused_imports = "allow"
+async_fn_in_trait = "allow"
 
 [dependencies]
 
