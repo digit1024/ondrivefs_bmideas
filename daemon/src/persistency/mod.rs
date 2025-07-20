@@ -401,6 +401,11 @@ impl PersistencyManager {
     pub fn upload_queue_repository(&self) -> upload_queue_repository::UploadQueueRepository {
         upload_queue_repository::UploadQueueRepository::new(self.pool.clone())
     }
+
+    /// Get the user profile repository
+    pub fn user_profile_repository(&self) -> profile_repository::ProfileRepository {
+        profile_repository::ProfileRepository::new(self.pool.clone())
+    }
 }
 
 impl Drop for PersistencyManager {

@@ -240,7 +240,7 @@ async fn main() -> Result<()> {
     // Set panic hook for user notification
     std::panic::set_hook(Box::new(|panic_info| {
         let _ = std::process::Command::new("fusermount").arg("-u").arg("~/OneDrive").status();
-
+        
         let msg = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
             s.to_string()
         } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
@@ -248,6 +248,7 @@ async fn main() -> Result<()> {
         } else {
             "Unknown panic".to_string()
         };
+        error!("Panic: {:?}", msg);
         let _ = std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new();
             if let Ok(rt) = rt {

@@ -46,7 +46,7 @@ libc = "0.2"
 ctrlc = "3.4"
 
 # DBus dependencies
-zbus = "5.0"
+zbus = { version = "5.0", default-features = false, features = ["tokio"] }
 
 # Internal dependencies
 onedrive-sync-lib = { path = "../lib" }

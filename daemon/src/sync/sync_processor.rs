@@ -407,7 +407,7 @@ impl SyncProcessor {
                     match self.app_state.onedrive_client.get_item_by_id(real_onedrive_id).await {
                         Ok(full_drive_item) => {
                             // Setup FUSE metadata for the created folder with real OneDrive data
-                            let local_downloads_path = self.app_state.config().project_dirs.data_dir().join("downloads");
+                    let local_downloads_path = self.app_state.config().project_dirs.data_dir().join("downloads");
                             let _inode = self.setup_fuse_metadata(&full_drive_item, &drive_item_with_fuse_repo, &local_downloads_path).await?;
                             
                             // Update the processing item with the real OneDrive data
@@ -478,10 +478,10 @@ impl SyncProcessor {
                                         // Move file from upload folder to download folder
                                         if let Err(e) = self.move_file_to_download_folder(&local_path, real_onedrive_id).await {
                                             warn!("⚠️ Failed to move file to download folder: {}", e);
-                                        }
+                                }
                                         
                                         // Setup FUSE metadata for the uploaded file with real OneDrive data
-                                        let local_downloads_path = self.app_state.config().project_dirs.data_dir().join("downloads");
+                                let local_downloads_path = self.app_state.config().project_dirs.data_dir().join("downloads");
                                         let _inode = self.setup_fuse_metadata(&full_drive_item, &drive_item_with_fuse_repo, &local_downloads_path).await?;
                                         
                                         // Update the processing item with the real OneDrive data
@@ -565,10 +565,10 @@ impl SyncProcessor {
                                         } else {
                                             info!("📁 Moved file from upload to download: {} -> {}", 
                                                   local_path.display(), download_path.display());
-                                        }
-                                        
+                                }
+                                
                                         // Setup FUSE metadata for the updated file with real OneDrive data
-                                        let local_downloads_path = self.app_state.config().project_dirs.data_dir().join("downloads");
+                                let local_downloads_path = self.app_state.config().project_dirs.data_dir().join("downloads");
                                         let _inode = self.setup_fuse_metadata(&full_drive_item, &drive_item_with_fuse_repo, &local_downloads_path).await?;
                                         
                                         // Update the processing item with the real OneDrive data

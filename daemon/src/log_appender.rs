@@ -11,7 +11,7 @@ use std::fs;
 use std::path::PathBuf;
 
 /// Default log file size in bytes (5MB)
-const DEFAULT_LOG_FILE_SIZE: u64 = 50 * 1024 * 1024;
+const DEFAULT_LOG_FILE_SIZE: u64 = 5 * 1024 * 1024;
 
 /// Number of log files to keep
 const LOG_FILE_COUNT: u32 = 3;

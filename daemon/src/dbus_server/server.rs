@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use onedrive_sync_lib::dbus::types::{DaemonStatus, SyncQueueItem, SyncStatus};
+use onedrive_sync_lib::dbus::types::{DaemonStatus, SyncQueueItem, SyncStatus, UserProfile};
 use zbus::interface;
 use log::{info, error, debug};
 
@@ -20,6 +20,19 @@ impl ServiceImpl {
 
 #[interface(name = "org.freedesktop.OneDriveSync")]
 impl ServiceImpl {
+    async fn get_user_profile(&self) -> zbus::fdo::Result<UserProfile> {
+        debug!("DBus: get_user_profile called");
+        
+        let user_profile_repo = self.app_state.persistency().user_profile_repository();
+        let user_profile = user_profile_repo.get_profile().await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to get user profile: {}", e)))?;
+        let user_profile = user_profile.unwrap();
+        Ok(UserProfile {
+            display_name: user_profile.display_name.unwrap_or_default(),
+            given_name: user_profile.given_name.unwrap_or_default(),
+            mail: user_profile.mail.unwrap_or_default(),
+        })
+    }
     async fn get_daemon_status(&self) -> zbus::fdo::Result<DaemonStatus> {
         debug!("DBus: get_daemon_status called");
         
@@ -117,7 +130,7 @@ impl ServiceImpl {
         download_queue_repo.clear_all_items().await
             .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to clear download queue: {}", e)))?;
         
-        
+
         info!("DBus: full_reset completed successfully");
         Ok(())
     }
