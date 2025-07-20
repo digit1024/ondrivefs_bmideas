@@ -5,6 +5,7 @@ mod config;
 mod i18n;
 mod dbus_client;
 mod notifications;
+mod pages;
 
 fn main() -> cosmic::iced::Result {
     // Get the system's preferred languages.

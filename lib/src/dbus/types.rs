@@ -1,12 +1,12 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use zbus::zvariant::Type;
 
 
-#[derive(Serialize, Type)]
+#[derive(Deserialize, Serialize, Type)]
 pub enum SyncStatus{
     Running, Paused, Error
 }
-#[derive(Serialize, Type)]
+#[derive(Deserialize, Serialize, Type)]
 pub struct DaemonStatus {
     pub is_authenticated: bool,
     pub is_connected: bool,
@@ -15,7 +15,7 @@ pub struct DaemonStatus {
     pub is_mounted: bool,
 }
 
-#[derive(Serialize, Type)]
+#[derive(Deserialize, Serialize, Type)]
 pub struct SyncQueueItem    {
     pub onedrive_id: String,
     pub ino: u64,
@@ -23,7 +23,7 @@ pub struct SyncQueueItem    {
     pub path: String,
 }
 
-#[derive(Serialize, Type)]
+#[derive(Deserialize, Serialize, Type)]
 pub struct UserProfile    {
     pub display_name: String,
     pub given_name: String,
