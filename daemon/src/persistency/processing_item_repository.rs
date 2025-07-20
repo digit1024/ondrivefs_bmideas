@@ -510,6 +510,16 @@ impl ProcessingItemRepository {
         Ok(())
     }
 
+    /// Clear all processing items (used for full reset)
+    pub async fn clear_all_items(&self) -> Result<()> {
+        sqlx::query("DELETE FROM processing_items")
+            .execute(&self.pool)
+            .await?;
+
+        debug!("Cleared all processing items");
+        Ok(())
+    }
+
     /// Get unprocessed items by change type (Remote first, then Local)
     pub async fn get_unprocessed_items_by_change_type(&self, change_type: &ChangeType) -> Result<Vec<ProcessingItem>> {
         let rows = sqlx::query(

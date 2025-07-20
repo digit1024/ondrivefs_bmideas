@@ -1,6 +1,23 @@
 //! Shared types and enums for persistency module 
 
 use crate::onedrive_service::onedrive_models::DriveItem;
+use std::path::PathBuf;
+
+/// Download queue item for tracking pending downloads
+#[derive(Debug, Clone)]
+pub struct DownloadQueueItem {
+    pub id: i64,
+    pub onedrive_id: String,
+    pub local_path: PathBuf,
+    pub priority: i32,
+    pub status: String,
+    pub retry_count: i32,
+    pub created_at: String,
+    pub updated_at: String,
+    pub ino: u64,
+    pub name: String,
+    pub virtual_path: Option<String>,
+}
 
 #[derive(Debug, Clone)]
 pub struct VirtualFile {

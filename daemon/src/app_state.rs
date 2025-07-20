@@ -6,7 +6,8 @@ use onedrive_sync_lib::config::ProjectConfig;
 use crate::{
     auth::onedrive_auth::OneDriveAuth, connectivity::ConnectivityChecker,
     onedrive_service::onedrive_client::OneDriveClient, persistency::PersistencyManager,
-    file_manager::DefaultFileManager,
+    file_manager::DefaultFileManager, message_broker::MessageBroker,
+    scheduler::periodic_scheduler::PeriodicScheduler,
 };
 
 /// Application state containing all shared components
@@ -24,6 +25,10 @@ pub struct AppState {
     pub auth: Arc<OneDriveAuth>,
     /// File manager
     pub file_manager: Arc<DefaultFileManager>,
+    /// Message broker for internal communication
+    pub message_broker: Arc<MessageBroker>,
+    /// Scheduler for periodic tasks
+    pub scheduler: Arc<PeriodicScheduler>,
 }
 
 impl AppState {
@@ -57,6 +62,12 @@ impl AppState {
         // Initialize file manager
         let file_manager = Arc::new(DefaultFileManager::new(project_config_arc.clone()).await?);
 
+        // Initialize message broker
+        let message_broker = Arc::new(MessageBroker::new(1000));
+
+        // Initialize scheduler
+        let scheduler = Arc::new(PeriodicScheduler::new());
+
         Ok(Self {
             project_config: project_config_arc,
             persistency_manager: Arc::new(persistency_manager),
@@ -64,6 +75,8 @@ impl AppState {
             onedrive_client: Arc::new(onedrive_client),
             auth: auth_arc,
             file_manager,
+            message_broker,
+            scheduler,
         })
     }
 
@@ -95,6 +108,16 @@ impl AppState {
     /// Get a reference to the file manager
     pub fn file_manager(&self) -> &DefaultFileManager {
         &self.file_manager
+    }
+
+    /// Get a reference to the message broker
+    pub fn message_broker(&self) -> &MessageBroker {
+        &self.message_broker
+    }
+
+    /// Get a reference to the scheduler
+    pub fn scheduler(&self) -> &PeriodicScheduler {
+        &self.scheduler
     }
 }
 

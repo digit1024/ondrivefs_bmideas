@@ -13,6 +13,11 @@ impl SyncStateRepository {
         Self { pool }
     }
 
+    pub async fn clear_all_items(&self) -> Result<()> {
+        sqlx::query("DELETE FROM sync_state").execute(&self.pool).await?;
+        Ok(())
+    }
+
     /// Store sync state
     pub async fn store_sync_state(
         &self,

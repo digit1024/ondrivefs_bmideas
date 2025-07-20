@@ -117,4 +117,55 @@ impl DownloadQueueRepository {
         debug!("Removed item from download queue: {}", drive_item_id);
         Ok(())
     }
+
+    /// Get all items in download queue
+    pub async fn get_all_items(&self) -> Result<Vec<crate::persistency::types::DownloadQueueItem>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, drive_item_id, local_path, priority, status, retry_count, created_at, updated_at
+            FROM download_queue 
+            ORDER BY priority DESC, created_at ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            let id: i64 = row.try_get("id")?;
+            let drive_item_id: String = row.try_get("drive_item_id")?;
+            let local_path: String = row.try_get("local_path")?;
+            let priority: i32 = row.try_get("priority")?;
+            let status: String = row.try_get("status")?;
+            let retry_count: i32 = row.try_get("retry_count")?;
+            let created_at: String = row.try_get("created_at")?;
+            let updated_at: String = row.try_get("updated_at")?;
+
+            items.push(crate::persistency::types::DownloadQueueItem {
+                id,
+                onedrive_id: drive_item_id,
+                local_path: PathBuf::from(local_path),
+                priority,
+                status,
+                retry_count,
+                created_at,
+                updated_at,
+                ino: 0, // Not used in download queue
+                name: String::new(), // Not used in download queue
+                virtual_path: None, // Not used in download queue
+            });
+        }
+
+        Ok(items)
+    }
+
+    /// Clear all items from download queue (used for full reset)
+    pub async fn clear_all_items(&self) -> Result<()> {
+        sqlx::query("DELETE FROM download_queue")
+            .execute(&self.pool)
+            .await?;
+
+        debug!("Cleared all download queue items");
+        Ok(())
+    }
 } 

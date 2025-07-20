@@ -10,11 +10,13 @@ mod connectivity;
 mod file_manager;
 mod fuse_filesystem;
 mod log_appender;
+mod message_broker;
 mod onedrive_service;
 mod persistency;
 mod scheduler;
 mod sync;
 mod tasks;
+mod dbus_server;
 
 use std::sync::Arc;
 use std::path::PathBuf;
@@ -343,6 +345,15 @@ async fn main() -> Result<()> {
     });
     
 
+    // Start DBus server
+    let mut dbus_server = crate::dbus_server::DbusServerManager::new(app.app_state.clone());
+    if let Err(e) = dbus_server.start().await {
+        error!("Failed to start DBus server: {}", e);
+        // Continue without DBus server
+    } else {
+        info!("✅ DBus server started successfully");
+    }
+
     // Start periodic sync scheduler with shutdown handling
     let sync_cycle = SyncCycle::new(app.app_state.clone());
     let mut scheduler = crate::scheduler::periodic_scheduler::PeriodicScheduler::new();
@@ -400,6 +411,11 @@ async fn main() -> Result<()> {
     // Wait for shutdown signal
     let _ = shutdown_rx.recv().await;
     info!("🛑 Shutdown initiated...");
+
+    // Stop DBus server
+    if let Err(e) = dbus_server.stop().await {
+        error!("Failed to stop DBus server: {}", e);
+    }
 
     // Wait for all tasks to complete
     let _ = tokio::time::timeout(Duration::from_secs(30), async {

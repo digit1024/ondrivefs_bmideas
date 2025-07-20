@@ -383,6 +383,9 @@ impl PersistencyManager {
     pub fn processing_item_repository(&self) -> processing_item_repository::ProcessingItemRepository {
         processing_item_repository::ProcessingItemRepository::new(self.pool.clone())
     }
+    pub fn sync_state_repository(&self) -> sync_state_repository::SyncStateRepository {
+        sync_state_repository::SyncStateRepository::new(self.pool.clone())
+    }
 
     /// Get the drive item with fuse repository
     pub fn drive_item_with_fuse_repository(&self) -> drive_item_with_fuse_repository::DriveItemWithFuseRepository {
