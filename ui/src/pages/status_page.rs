@@ -1,7 +1,9 @@
+use std::time::Duration;
+
 use cosmic::iced::alignment::Horizontal;
 use cosmic::iced_wgpu::graphics::image::image_rs::codecs::png;
 use cosmic::widget::{self, button, column, container, row, svg, text };
-use cosmic::iced::{Alignment, Length};
+use cosmic::iced::{time, Alignment, Length, Subscription};
 use log::{error, info};
 use onedrive_sync_lib::dbus::types::{DaemonStatus, UserProfile, SyncStatus};
 use crate::dbus_client::DbusClient;
@@ -21,6 +23,7 @@ pub enum Message {
     StatusLoaded(Result<DaemonStatus, String>),
     ProfileLoaded(Result<UserProfile, String>),
     Refresh,
+    AutoRefresh,
 }
 
 pub struct Page {
@@ -40,6 +43,10 @@ impl Page {
             error: None,
         }
     }
+    pub fn subscription(&self) -> Subscription<Message> {
+        time::every(Duration::from_secs(5)).map(|_| Message::AutoRefresh)
+    }
+
 
     pub fn view(&self) -> cosmic::Element<Message> {
         let spacing = cosmic::theme::active().cosmic().spacing.space_l;
@@ -220,6 +227,47 @@ impl Page {
     
     pub fn update(&mut self, message: Message) -> cosmic::Task<cosmic::Action<crate::app::Message>> {
         match message {
+            Message::AutoRefresh => {
+             
+                let fetch_status = async move {
+                    match DbusClient::new().await {
+                        Ok(client) => {
+                            info!("StatusPage: Successfully created DbusClient");
+                            match client.get_daemon_status().await {
+                                Ok(status) => Ok(status),
+                                Err(e) => Err(format!("Failed to get daemon status: {}", e)),
+                            }
+                        }
+                        Err(e) => {
+                            error!("StatusPage: Failed to create DbusClient - {}", e);
+                            Err(format!("Failed to connect to daemon: {}", e))
+                        }
+                    }
+                };
+                let fetch_profile = async move {
+                    match DbusClient::new().await {
+                        Ok(client) => {
+                            info!("StatusPage: Successfully created DbusClient");
+                            match client.get_user_profile().await {
+                                Ok(profile) => Ok(profile),
+                                Err(e) => Err(format!("Failed to get user profile: {}", e)),
+                            }
+                        }
+                        Err(e) => {
+                            error!("StatusPage: Failed to create DbusClient - {}", e);
+                            Err(format!("Failed to connect to daemon: {}", e))
+                        }
+                    }
+                };
+
+                let a = cosmic::task::future(fetch_status).map(|result| {
+                    cosmic::Action::App(crate::app::Message::StatusPage(Message::StatusLoaded(result)))
+                });
+                let b = cosmic::task::future(fetch_profile).map(|result| {
+                    cosmic::Action::App(crate::app::Message::StatusPage(Message::ProfileLoaded(result)))
+                });
+                cosmic::task::batch(vec![a, b])
+            }
             Message::FetchStatus => {
                 info!("StatusPage: Fetching status from daemon");
                 self.loading = true;

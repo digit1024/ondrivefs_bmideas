@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{fs, sync::Arc};
 
 use onedrive_sync_lib::dbus::types::{DaemonStatus, SyncQueueItem, SyncStatus, UserProfile};
 use zbus::interface;
@@ -63,7 +63,17 @@ impl ServiceImpl {
             .unwrap_or(false);
         
         // Check if FUSE is mounted
-        let is_mounted = std::path::Path::new(&format!("{}/OneDrive", std::env::var("HOME").unwrap_or_default())).exists();
+        let path_str = format!("{}/OneDrive", std::env::var("HOME").unwrap_or_default());
+        let p = std::path::Path::new(&path_str);
+        
+            let mounts = fs::read_to_string("/proc/mounts").unwrap_or_default();
+            let is_mounted =mounts.lines().any(|line| {
+                line.split_whitespace().nth(1) == Some(p.to_str().unwrap_or_default())
+            });
+        
+
+
+         
         
         Ok(DaemonStatus {
             is_authenticated,
@@ -77,16 +87,17 @@ impl ServiceImpl {
     async fn get_download_queue(&self) -> zbus::fdo::Result<Vec<SyncQueueItem>> {
         debug!("DBus: get_download_queue called");
         
-        let download_queue_repo = self.app_state.persistency().download_queue_repository();
-        let items = download_queue_repo.get_all_items().await
+        let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
+
+        let items = drive_item_with_fuse_repo.get_drive_items_with_fuse_in_download_queue().await
             .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to get download queue: {}", e)))?;
         
         let sync_items: Vec<SyncQueueItem> = items.into_iter()
             .map(|item| SyncQueueItem {
-                onedrive_id: item.onedrive_id,
-                ino: item.ino,
-                name: item.name,
-                path: item.virtual_path.unwrap_or_default(),
+                onedrive_id: item.drive_item.id.clone(),
+                ino: item.fuse_metadata.virtual_ino.unwrap_or(0),
+                name: item.drive_item.name.clone().unwrap_or_default(),
+                path: item.drive_item.parent_reference.unwrap().path.clone().unwrap_or_default().replace("/drive/root:", "").to_string(),
             })
             .collect();
         

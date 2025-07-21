@@ -156,6 +156,35 @@ impl DriveItemWithFuseRepository {
         }
     }
 
+
+   /// Get all drive items in upload que
+   pub async fn get_drive_items_with_fuse_in_download_queue(&self) -> Result<Vec<DriveItemWithFuse>> {
+    let rows = sqlx::query(
+        r#"
+        SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
+               mime_type, download_url, is_deleted, parent_id, parent_path, local_path,
+               parent_ino, virtual_path, display_path, file_source, sync_status
+        FROM drive_items_with_fuse WHERE 
+        onedrive_id  in 
+	    (
+        SELECT drive_item_id    FROM download_queue where status is not "completed"
+        )      
+         ORDER BY name
+        "#,
+    )
+    .fetch_all(&self.pool)
+    .await?;
+
+    let mut items = Vec::new();
+    for row in rows {
+        let item = self.row_to_drive_item_with_fuse(row).await?;
+        items.push(item);
+    }
+
+    Ok(items)
+}
+
+
     /// Get all drive items with Fuse metadata
     pub async fn get_all_drive_items_with_fuse(&self) -> Result<Vec<DriveItemWithFuse>> {
         let rows = sqlx::query(

@@ -190,6 +190,20 @@ impl cosmic::Application for AppModel {
         (app, Task::batch(vec![title_command, fetch_status_command, fetch_queues_command]))
     }
 
+
+    fn subscription(&self) -> Subscription<Message> {
+        match self.nav.active_data::<PageId>() {
+            Some(PageId::Status) => {
+                self.status_page.subscription().map(Message::StatusPage)
+            }
+            Some(PageId::Queues) => {
+                self.queues_page.subscription().map(Message::QueuesPage)
+            }
+            _ => Subscription::none(),
+        }
+        
+    }
+
     /// Elements to pack at the start of the header bar.
     fn header_start(&self) -> Vec<Element<Self::Message>> {
         let menu_bar = menu::bar(vec![menu::Tree::with_children(
