@@ -19,9 +19,6 @@ const LOG_FILE_COUNT: u32 = 3;
 /// Log directory name
 const LOG_DIR: &str = "logs";
 
-/// Log file name pattern
-const LOG_FILE_PATTERN: &str = "daemon.{}.log.gz";
-
 /// Console log pattern
 const CONSOLE_LOG_PATTERN: &str = "{h({l})} {d(%Y-%m-%d %H:%M:%S)} {M} - {m}{n}";
 
@@ -66,7 +63,7 @@ fn get_log_level() -> LevelFilter {
         }
     } else {
         // Default to Info level to reduce noise
-        LevelFilter::Debug
+        LevelFilter::Info
     }
 }
 
@@ -79,10 +76,14 @@ fn create_console_appender() -> Result<ConsoleAppender> {
 
 /// Create rolling file appender with size-based rotation
 fn create_rolling_file_appender(logs_path: &PathBuf) -> Result<RollingFileAppender> {
+    // Build the full path for the log file pattern
+    let p = logs_path.join("daemon.{}.log.gz");
+    let log_file_pattern = p.to_str().unwrap();
+
     // Fixed window roller: keep compressed log files
     let roller = FixedWindowRoller::builder()
         .base(1)
-        .build(LOG_FILE_PATTERN, LOG_FILE_COUNT)
+        .build(log_file_pattern, LOG_FILE_COUNT)
         .map_err(|e| anyhow::anyhow!("Failed to create log roller: {}", e))?;
 
     // Size trigger: roll when file reaches size limit
