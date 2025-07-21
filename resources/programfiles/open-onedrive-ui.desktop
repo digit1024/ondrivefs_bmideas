@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Open OneDrive UI
+Comment=OneDrive graphical sync client
+Exec=onedrive-sync-ui
+Terminal=false
+Type=Application
+Icon=open-onedrive
+Categories=Network;FileManager;
+StartupNotify=true

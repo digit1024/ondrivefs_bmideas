@@ -27,12 +27,22 @@ else
     echo -e "${YELLOW}ℹ️ Symlink not found: $SYMLINK_PATH${NC}"
 fi
 
-# Remove desktop file
-if [ -f "$DESKTOP_FILE" ]; then
-    echo -e "${YELLOW}📄 Removing desktop file: $DESKTOP_FILE${NC}"
-    rm "$DESKTOP_FILE"
+# Remove desktop file for daemon/file handler
+DAEMON_DESKTOP_FILE="$HOME/.local/share/applications/open-onedrive-daemon.desktop"
+if [ -f "$DAEMON_DESKTOP_FILE" ]; then
+    echo -e "${YELLOW}🔗 Removing daemon desktop file: $DAEMON_DESKTOP_FILE${NC}"
+    rm "$DAEMON_DESKTOP_FILE"
 else
-    echo -e "${YELLOW}ℹ️ Desktop file not found: $DESKTOP_FILE${NC}"
+    echo -e "${YELLOW}ℹ️ Daemon desktop file not found: $DAEMON_DESKTOP_FILE${NC}"
+fi
+
+# Remove desktop file for UI
+UI_DESKTOP_FILE="$HOME/.local/share/applications/open-onedrive-ui.desktop"
+if [ -f "$UI_DESKTOP_FILE" ]; then
+    echo -e "${YELLOW}📄 Removing UI desktop file: $UI_DESKTOP_FILE${NC}"
+    rm "$UI_DESKTOP_FILE"
+else
+    echo -e "${YELLOW}ℹ️ UI desktop file not found: $UI_DESKTOP_FILE${NC}"
 fi
 
 # Remove MIME type definition
@@ -78,10 +88,24 @@ if [ -d "$HOME/.local/share/mime" ]; then
     update-mime-database "$HOME/.local/share/mime"
 fi
 
+# Remove symlink for UI
+UI_SYMLINK_PATH="$HOME/.local/bin/onedrive-sync-ui"
+if [ -L "$UI_SYMLINK_PATH" ]; then
+    echo -e "${YELLOW}🔗 Removing UI symlink: $UI_SYMLINK_PATH${NC}"
+    rm "$UI_SYMLINK_PATH"
+else
+    echo -e "${YELLOW}ℹ️ UI symlink not found: $UI_SYMLINK_PATH${NC}"
+fi
+
+echo -e "   • UI Symlink: $UI_SYMLINK_PATH"
+
+echo -e "   • Daemon Desktop file: $DAEMON_DESKTOP_FILE"
+
 echo -e "${GREEN}✅ Uninstallation completed successfully!${NC}"
 echo -e "${GREEN}📋 Removed:${NC}"
 echo -e "   • Symlink: $SYMLINK_PATH"
 echo -e "   • Desktop file: $DESKTOP_FILE"
+echo -e "   • UI Desktop file: $UI_DESKTOP_FILE"
 echo -e "   • MIME type: application/onedrivedownload"
 echo -e "   • MIME file: $MIME_FILE"
 echo -e "   • Icons: $ICONS_REMOVED icon files removed" 

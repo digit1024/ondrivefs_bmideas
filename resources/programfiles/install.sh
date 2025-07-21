@@ -42,15 +42,35 @@ fi
 ln -sf "$DAEMON_BINARY" "$SYMLINK_PATH"
 chmod +x "$SYMLINK_PATH"
 
+# Create symlink for UI
+UI_BINARY="$PROJECT_ROOT/../target/debug/onedrive-sync-ui"
+UI_SYMLINK_PATH="$HOME/.local/bin/onedrive-sync-ui"
+if [ -f "$UI_BINARY" ]; then
+    echo -e "${YELLOW}🔗 Creating symlink: $UI_SYMLINK_PATH -> $UI_BINARY${NC}"
+    if [ -L "$UI_SYMLINK_PATH" ]; then
+        rm "$UI_SYMLINK_PATH"
+    fi
+    ln -sf "$UI_BINARY" "$UI_SYMLINK_PATH"
+    chmod +x "$UI_SYMLINK_PATH"
+else
+    echo -e "${YELLOW}⚠️ UI binary not found at: $UI_BINARY${NC}"
+fi
+
 # Create applications directory if it doesn't exist
 if [ ! -d "$HOME/.local/share/applications" ]; then
     echo -e "${YELLOW}📁 Creating applications directory...${NC}"
     mkdir -p "$HOME/.local/share/applications"
 fi
 
-# Install desktop file
-echo -e "${YELLOW}📄 Installing desktop file...${NC}"
-cp "$SCRIPT_DIR/open-onedrive.desktop" "$DESKTOP_FILE"
+# Install desktop file for daemon/file handler
+DAEMON_DESKTOP_FILE="$HOME/.local/share/applications/open-onedrive-daemon.desktop"
+echo -e "${YELLOW}🔗 Creating symlink: $DAEMON_DESKTOP_FILE -> $DAEMON_DESKTOP_FILE${NC}"
+cp "$SCRIPT_DIR/open-onedrive-daemon.desktop" "$DAEMON_DESKTOP_FILE"
+
+# Install desktop file for UI
+UI_DESKTOP_FILE="$HOME/.local/share/applications/open-onedrive-ui.desktop"
+echo -e "${YELLOW}📄 Installing UI desktop file...${NC}"
+cp "$SCRIPT_DIR/open-onedrive-ui.desktop" "$UI_DESKTOP_FILE"
 
 # Create mime directory if it doesn't exist
 if [ ! -d "$HOME/.local/share/mime/packages" ]; then
@@ -107,10 +127,12 @@ fi
 echo -e "${GREEN}✅ Installation completed successfully!${NC}"
 echo -e "${GREEN}📋 Summary:${NC}"
 echo -e "   • Symlink: $SYMLINK_PATH"
-echo -e "   • Desktop file: $DESKTOP_FILE"
+echo -e "   • Desktop file: $DAEMON_DESKTOP_FILE"
+echo -e "   • UI Desktop file: $UI_DESKTOP_FILE"
 echo -e "   • MIME type: application/onedrivedownload"
 echo -e "   • MIME file: $MIME_FILE"
 echo -e "   • Icon: $ICON_DST"
+echo -e "   • UI Symlink: $UI_SYMLINK_PATH"
 echo -e ""
 echo -e "${YELLOW}💡 To test:${NC}"
 echo -e "   • Open a file with MIME type application/onedrivedownload"

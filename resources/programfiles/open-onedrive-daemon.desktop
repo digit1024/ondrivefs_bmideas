@@ -1,10 +1,12 @@
 [Desktop Entry]
-Name=Open OneDrive
+Name=DAEMON OneDrive
 Comment=OneDrive file handler
 Exec=open-onedrive %f
 Terminal=false
 Type=Application
 MimeType=application/onedrivedownload;
-Icon=open-onedrive
+Icon=open-onedrive-daemon
 Categories=Network;FileManager;
-StartupNotify=true 
+StartupNotify=true
+NoDisplay=true
+Hidden=true
