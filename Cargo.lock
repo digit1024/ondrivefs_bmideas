@@ -4275,10 +4275,12 @@ name = "onedrive-sync-ui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "env_logger",
  "futures-util",
  "i18n-embed",
  "i18n-embed-fl",
  "libcosmic",
+ "log",
  "onedrive-sync-lib",
  "open",
  "rust-embed",

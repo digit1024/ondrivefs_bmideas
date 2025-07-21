@@ -21,7 +21,7 @@ pub fn about<'a>() -> Element<'a, Message> {
 
     let link = widget::button::link(REPOSITORY)
         //.on_press(Message::OpenRepositoryUrl)
-        .padding(0);
+        .padding(1);
 
     widget::column()
         .push(icon)

@@ -14,6 +14,7 @@ use cosmic::widget::{self, button, icon, menu, nav_bar, row, Row};
 
 
 use cosmic::{cosmic_theme, theme};
+use log::info;
 use std::collections::HashMap;
 use crate::pages::{self, about_element, status_page};
 
@@ -68,11 +69,17 @@ pub enum Message {
     AboutElement(about_element::Message),
  
 }
+// impl From<status_page::Message> for Message {
+//     fn from(message: status_page::Message) -> Self {
+//         Self::StatusPage(message)
+//     }
+// }
 impl From<status_page::Message> for Message {
     fn from(message: status_page::Message) -> Self {
         Self::StatusPage(message)
     }
 }
+
 impl From<about_element::Message> for Message {
     fn from(message: about_element::Message) -> Self {
         Self::AboutElement(message)
@@ -144,11 +151,15 @@ impl cosmic::Application for AppModel {
             
         };
 
-        // Create startup commands: set window title and initialize notification sender
+        // Create startup commands: set window title and fetch initial status
         let title_command = app.update_title();
-        
+        let fetch_status_command = cosmic::task::future(async move {
+            info!("App: Initializing StatusPage with fetch command");
+            Message::StatusPage(status_page::Message::FetchStatus)
+            
+        });
 
-        (app, Task::batch(vec![title_command]))
+        (app, Task::batch(vec![title_command, fetch_status_command]))
     }
 
     /// Elements to pack at the start of the header bar.
@@ -202,7 +213,7 @@ impl cosmic::Application for AppModel {
     
 
     /// Handles messages emitted by the application and its widgets.
-    fn update(&mut self, message: Self::Message) -> Task<cosmic::Action<Self::Message>> {
+    fn update(&mut self, message: Self::Message) -> cosmic::Task<cosmic::Action<Message>> {
         match message {
             // Message::OpenRepositoryUrl => {
             //     _ = open::that_detached(REPOSITORY);
@@ -215,22 +226,26 @@ impl cosmic::Application for AppModel {
                     self.context_page = context_page;
                     self.core.window.show_context = true;
                 }
+                Task::none()
             }
 
-            Message::StatusPage(status_page::Message::FetchStatus) => {
-                self.status_page.update(status_page::Message::FetchStatus);
+            Message::StatusPage(status_message) => {
+                info!("App: Processing StatusPage message: {:?}", status_message);
+                self.status_page.update(status_message)
+                
+                
+                
             }
 
             Message::AboutElement(about_element::Message::OpenRepositoryUrl) => {
                 _ = open::that_detached("REPOITORY");
+                Task::none()
             }
             Message::AboutElement(about_element::Message::LaunchUrl(url)) => {
                 _ = open::that_detached(url);
+                Task::none()
             }
-
-            
         }
-        Task::none()
     }
 
     /// Called when a nav item is selected.

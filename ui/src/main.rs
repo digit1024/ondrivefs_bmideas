@@ -8,6 +8,9 @@ mod notifications;
 mod pages;
 
 fn main() -> cosmic::iced::Result {
+    // Initialize logging
+    env_logger::init();
+    
     // Get the system's preferred languages.
     let requested_languages = i18n_embed::DesktopLanguageRequester::requested_languages();
 

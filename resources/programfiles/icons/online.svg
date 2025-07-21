@@ -1,0 +1,13 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <defs>
+    <linearGradient id="cloudGradient" x1="0%" y1="50%" x2="100%" y2="50%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="100%" stop-color="#E0E7FF" />
+    </linearGradient>
+  </defs>
+  <path d="M48 30a10 10 0 0 0-19.9-2A7 7 0 0 0 22 35h1a7 7 0 0 0 0 14h25a7 7 0 0 0 0-14h-1" fill="url(#cloudGradient)" />
+  <!-- Up arrow -->
+  <polygon points="32,44 32,28 28,32 26,30 32,24 38,30 36,32 32,28 32,44" fill="#6B73FF"/>
+  <!-- Down arrow -->
+  <polygon points="32,20 32,36 36,32 38,34 32,40 26,34 28,32 32,36 32,20" fill="#6B73FF"/>
+</svg>

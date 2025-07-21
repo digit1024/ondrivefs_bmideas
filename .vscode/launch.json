@@ -7,12 +7,12 @@
             "name": "Debug Rust (LLDB, WSL2)",
             "type": "lldb",
             "request": "launch",
-            "program": "${workspaceFolder}/target/debug/onedrive-sync-daemon",
+            "program": "${workspaceFolder}/target/debug/onedrive-sync-ui",
             "args": [],
             "cwd": "${workspaceFolder}",
             "sourceLanguages": ["rust"],
             "env": {
-                "RUST_LOG": "debug",
+                "RUST_LOG": "info",
                 "RUST_BACKTRACE": "1"
             },
             "terminal": "integrated",
