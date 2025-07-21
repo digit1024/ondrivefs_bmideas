@@ -16,13 +16,13 @@ use cosmic::widget::{self, button, icon, menu, nav_bar, row, Row};
 use cosmic::{cosmic_theme, theme};
 use log::info;
 use std::collections::HashMap;
-use crate::pages::{self, about_element, status_page};
+use crate::pages::{self, about_element, status_page, folders_page};
 
 
 
 enum PageId {
     Status,
-    
+    Folders,
 }
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub enum ContextPage {
@@ -53,6 +53,7 @@ pub struct AppModel {
 
     active_page: PageId,
     status_page: pages::status_page::Page,
+    folders_page: pages::folders_page::Page,
 
     
 
@@ -67,6 +68,7 @@ pub enum Message {
     //OpenRepositoryUrl,
     ToggleContextPage(ContextPage),
     StatusPage(status_page::Message),
+    FoldersPage(folders_page::Message),
     AboutElement(about_element::Message),
  
 }
@@ -78,6 +80,12 @@ pub enum Message {
 impl From<status_page::Message> for Message {
     fn from(message: status_page::Message) -> Self {
         Self::StatusPage(message)
+    }
+}
+
+impl From<folders_page::Message> for Message {
+    fn from(message: folders_page::Message) -> Self {
+        Self::FoldersPage(message)
     }
 }
 
@@ -127,7 +135,7 @@ impl cosmic::Application for AppModel {
 
         nav.insert()
             .text("Folders")
-            //.data::<Page>(Page::Folders)
+            .data::<PageId>(PageId::Folders)
             .icon(icon::from_name("folder-symbolic"));
 
         nav.insert()
@@ -149,6 +157,7 @@ impl cosmic::Application for AppModel {
                 .unwrap_or_default(),
             active_page: PageId::Status,
             status_page: pages::status_page::Page::new(),
+            folders_page: pages::folders_page::Page::new(),
             
         };
 
@@ -202,6 +211,7 @@ impl cosmic::Application for AppModel {
         
         let content = match page {
             PageId::Status => self.status_page.view().map(Message::StatusPage),
+            PageId::Folders => self.folders_page.view().map(Message::FoldersPage),
         };
 
         widget::container(content)
@@ -237,7 +247,10 @@ impl cosmic::Application for AppModel {
                 
                 
             }
-
+            Message::FoldersPage(folders_message) => {
+                self.folders_page.update(folders_message);
+                Task::none()
+            }
             Message::AboutElement(about_element::Message::OpenRepositoryUrl) => {
                 _ = open::that_detached("REPOITORY");
                 Task::none()

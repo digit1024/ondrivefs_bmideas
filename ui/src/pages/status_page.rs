@@ -18,9 +18,8 @@ const ICON_FALSE: &[u8] = include_bytes!("../../../resources/programfiles/icons/
 #[derive(Debug, Clone)]
 pub enum Message {
     FetchStatus,
-    StatusLoaded(DaemonStatus),
-   // FetchProfile,
-    ProfileLoaded(UserProfile),
+    StatusLoaded(Result<DaemonStatus, String>),
+    ProfileLoaded(Result<UserProfile, String>),
     Refresh,
 }
 
@@ -226,18 +225,18 @@ impl Page {
                 self.loading = true;
                 self.error = None;
 
-                
                 let fetch_status = async move {
-                    
-        
                     match DbusClient::new().await {
                         Ok(client) => {
                             info!("StatusPage: Successfully created DbusClient");
-                            client.get_daemon_status().await
+                            match client.get_daemon_status().await {
+                                Ok(status) => Ok(status),
+                                Err(e) => Err(format!("Failed to get daemon status: {}", e)),
+                            }
                         }
                         Err(e) => {
                             error!("StatusPage: Failed to create DbusClient - {}", e);
-                            Err(e)
+                            Err(format!("Failed to connect to daemon: {}", e))
                         }
                     }
                 };
@@ -245,41 +244,56 @@ impl Page {
                     match DbusClient::new().await {
                         Ok(client) => {
                             info!("StatusPage: Successfully created DbusClient");
-                            client.get_user_profile().await
+                            match client.get_user_profile().await {
+                                Ok(profile) => Ok(profile),
+                                Err(e) => Err(format!("Failed to get user profile: {}", e)),
+                            }
                         }
                         Err(e) => {
                             error!("StatusPage: Failed to create DbusClient - {}", e);
-                            Err(e)
+                            Err(format!("Failed to connect to daemon: {}", e))
                         }
                     }
                 };
 
-                
-                
-                 let a =  cosmic::task::future(fetch_status).map(|status: Result<DaemonStatus, _>| {
-                     cosmic::Action::App(crate::app::Message::StatusPage(Message::StatusLoaded(status.unwrap())))
-                 });
-                 let b = cosmic::task::future(fetch_profile).map(|profile: Result<UserProfile, _>| {
-                    cosmic::Action::App(crate::app::Message::StatusPage(Message::ProfileLoaded(profile.unwrap())))
-                 });
-                 cosmic::task::batch(vec![a, b])
+                let a = cosmic::task::future(fetch_status).map(|result| {
+                    cosmic::Action::App(crate::app::Message::StatusPage(Message::StatusLoaded(result)))
+                });
+                let b = cosmic::task::future(fetch_profile).map(|result| {
+                    cosmic::Action::App(crate::app::Message::StatusPage(Message::ProfileLoaded(result)))
+                });
+                cosmic::task::batch(vec![a, b])
             }
 
-            Message::ProfileLoaded(profile) => {
-                self.user_profile = Some(profile);
+            Message::ProfileLoaded(result) => {
                 self.loading = false;
-                self.error = None;
+                match result {
+                    Ok(profile) => {
+                        self.user_profile = Some(profile);
+                        self.error = None;
+                    }
+                    Err(e) => {
+                        self.user_profile = None;
+                        self.error = Some(e);
+                    }
+                }
                 cosmic::Task::none()
             }
 
-            Message::StatusLoaded(status) => {
+            Message::StatusLoaded(result) => {
                 self.loading = false;
+                match result {
+                    Ok(status) => {
                         info!("StatusPage: Successfully loaded daemon status - authenticated={}, connected={}, sync_status={:?}", 
                               status.is_authenticated, status.is_connected, status.sync_status);
                         self.daemon_status = Some(status);
                         self.error = None;
-                
-                
+                    }
+                    Err(e) => {
+                        self.daemon_status = None;
+                        self.error = Some(e);
+                    }
+                }
                 cosmic::Task::none()
             }
 
@@ -287,23 +301,22 @@ impl Page {
                 info!("StatusPage: Manual refresh requested");
                 self.loading = true;
                 self.error = None;
-                
+
                 let fetch_status = async move {
                     match DbusClient::new().await {
                         Ok(client) => {
-                            client.get_daemon_status().await
+                            match client.get_daemon_status().await {
+                                Ok(status) => Ok(status),
+                                Err(e) => Err(format!("Failed to get daemon status: {}", e)),
+                            }
                         }
-                        Err(e) => {
-                            error!("StatusPage: Failed to load daemon status - {}", e);
-                            Err(e)
-                        }
+                        Err(e) => Err(format!("Failed to connect to daemon: {}", e)),
                     }
                 };
-                
 
-                 cosmic::task::future(fetch_status).map(|status: Result<DaemonStatus, _>| {
-                     cosmic::Action::App(crate::app::Message::StatusPage(Message::StatusLoaded(status.unwrap())))
-                 })
+                cosmic::task::future(fetch_status).map(|result| {
+                    cosmic::Action::App(crate::app::Message::StatusPage(Message::StatusLoaded(result)))
+                })
             }
         }
     }
