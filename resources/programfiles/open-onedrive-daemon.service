@@ -1,0 +1,9 @@
+[Unit]
+Description=OpenOneDrive Daemon
+
+[Service]
+ExecStart=%h/.local/bin/open-onedrive
+Restart=on-failure
+
+[Install]
+WantedBy=default.target 
