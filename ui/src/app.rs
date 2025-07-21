@@ -16,13 +16,14 @@ use cosmic::widget::{self, button, icon, menu, nav_bar, row, Row};
 use cosmic::{cosmic_theme, theme};
 use log::info;
 use std::collections::HashMap;
-use crate::pages::{self, about_element, status_page, folders_page};
+use crate::pages::{self, about_element, status_page, folders_page, queues_page};
 
 
 
 enum PageId {
     Status,
     Folders,
+    Queues,
 }
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub enum ContextPage {
@@ -54,6 +55,7 @@ pub struct AppModel {
     active_page: PageId,
     status_page: pages::status_page::Page,
     folders_page: pages::folders_page::Page,
+    queues_page: pages::queues_page::Page,
 
     
 
@@ -69,6 +71,7 @@ pub enum Message {
     ToggleContextPage(ContextPage),
     StatusPage(status_page::Message),
     FoldersPage(folders_page::Message),
+    QueuesPage(queues_page::Message),
     AboutElement(about_element::Message),
  
 }
@@ -86,6 +89,12 @@ impl From<status_page::Message> for Message {
 impl From<folders_page::Message> for Message {
     fn from(message: folders_page::Message) -> Self {
         Self::FoldersPage(message)
+    }
+}
+
+impl From<queues_page::Message> for Message {
+    fn from(message: queues_page::Message) -> Self {
+        Self::QueuesPage(message)
     }
 }
 
@@ -139,6 +148,11 @@ impl cosmic::Application for AppModel {
             .icon(icon::from_name("folder-symbolic"));
 
         nav.insert()
+            .text("Queues")
+            .data::<PageId>(PageId::Queues)
+            .icon(icon::from_name("view-refresh-symbolic"));
+
+        nav.insert()
             .text("Settings")
             //.data::<Page>(Page::Settings)
             .icon(icon::from_name("applications-science-symbolic"));
@@ -158,18 +172,22 @@ impl cosmic::Application for AppModel {
             active_page: PageId::Status,
             status_page: pages::status_page::Page::new(),
             folders_page: pages::folders_page::Page::new(),
+            queues_page: pages::queues_page::Page::new(),
             
         };
 
-        // Create startup commands: set window title and fetch initial status
+        // Create startup commands: set window title and fetch initial status/queues
         let title_command = app.update_title();
         let fetch_status_command = cosmic::task::future(async move {
             info!("App: Initializing StatusPage with fetch command");
             Message::StatusPage(status_page::Message::FetchStatus)
             
         });
+        let fetch_queues_command = cosmic::task::future(async move {
+            Message::QueuesPage(queues_page::Message::FetchQueues)
+        });
 
-        (app, Task::batch(vec![title_command, fetch_status_command]))
+        (app, Task::batch(vec![title_command, fetch_status_command, fetch_queues_command]))
     }
 
     /// Elements to pack at the start of the header bar.
@@ -212,6 +230,7 @@ impl cosmic::Application for AppModel {
         let content = match page {
             PageId::Status => self.status_page.view().map(Message::StatusPage),
             PageId::Folders => self.folders_page.view().map(Message::FoldersPage),
+            PageId::Queues => self.queues_page.view().map(Message::QueuesPage),
         };
 
         widget::container(content)
@@ -250,6 +269,9 @@ impl cosmic::Application for AppModel {
             Message::FoldersPage(folders_message) => {
                 self.folders_page.update(folders_message);
                 Task::none()
+            }
+            Message::QueuesPage(queues_message) => {
+                self.queues_page.update(queues_message)
             }
             Message::AboutElement(about_element::Message::OpenRepositoryUrl) => {
                 _ = open::that_detached("REPOITORY");
