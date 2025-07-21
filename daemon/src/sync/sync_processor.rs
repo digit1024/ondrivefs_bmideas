@@ -35,10 +35,15 @@ impl SyncProcessor {
 
         // 2. Process Local changes after remote changes are handled
         info!("🔄 Processing local changes...");
-        let local_items = processing_repo.get_unprocessed_items_by_change_type(&ChangeType::Local).await?;
-        for item in local_items {
-            if let Err(e) = self.process_single_item(&item).await {
-                error!("❌ Failed to process local item: {}", e);
+        loop {
+            // Always fetch the next unprocessed local item
+            if let Some(item) = processing_repo.get_next_unprocessed_item_by_change_type(&ChangeType::Local).await? {
+                if let Err(e) = self.process_single_item(&item).await {
+                    error!("❌ Failed to process local item: {}", e);
+                }
+            } else {
+                // No more unprocessed items
+                break;
             }
         }
 

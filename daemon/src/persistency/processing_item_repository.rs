@@ -519,6 +519,30 @@ impl ProcessingItemRepository {
         debug!("Cleared all processing items");
         Ok(())
     }
+    pub async fn get_next_unprocessed_item_by_change_type(&self, change_type: &ChangeType) -> Result<Option<ProcessingItem>> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
+                   mime_type, download_url, is_deleted, parent_id, parent_path,
+                   status, local_path, error_message, last_status_update, retry_count, priority,
+                   change_type, change_operation, conflict_resolution, validation_errors, user_decision
+            FROM processing_items 
+            WHERE change_type = ? AND status IN ('new', 'validated')
+            AND ( parent_path  NOT LIKE '/root/.%' OR (name ='root' and parent_path is null))
+            ORDER BY id ASC LIMIT 1
+            "#,
+        )
+        .bind(change_type.as_str())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some(row) = row {
+            let processing_item = self.row_to_processing_item(row).await?;
+            Ok(Some(processing_item))
+        } else {
+            Ok(None)
+        }
+    }
 
     /// Get unprocessed items by change type (Remote first, then Local)
     pub async fn get_unprocessed_items_by_change_type(&self, change_type: &ChangeType) -> Result<Vec<ProcessingItem>> {
