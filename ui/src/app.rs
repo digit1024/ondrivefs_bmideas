@@ -49,6 +49,7 @@ pub struct AppModel {
     key_binds: HashMap<menu::KeyBind, MenuAction>,
     /// Configuration data that persists between application runs.
     config: Config,
+    
 
     active_page: PageId,
     status_page: pages::status_page::Page,

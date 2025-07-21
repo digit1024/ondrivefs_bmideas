@@ -46,6 +46,11 @@ features = [
     "wayland",
     # GPU-accelerated rendering
     "wgpu",
+    # XDG Portal support
+    "xdg-portal",
+    "desktop", 
+    "debug",
+    
 ]
 
 # Uncomment to test a locally-cloned libcosmic
