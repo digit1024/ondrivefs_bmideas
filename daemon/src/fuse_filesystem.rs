@@ -117,20 +117,15 @@ impl OneDriveFuse {
         }
     }
 
+
+
     /// Get DriveItemWithFuse by path
     async fn get_item_by_path(&self, path: &str) -> Result<Option<DriveItemWithFuse>> {
         // For now, we'll search by virtual_path
         // In a production system, you might want to add a path index
-        let all_items = sync_await(self.drive_item_with_fuse_repo.get_all_drive_items_with_fuse())?;
+        let item = sync_await(self.drive_item_with_fuse_repo.get_drive_item_with_fuse_by_virtual_path(path));
+        item
         
-        for item in all_items {
-            if let Some(virtual_path) = item.virtual_path() {
-                if virtual_path == path {
-                    return Ok(Some(item));
-                }
-            }
-        }
-        Ok(None)
     }
 
     /// Get children of a directory by parent inode
@@ -428,7 +423,7 @@ impl fuser::Filesystem for OneDriveFuse {
         if parent == 1 && name_str == "." {
             if let Ok(Some(root_item)) = sync_await(self.get_item_by_ino(1)) {
                 reply.entry(
-                    &Duration::from_secs(1),
+                    &Duration::from_secs(120),
                     &self.item_to_file_attr(&root_item),
                     0,
                 );
@@ -466,7 +461,7 @@ impl fuser::Filesystem for OneDriveFuse {
         // Try to get the item
         if let Ok(Some(item)) = sync_await(self.get_item_by_path(&full_path)) {
             reply.entry(
-                &Duration::from_secs(1),
+                &Duration::from_secs(120),
                 &self.item_to_file_attr(&item),
                 0,
             );
@@ -480,7 +475,7 @@ impl fuser::Filesystem for OneDriveFuse {
 
         if let Ok(Some(item)) = sync_await(self.get_item_by_ino(ino)) {
             reply.attr(
-                &Duration::from_secs(1),
+                &Duration::from_secs(120),
                 &self.item_to_file_attr(&item),
             );
         } else {
@@ -502,42 +497,35 @@ impl fuser::Filesystem for OneDriveFuse {
         if ino == 1 {
             let onedot_entry = (1, fuser::FileType::Directory, ".".to_string());
             let twodot_entry = (1, fuser::FileType::Directory, "..".to_string());
-            
             let mut entries: Vec<(u64, fuser::FileType, String)> = vec![onedot_entry, twodot_entry];
-            
-            // Get children of root
+
+            // Fetch all children of root
             if let Ok(children) = sync_await(self.get_children_by_parent_ino(ino)) {
                 for child in children {
                     let file_type = if child.is_folder() {
-                    fuser::FileType::Directory
-                } else {
-                    fuser::FileType::RegularFile
+                        fuser::FileType::Directory
+                    } else {
+                        fuser::FileType::RegularFile
                     };
-                    
-                    // For files that aren't available locally, append .onedrivedownload extension
                     let name = if child.is_folder() {
                         child.name().unwrap_or_default().to_string()
                     } else {
                         let base_name = child.name().unwrap_or_default();
                         if self.file_exists_locally(child.id()).is_some() {
-                            // File exists locally - use original name
                             base_name.to_string()
                         } else {
-                            // File doesn't exist locally - append .onedrivedownload
                             format!("{}.onedrivedownload", base_name)
                         }
                     };
-                    
                     entries.push((child.virtual_ino().unwrap_or(0), file_type, name));
                 }
             }
-
-        for (i, (ino, kind, name)) in entries.into_iter().enumerate().skip(offset as usize) {
+            for (i, (ino, kind, name)) in entries.into_iter().enumerate().skip(offset as usize) {
                 if reply.add(ino, (i + 1) as i64, kind, &name) {
-                break;
+                    break;
+                }
             }
-        }
-        reply.ok();
+            reply.ok();
             return;
         }
 
@@ -547,13 +535,9 @@ impl fuser::Filesystem for OneDriveFuse {
                 reply.error(libc::ENOTDIR);
                 return;
             }
-
             let onedot_entry = (ino, fuser::FileType::Directory, ".".to_string());
             let twodot_entry = (parent_item.parent_ino().unwrap_or(1), fuser::FileType::Directory, "..".to_string());
-            
             let mut entries: Vec<(u64, fuser::FileType, String)> = vec![onedot_entry, twodot_entry];
-            
-            // Get children
             if let Ok(children) = sync_await(self.get_children_by_parent_ino(ino)) {
                 for child in children {
                     let file_type = if child.is_folder() {
@@ -561,25 +545,19 @@ impl fuser::Filesystem for OneDriveFuse {
                     } else {
                         fuser::FileType::RegularFile
                     };
-                    
-                    // For files that aren't available locally, append .onedrivedownload extension
                     let name = if child.is_folder() {
                         child.name().unwrap_or_default().to_string()
                     } else {
                         let base_name = child.name().unwrap_or_default();
                         if self.file_exists_locally(child.id()).is_some() {
-                            // File exists locally - use original name
                             base_name.to_string()
                         } else {
-                            // File doesn't exist locally - append .onedrivedownload
                             format!("{}.onedrivedownload", base_name)
                         }
                     };
-                    
                     entries.push((child.virtual_ino().unwrap_or(0), file_type, name));
                 }
             }
-
             for (i, (ino, kind, name)) in entries.into_iter().enumerate().skip(offset as usize) {
                 if reply.add(ino, (i + 1) as i64, kind, &name) {
                     break;

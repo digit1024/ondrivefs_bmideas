@@ -269,6 +269,7 @@ impl DriveItemWithFuseRepository {
         Ok(items)
     }
 
+
     /// Get children of a directory by parent inode
     pub async fn get_children_by_parent_ino(&self, parent_ino: u64) -> Result<Vec<DriveItemWithFuse>> {
         let rows = sqlx::query(
@@ -280,6 +281,31 @@ impl DriveItemWithFuseRepository {
             "#,
         )
         .bind(parent_ino as i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            let item = self.row_to_drive_item_with_fuse(row).await?;
+            items.push(item);
+        }
+
+        Ok(items)
+    }
+
+    /// Get children of a directory by parent inode, paginated
+    pub async fn get_children_by_parent_ino_paginated(&self, parent_ino: u64, offset: usize, limit: usize) -> Result<Vec<DriveItemWithFuse>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
+                   mime_type, download_url, is_deleted, parent_id, parent_path, local_path,
+                   parent_ino, virtual_path, display_path, file_source, sync_status
+            FROM drive_items_with_fuse WHERE parent_ino = ? ORDER BY name LIMIT ? OFFSET ?
+            "#,
+        )
+        .bind(parent_ino as i64)
+        .bind(limit as i64)
+        .bind(offset as i64)
         .fetch_all(&self.pool)
         .await?;
 

@@ -80,13 +80,13 @@ impl SyncCycle {
         let sync_state = sync_state_repo.get_latest_sync_state().await?;
         let delta_token = sync_state
             .map(|(delta_link, _, _)| {
-                info!("🔗 Retrieved delta link from DB: {}", delta_link);
+                debug!("🔗 Retrieved delta link from DB: {}", delta_link);
                 // Extract token from delta_link URL
                 if delta_link.starts_with("http") {
                     // Extract just the token part from the full URL
                     if let Some(token_start) = delta_link.find("token=") {
                         let token = &delta_link[token_start + 6..];
-                        info!("🔑 Extracted token: {}", token);
+                        debug!("🔑 Extracted token: {}", token);
                         Some(token.to_string())
                     } else {
                         warn!("⚠️ Could not extract token from delta link: {}", delta_link);
@@ -94,7 +94,7 @@ impl SyncCycle {
                     }
                 } else {
                     // Already just a token
-                    info!("🔑 Using token directly: {}", delta_link);
+                    debug!("🔑 Using token directly: {}", delta_link);
                     Some(delta_link)
                 }
             })
@@ -114,19 +114,19 @@ impl SyncCycle {
                 .await
             {
                 Ok(delta) => {
-                    info!("📥 Received {} items from delta API", delta.value.len());
+                    debug!("📥 Received {} items from delta API", delta.value.len());
                     all_items.extend(delta.value);
                     info!("📊 Total delta items count: {}", all_items.len());
 
                     if let Some(next_link) = delta.next_link {
                         // Continue pagination
-                        info!("⏭️ Continuing pagination with next_link: {}", next_link);
+                        debug!("⏭️ Continuing pagination with next_link: {}", next_link);
                         current_token = Some(next_link);
                         continue;
                     } else {
                         // Pagination complete, store delta_link for next cycle
                         if let Some(delta_link) = delta.delta_link {
-                            info!("💾 Storing delta link for next cycle: {}", delta_link);
+                            debug!("💾 Storing delta link for next cycle: {}", delta_link);
                             sync_state_repo
                                 .store_sync_state(Some(delta_link), "done", None)
                                 .await
@@ -333,7 +333,7 @@ impl SyncCycle {
         // Store new item with proper Fuse metadata
         let inode = self.setup_fuse_metadata(item, drive_item_with_fuse_repo, local_path).await?;
         
-        info!(
+        debug!(
             "📁 Created item: {} ({}) with inode {}",
             item.name.as_deref().unwrap_or("unnamed"),
             item.id,
@@ -346,7 +346,7 @@ impl SyncCycle {
             download_queue_repo
                 .add_to_download_queue(&item.id, &local_file_path)
                 .await?;
-            info!(
+            debug!(
                 "📥 Added new file to download queue: {} ({})",
                 item.name.as_deref().unwrap_or("unnamed"),
                 item.id
@@ -368,7 +368,7 @@ impl SyncCycle {
         // Update existing item with proper Fuse metadata
         let inode = self.setup_fuse_metadata(item, drive_item_with_fuse_repo, local_path).await?;
         
-        info!(
+        debug!(
             "📝 Updated item: {} ({}) with inode {}",
             item.name.as_deref().unwrap_or("unnamed"),
             item.id,
@@ -382,7 +382,7 @@ impl SyncCycle {
                 download_queue_repo
                     .add_to_download_queue(&item.id, &local_file_path)
                     .await?;
-                info!(
+                debug!(
                     "📥 Added modified file to download queue: {} ({})",
                     item.name.as_deref().unwrap_or("unnamed"),
                     item.id
@@ -412,7 +412,7 @@ impl SyncCycle {
         if let Err(e) = download_queue_repo.remove_by_drive_item_id(&item.id).await {
             warn!("⚠️ Failed to remove item from download queue: {}", e);
         } else {
-            info!("📋 Removed deleted item from download queue: {}", item.id);
+            debug!("📋 Removed deleted item from download queue: {}", item.id);
         }
 
         // If it's a folder, also remove all child items from download queue and delete their local files
@@ -434,7 +434,7 @@ impl SyncCycle {
         if local_file_path.exists() {
             match std::fs::remove_file(&local_file_path) {
                 Ok(_) => {
-                    info!(
+                    debug!(
                         "🗑️ Deleted local file: {} -> {}",
                         item.name.as_deref().unwrap_or("unnamed"),
                         local_file_path.display()
@@ -456,7 +456,7 @@ impl SyncCycle {
             );
         }
 
-        info!(
+        debug!(
             "🗑️ File deleted from OneDrive: {} ({}) with inode {}",
             item.name.as_deref().unwrap_or("unnamed"),
             item.id,
@@ -481,7 +481,7 @@ impl SyncCycle {
         let inode = self.setup_fuse_metadata(item, drive_item_with_fuse_repo, &local_path).await?;
 
         // TODO: Handle move logic for "download on demand" later
-        info!(
+        debug!(
             "📁 File moved: {} ({}) with inode {}",
             item.name.as_deref().unwrap_or("unnamed"),
             item.id,
@@ -583,7 +583,7 @@ impl SyncCycle {
                 )
             })?;
 
-            info!(
+            debug!(
                 "📥 Downloaded file: {} -> {} ({} bytes)",
                 drive_item_id,
                 local_path.display(),
@@ -690,7 +690,7 @@ impl SyncCycle {
         }
         
         if removed_count > 0 {
-            info!("📋 Removed {} child items from download queue for deleted folder: {}", removed_count, parent_id);
+            debug!("📋 Removed {} child items from download queue for deleted folder: {}", removed_count, parent_id);
         }
         
         Ok(())
@@ -731,7 +731,7 @@ impl SyncCycle {
         }
         
         if deleted_count > 0 {
-            info!("🗑️ Deleted {} child local files for deleted folder: {}", deleted_count, parent_id);
+            debug!("🗑️ Deleted {} child local files for deleted folder: {}", deleted_count, parent_id);
         }
         
         Ok(())

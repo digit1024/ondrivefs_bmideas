@@ -25,7 +25,7 @@ impl SyncProcessor {
         let processing_repo = self.app_state.persistency().processing_item_repository();
 
         // 1. Process Remote changes first
-        info!("🔄 Processing remote changes...");
+        debug!("🔄 Processing remote changes...");
         let remote_items = processing_repo.get_unprocessed_items_by_change_type(&ChangeType::Remote).await?;
         for item in remote_items {
             if let Err(e) = self.process_single_item(&item).await {
@@ -34,7 +34,7 @@ impl SyncProcessor {
         }
 
         // 2. Process Local changes after remote changes are handled
-        info!("🔄 Processing local changes...");
+        debug!("🔄 Processing local changes...");
         loop {
             // Always fetch the next unprocessed local item
             if let Some(item) = processing_repo.get_next_unprocessed_item_by_change_type(&ChangeType::Local).await? {
@@ -91,22 +91,22 @@ impl SyncProcessor {
                 // Apply the resolution
                 match resolution {
                     ConflictResolution::UseRemote => {
-                        info!("✅ Using remote version for: {}", 
+                        debug!("✅ Using remote version for: {}", 
                               item.drive_item.name.as_deref().unwrap_or("unnamed"));
                         self.apply_remote_resolution(item).await?;
                     }
                     ConflictResolution::UseLocal => {
-                        info!("✅ Using local version for: {}", 
+                        debug!("✅ Using local version for: {}", 
                               item.drive_item.name.as_deref().unwrap_or("unnamed"));
                         self.apply_local_resolution(item).await?;
                     }
                     ConflictResolution::Skip => {
-                        info!("⏭️ Skipping item: {}", 
+                        debug!("⏭️ Skipping item: {}", 
                               item.drive_item.name.as_deref().unwrap_or("unnamed"));
                         processing_repo.update_status_by_id(db_id, &ProcessingStatus::Cancelled).await?;
                     }
                     ConflictResolution::Merge => {
-                        info!("🔄 Merging item: {}", 
+                        debug!("🔄 Merging item: {}", 
                               item.drive_item.name.as_deref().unwrap_or("unnamed"));
                         self.apply_merge_resolution(item).await?;
                     }
@@ -175,7 +175,7 @@ impl SyncProcessor {
 
     // Remote operation handlers
     async fn handle_remote_create(&self, item: &ProcessingItem) -> Result<()> {
-        info!("📥 Processing remote create: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
+        debug!("📥 Processing remote create: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
         
         let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
         let download_queue_repo = self.app_state.persistency().download_queue_repository();
@@ -210,7 +210,7 @@ impl SyncProcessor {
     }
 
     async fn handle_remote_update(&self, item: &ProcessingItem) -> Result<()> {
-        info!("📝 Processing remote update: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
+        debug!("📝 Processing remote update: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
         
         let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
         let download_queue_repo = self.app_state.persistency().download_queue_repository();
@@ -238,7 +238,7 @@ impl SyncProcessor {
                 download_queue_repo
                     .add_to_download_queue(&item.drive_item.id, &local_file_path)
                     .await?;
-                info!(
+                debug!(
                     "📥 Added modified remote file to download queue: {} ({})",
                     item.drive_item.name.as_deref().unwrap_or("unnamed"),
                     item.drive_item.id
@@ -250,7 +250,7 @@ impl SyncProcessor {
     }
 
     async fn handle_remote_delete(&self, item: &ProcessingItem) -> Result<()> {
-        info!("🗑️ Processing remote delete: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
+        debug!("🗑️ Processing remote delete: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
         
         let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
         let download_queue_repo = self.app_state.persistency().download_queue_repository();
@@ -263,7 +263,7 @@ impl SyncProcessor {
         if let Err(e) = download_queue_repo.remove_by_drive_item_id(&item.drive_item.id).await {
             warn!("⚠️ Failed to remove item from download queue: {}", e);
         } else {
-            info!("📋 Removed deleted item from download queue: {}", item.drive_item.id);
+            debug!("📋 Removed deleted item from download queue: {}", item.drive_item.id);
         }
 
         // If it's a folder, also remove all child items from download queue and delete their local files
@@ -301,7 +301,7 @@ impl SyncProcessor {
             );
         }
 
-        info!(
+        debug!(
             "🗑️ File deleted from OneDrive: {} ({}) with inode {}",
             item.drive_item.name.as_deref().unwrap_or("unnamed"),
             item.drive_item.id,
@@ -312,7 +312,7 @@ impl SyncProcessor {
     }
 
     async fn handle_remote_move(&self, item: &ProcessingItem) -> Result<()> {
-        info!("📁 Processing remote move: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
+        debug!("📁 Processing remote move: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
         
         let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
         
@@ -348,7 +348,7 @@ impl SyncProcessor {
     }
 
     async fn handle_remote_rename(&self, item: &ProcessingItem) -> Result<()> {
-        info!("🏷️ Processing remote rename: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
+        debug!("🏷️ Processing remote rename: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
         
         let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
         
@@ -370,7 +370,7 @@ impl SyncProcessor {
 
     // Local operation handlers
     async fn handle_local_create(&self, item: &ProcessingItem) -> Result<()> {
-        info!("📤 Processing local create: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
+        debug!("📤 Processing local create: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
         
         let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
         let processing_repo = self.app_state.persistency().processing_item_repository();
@@ -406,7 +406,7 @@ impl SyncProcessor {
                     drive_item_with_fuse_repo.update_parent_id_for_children(temporary_id, real_onedrive_id).await?;
                     processing_repo.update_parent_id_for_children(temporary_id, real_onedrive_id).await?;
                     
-                    info!("🔄 Updated database references: {} -> {}", temporary_id, real_onedrive_id);
+                    debug!("🔄 Updated database references: {} -> {}", temporary_id, real_onedrive_id);
                     
                     // Get the full DriveItem from OneDrive to update with complete metadata
                     match self.app_state.onedrive_client.get_item_by_id(real_onedrive_id).await {
@@ -420,7 +420,7 @@ impl SyncProcessor {
                             updated_processing_item.drive_item = full_drive_item;
                             processing_repo.update_processing_item(&updated_processing_item).await?;
                             
-                            info!("✅ Updated processing item with real OneDrive data for folder: {}", folder_name);
+                            debug!("✅ Updated processing item with real OneDrive data for folder: {}", folder_name);
                         }
                         Err(e) => {
                             warn!("⚠️ Failed to get full DriveItem for created folder: {}", e);
@@ -475,7 +475,7 @@ impl SyncProcessor {
                                 drive_item_with_fuse_repo.update_parent_id_for_children(temporary_id, real_onedrive_id).await?;
                                 processing_repo.update_parent_id_for_children(temporary_id, real_onedrive_id).await?;
                                 
-                                info!("🔄 Updated database references: {} -> {}", temporary_id, real_onedrive_id);
+                                debug!("🔄 Updated database references: {} -> {}", temporary_id, real_onedrive_id);
                                 
                                 // Get the full DriveItem from OneDrive to update with complete metadata
                                 match self.app_state.onedrive_client.get_item_by_id(real_onedrive_id).await {
@@ -494,7 +494,7 @@ impl SyncProcessor {
                                         updated_processing_item.drive_item = full_drive_item;
                                         processing_repo.update_processing_item(&updated_processing_item).await?;
                                         
-                                        info!("✅ Updated processing item with real OneDrive data for file: {}", file_name);
+                                        debug!("✅ Updated processing item with real OneDrive data for file: {}", file_name);
                                     }
                                     Err(e) => {
                                         warn!("⚠️ Failed to get full DriveItem for uploaded file: {}", e);
@@ -522,7 +522,7 @@ impl SyncProcessor {
     }
 
     async fn handle_local_update(&self, item: &ProcessingItem) -> Result<()> {
-        info!("📤 Processing local update: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
+        debug!("📤 Processing local update: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
         
         let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
         let processing_repo = self.app_state.persistency().processing_item_repository();
@@ -539,7 +539,7 @@ impl SyncProcessor {
             // For folders, just update metadata (no content to update)
             let local_downloads_path = self.app_state.config().project_dirs.data_dir().join("downloads");
             let _inode = self.setup_fuse_metadata(&item.drive_item, &drive_item_with_fuse_repo, &local_downloads_path).await?;
-            info!("📁 Updated folder metadata: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
+            debug!("📁 Updated folder metadata: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
         } else {
             // For files, read the file and update on OneDrive
             if local_path.exists() {
@@ -568,7 +568,7 @@ impl SyncProcessor {
                                             warn!("⚠️ Failed to move file from upload to download: {} -> {}: {}", 
                                                   local_path.display(), download_path.display(), e);
                                         } else {
-                                            info!("📁 Moved file from upload to download: {} -> {}", 
+                                            debug!("📁 Moved file from upload to download: {} -> {}", 
                                                   local_path.display(), download_path.display());
                                 }
                                 
@@ -581,7 +581,7 @@ impl SyncProcessor {
                                         updated_processing_item.drive_item = full_drive_item;
                                         processing_repo.update_processing_item(&updated_processing_item).await?;
                                         
-                                        info!("✅ Updated processing item with real OneDrive data for file: {}", 
+                                        debug!("✅ Updated processing item with real OneDrive data for file: {}", 
                                               item.drive_item.name.as_deref().unwrap_or("unnamed"));
                                     }
                                     Err(e) => {
@@ -610,7 +610,7 @@ impl SyncProcessor {
     }
 
     async fn handle_local_delete(&self, item: &ProcessingItem) -> Result<()> {
-        info!("🗑️ Processing local delete: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
+        debug!("🗑️ Processing local delete: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
         
         let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
         
@@ -640,7 +640,7 @@ impl SyncProcessor {
     }
 
     async fn handle_local_move(&self, item: &ProcessingItem) -> Result<()> {
-        info!("📁 Processing local move: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
+        debug!("📁 Processing local move: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
         
         let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
         let processing_repo = self.app_state.persistency().processing_item_repository();
@@ -666,7 +666,7 @@ impl SyncProcessor {
                 updated_processing_item.drive_item = moved_item;
                 processing_repo.update_processing_item(&updated_processing_item).await?;
                 
-                info!("✅ Updated processing item with real OneDrive data for moved item: {}", 
+                debug!("✅ Updated processing item with real OneDrive data for moved item: {}", 
                       item.drive_item.name.as_deref().unwrap_or("unnamed"));
             }
             Err(e) => {
@@ -679,7 +679,7 @@ impl SyncProcessor {
     }
 
     async fn handle_local_rename(&self, item: &ProcessingItem) -> Result<()> {
-        info!("🏷️ Processing local rename: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
+        debug!("🏷️ Processing local rename: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
         
         let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
         let processing_repo = self.app_state.persistency().processing_item_repository();
@@ -705,7 +705,7 @@ impl SyncProcessor {
                 updated_processing_item.drive_item = renamed_item;
                 processing_repo.update_processing_item(&updated_processing_item).await?;
                 
-                info!("✅ Updated processing item with real OneDrive data for renamed item: {}", new_name);
+                debug!("✅ Updated processing item with real OneDrive data for renamed item: {}", new_name);
             }
             Err(e) => {
                 error!("❌ Failed to rename item on OneDrive: {}", e);
@@ -932,7 +932,7 @@ impl SyncProcessor {
         // Move file from upload to download
         match std::fs::rename(upload_path, &download_path) {
             Ok(_) => {
-                info!("📁 Moved file from upload to download: {} -> {}", 
+                debug!("📁 Moved file from upload to download: {} -> {}", 
                       upload_path.display(), download_path.display());
                 Ok(())
             }

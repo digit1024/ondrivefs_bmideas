@@ -14,12 +14,14 @@ NC='\033[0m' # No Color
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-DAEMON_BINARY="$PROJECT_ROOT/../target/debug/onedrive-sync-daemon"
+DAEMON_BINARY="$PROJECT_ROOT/../target/release/onedrive-sync-daemon"
 SYMLINK_PATH="$HOME/.local/bin/open-onedrive"
 DESKTOP_FILE="$HOME/.local/share/applications/open-onedrive.desktop"
 MIME_FILE="$HOME/.local/share/mime/packages/onedrive-sync.xml"
 
 echo -e "${GREEN}🚀 Installing OneDrive Sync Handler...${NC}"
+echo -e "${GREEN}⚙️ BUilding For release first...${NC}"
+cargo build --release --manifest-path "$PROJECT_ROOT/../Cargo.toml" --target-dir "$PROJECT_ROOT/../target"
 
 # Check if daemon binary exists
 if [ ! -f "$DAEMON_BINARY" ]; then
@@ -43,7 +45,7 @@ ln -sf "$DAEMON_BINARY" "$SYMLINK_PATH"
 chmod +x "$SYMLINK_PATH"
 
 # Create symlink for UI
-UI_BINARY="$PROJECT_ROOT/../target/debug/onedrive-sync-ui"
+UI_BINARY="$PROJECT_ROOT/../target/release/onedrive-sync-ui"
 UI_SYMLINK_PATH="$HOME/.local/bin/onedrive-sync-ui"
 if [ -f "$UI_BINARY" ]; then
     echo -e "${YELLOW}🔗 Creating symlink: $UI_SYMLINK_PATH -> $UI_BINARY${NC}"

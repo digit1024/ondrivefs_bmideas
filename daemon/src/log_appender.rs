@@ -111,6 +111,7 @@ fn build_log_config(stdout: ConsoleAppender, file: RollingFileAppender) -> Resul
                 .appender("file")
                 .additive(false)
                 .build("sqlx_core::logger", LevelFilter::Off)
+                
         )
         // Reduce FUSE library noise
         .logger(
@@ -135,6 +136,13 @@ fn build_log_config(stdout: ConsoleAppender, file: RollingFileAppender) -> Resul
                 .appender("file")
                 .additive(false)
                 .build("tokio", LevelFilter::Warn) // Only show warnings and errors from tokio
+        )
+        .logger(
+            log4rs::config::Logger::builder()
+                .appender("stdout")
+                .appender("file")
+                .additive(false)
+                .build("zbus", LevelFilter::Warn) // Only show warnings and errors from zbus
         )
         .build(
             Root::builder()
