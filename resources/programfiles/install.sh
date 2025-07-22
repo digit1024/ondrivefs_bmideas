@@ -22,7 +22,7 @@ MIME_FILE="$HOME/.local/share/mime/packages/onedrive-sync.xml"
 echo -e "${GREEN}🚀 Installing OneDrive Sync Handler...${NC}"
 echo -e "${GREEN}⚙️ BUilding For release first...${NC}"
 cargo build --release --manifest-path "$PROJECT_ROOT/../Cargo.toml" --target-dir "$PROJECT_ROOT/../target"
-
+systemctl --user stop open-onedrive-daemon.service
 # Check if daemon binary exists
 if [ ! -f "$DAEMON_BINARY" ]; then
     echo -e "${RED}❌ Daemon binary not found at: $DAEMON_BINARY${NC}"
@@ -142,3 +142,4 @@ echo -e "   • It should open in your OneDrive Sync application"
 echo -e ""
 echo -e "${YELLOW}💡 To uninstall:${NC}"
 echo -e "   • Run: $SCRIPT_DIR/uninstall.sh" 
+systemctl --user start open-onedrive-daemon.service

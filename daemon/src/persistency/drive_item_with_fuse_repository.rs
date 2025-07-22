@@ -530,6 +530,29 @@ impl DriveItemWithFuseRepository {
         Ok(())
     }
 
+    /// Get a drive item with Fuse metadata by parent inode and name
+    pub async fn get_drive_item_with_fuse_by_parent_ino_and_name(&self, parent_ino: u64, name: &str) -> Result<Option<DriveItemWithFuse>> {
+        let row = sqlx::query(
+            r#"
+            SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
+                   mime_type, download_url, is_deleted, parent_id, parent_path, local_path,
+                   parent_ino, virtual_path, display_path, file_source, sync_status
+            FROM drive_items_with_fuse WHERE parent_ino = ? AND name = ?
+            "#,
+        )
+        .bind(parent_ino as i64)
+        .bind(name)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some(row) = row {
+            let drive_item_with_fuse = self.row_to_drive_item_with_fuse(row).await?;
+            Ok(Some(drive_item_with_fuse))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Convert database row to DriveItemWithFuse
     async fn row_to_drive_item_with_fuse(&self, row: sqlx::sqlite::SqliteRow) -> Result<DriveItemWithFuse> {
         // Extract DriveItem fields

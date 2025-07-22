@@ -9,4 +9,3 @@ Icon=open-onedrive-daemon
 Categories=Network;FileManager;
 StartupNotify=true
 NoDisplay=true
-Hidden=true

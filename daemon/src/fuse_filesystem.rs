@@ -431,19 +431,6 @@ impl fuser::Filesystem for OneDriveFuse {
             }
         }
 
-        // Get parent directory path
-        let parent_path = if parent == 1 {
-            "/".to_string()
-        } else {
-            match sync_await(self.get_item_by_ino(parent)) {
-                Ok(Some(parent_item)) => parent_item.virtual_path().unwrap_or("/").to_string(),
-                _ => {
-                reply.error(libc::ENOENT);
-                return;
-                }
-            }
-        };
-
         // Strip .onedrivedownload extension if present for lookup
         let lookup_name = if name_str.ends_with(".onedrivedownload") {
             &name_str[..name_str.len() - 17] // Remove ".onedrivedownload"
@@ -451,15 +438,8 @@ impl fuser::Filesystem for OneDriveFuse {
             &name_str
         };
 
-        // Construct full path
-        let full_path = if parent_path == "/" {
-            format!("/{}", lookup_name)
-        } else {
-            format!("{}/{}", parent_path, lookup_name)
-        };
-
-        // Try to get the item
-        if let Ok(Some(item)) = sync_await(self.get_item_by_path(&full_path)) {
+        // Use optimized DB query by parent_ino and name
+        if let Ok(Some(item)) = sync_await(self.drive_item_with_fuse_repo.get_drive_item_with_fuse_by_parent_ino_and_name(parent, lookup_name)) {
             reply.entry(
                 &Duration::from_secs(120),
                 &self.item_to_file_attr(&item),
