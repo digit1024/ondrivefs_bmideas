@@ -38,7 +38,7 @@ An experimental OneDrive sync client for Linux, featuring:
    ```
 
 
-## ⚡ Autostart Daemon (Native Only)
+## ⚡ Autostart Daemon 
 1. **Copy the service file:**
    ```sh
    cp resources/programfiles/open-onedrive-daemon.service ~/.config/systemd/user/
@@ -59,7 +59,7 @@ An experimental OneDrive sync client for Linux, featuring:
 
 
 ## 📝 License
-MPL-2.0
+MIT
 
 ---
 
@@ -67,6 +67,9 @@ MPL-2.0
 
 - **Q: Where are files stored?**
   - A: Downloaded files are stored in a flat directory under `~/.local/share/onedrive-sync/downloads`.
+- **What is the answer  to the Ultimate Question of Life, The Universe, and Everything?**
+  - 42 
+`  
 ---
 
 ## 🤝 Contributing
