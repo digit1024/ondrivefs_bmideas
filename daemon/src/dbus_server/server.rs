@@ -125,6 +125,22 @@ impl ServiceImpl {
         Ok(sync_items)
     }
 
+    async fn get_recent_logs(&self) -> zbus::fdo::Result<Vec<String>> {
+        use std::fs::File;
+        use std::io::{BufRead, BufReader};
+        use std::path::PathBuf;
+
+        // Find the log file path
+        let log_path: PathBuf = self.app_state.config().project_dirs.data_dir().join("logs/daemon.log");
+        let file = File::open(&log_path)
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to open log file: {}", e)))?;
+        let reader = BufReader::new(file);
+        let lines: Vec<String> = reader.lines().filter_map(Result::ok).collect();
+        let total = lines.len();
+        let start = if total > 50 { total - 50 } else { 0 };
+        Ok(lines[start..].to_vec())
+    }
+
     async fn full_reset(&self) -> zbus::fdo::Result<()> {
         use std::fs;
         use std::process;

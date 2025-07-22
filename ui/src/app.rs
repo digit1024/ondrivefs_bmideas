@@ -24,6 +24,7 @@ enum PageId {
     Status,
     Folders,
     Queues,
+    Logs,
 }
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub enum ContextPage {
@@ -56,6 +57,7 @@ pub struct AppModel {
     status_page: pages::status_page::Page,
     folders_page: pages::folders_page::Page,
     queues_page: pages::queues_page::Page,
+    logs_page: pages::logs_page::Page,
 
     
 
@@ -73,6 +75,7 @@ pub enum Message {
     FoldersPage(folders_page::Message),
     QueuesPage(queues_page::Message),
     AboutElement(about_element::Message),
+    LogsPage(pages::logs_page::Message),
  
 }
 // impl From<status_page::Message> for Message {
@@ -101,6 +104,12 @@ impl From<queues_page::Message> for Message {
 impl From<about_element::Message> for Message {
     fn from(message: about_element::Message) -> Self {
         Self::AboutElement(message)
+    }
+}
+
+impl From<pages::logs_page::Message> for Message {
+    fn from(message: pages::logs_page::Message) -> Self {
+        Self::LogsPage(message)
     }
 }
 
@@ -153,6 +162,11 @@ impl cosmic::Application for AppModel {
             .icon(icon::from_name("view-refresh-symbolic"));
 
         nav.insert()
+            .text("Logs")
+            .data::<PageId>(PageId::Logs)
+            .icon(icon::from_name("text-x-generic-symbolic"));
+
+        nav.insert()
             .text("Settings")
             //.data::<Page>(Page::Settings)
             .icon(icon::from_name("applications-science-symbolic"));
@@ -173,6 +187,7 @@ impl cosmic::Application for AppModel {
             status_page: pages::status_page::Page::new(),
             folders_page: pages::folders_page::Page::new(),
             queues_page: pages::queues_page::Page::new(),
+            logs_page: pages::logs_page::Page::new(),
             
         };
 
@@ -245,6 +260,7 @@ impl cosmic::Application for AppModel {
             PageId::Status => self.status_page.view().map(Message::StatusPage),
             PageId::Folders => self.folders_page.view().map(Message::FoldersPage),
             PageId::Queues => self.queues_page.view().map(Message::QueuesPage),
+            PageId::Logs => self.logs_page.view().map(Message::LogsPage),
         };
 
         widget::container(content)
@@ -294,6 +310,9 @@ impl cosmic::Application for AppModel {
             Message::AboutElement(about_element::Message::LaunchUrl(url)) => {
                 _ = open::that_detached(url);
                 Task::none()
+            }
+            Message::LogsPage(logs_message) => {
+                self.logs_page.update(logs_message)
             }
         }
     }

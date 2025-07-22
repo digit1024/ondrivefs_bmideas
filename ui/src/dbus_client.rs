@@ -152,6 +152,25 @@ impl DbusClient {
             }
         }
     }
+
+    /// Get the last 50 log lines from the daemon
+    pub async fn get_recent_logs(&self) -> Result<Vec<String>> {
+        let proxy = Proxy::new(
+            &self.connection,
+            DBUS_SERVICE,
+            DBUS_PATH,
+            DBUS_INTERFACE,
+        )
+        .await?;
+
+        let logs = proxy
+            .call_method("GetRecentLogs", &())
+            .await?
+            .body()
+            .deserialize::<Vec<String>>()?;
+
+        Ok(logs)
+    }
 }
 
 #[cfg(test)]
