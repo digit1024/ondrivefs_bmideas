@@ -118,10 +118,10 @@ if [ -f "$ICON_SRC" ]; then
     fi
     
     # Update icon cache
-    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-        echo -e "${YELLOW}🔄 Updating icon cache...${NC}"
-        gtk-update-icon-cache "$HOME/.local/share/icons/hicolor"
-    fi
+    # if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    #     echo -e "${YELLOW}🔄 Updating icon cache...${NC}"
+    #     gtk-update-icon-cache "$HOME/.local/share/icons/hicolor"
+    # fi
 else
     echo -e "${YELLOW}⚠️ Icon file not found: $ICON_SRC${NC}"
 fi
@@ -142,4 +142,6 @@ echo -e "   • It should open in your OneDrive Sync application"
 echo -e ""
 echo -e "${YELLOW}💡 To uninstall:${NC}"
 echo -e "   • Run: $SCRIPT_DIR/uninstall.sh" 
+
+echo "STARTING DAEMON NOW!"
 systemctl --user start open-onedrive-daemon.service

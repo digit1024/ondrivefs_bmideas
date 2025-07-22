@@ -21,6 +21,53 @@ An experimental OneDrive sync client for Linux, featuring:
 
 ---
 
+## 🏗️ Architecture
+
+```mermaid
+flowchart TD
+    subgraph "Daemon (Rust)"
+        A1["AppState<br/>config, db, auth, file mgr, scheduler"]
+        A2["PersistencyManager<br/>SQLite, SQLx"]
+        A3["OneDriveClient<br/>API, Auth"]
+        A4["FileManager<br/>Local ops"]
+        A5["FUSE Filesystem<br/>Virtual FS"]
+        A6["SyncProcessor<br/>Two-way sync, conflict res."]
+        A7["Scheduler<br/>Periodic tasks"]
+        A8["DBusServer<br/>IPC"]
+        A9["MessageBroker<br/>Internal events"]
+    end
+    subgraph "UI (Rust + libcosmic)"
+        B1["AppModel<br/>State, nav, config"]
+        B2["Pages<br/>Status, Folders, Queues, Logs"]
+        B3["Notifications"]
+        B4["DBusClient"]
+    end
+    subgraph "Shared"
+        C1["onedrive-sync-lib"]
+    end
+
+    A1 -->|uses| A2
+    A1 -->|uses| A3
+    A1 -->|uses| A4
+    A1 -->|uses| A5
+    A1 -->|uses| A6
+    A1 -->|uses| A7
+    A1 -->|uses| A8
+    A1 -->|uses| A9
+    A3 -->|auth| A1
+    A5 -->|mounts| UserFS
+    A6 -->|calls| A2
+    A6 -->|calls| A3
+    A6 -->|calls| A4
+    A8 -->|IPC| B4
+    B1 -->|pages| B2
+    B1 -->|notifies| B3
+    B1 -->|IPC| B4
+    B4 -->|calls| A8
+    A1 -->|uses| C1
+    B1 -->|uses| C1
+```
+
 ## 🛠️ Installation
 
 ### 1. 

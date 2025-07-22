@@ -227,6 +227,11 @@ async fn main() -> Result<()> {
                 .num_args(1)
                 .help("File path to handle (for MIME type handler)"),
         )
+        .arg(
+            Arg::new("readdirplus")
+                .long("readdirplus")
+                .help("Advertise readdirplus support to the kernel"),
+        )
         .get_matches();
 
     // If launched as a file handler, only handle the file and exit
@@ -319,7 +324,13 @@ async fn main() -> Result<()> {
                 let result = fuser::mount2(
                     fuse_fs,
                     &mount_point_for_mount,
-                    &[MountOption::FSName("onedrive".to_string()), MountOption::NoExec, MountOption::NoSuid, MountOption::NoDev, MountOption::DefaultPermissions, MountOption::NoAtime],
+                    &[MountOption::FSName("onedrive".to_string()),
+                     MountOption::NoExec,
+                      MountOption::NoSuid,
+                       MountOption::NoDev,
+                        MountOption::DefaultPermissions,
+                         MountOption::NoAtime, 
+                         ],
                 );
                 if let Err(e) = result {
                     error!("FUSE mount error: {}", e);
