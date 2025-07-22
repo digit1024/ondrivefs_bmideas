@@ -24,6 +24,7 @@ pub enum Message {
     ProfileLoaded(Result<UserProfile, String>),
     Refresh,
     AutoRefresh,
+    FullReset,
 }
 
 pub struct Page {
@@ -68,9 +69,11 @@ impl Page {
             .width(Length::Fill)
             .push(
                 column().push(header).push(
-                    container(button::standard("Refresh")
-                    .on_press(Message::Refresh))
-                    .align_x(Alignment::End)
+                    row().push(
+                        button::standard("Refresh")
+                        .on_press(Message::Refresh))
+                    .push(button::destructive("Full Reset")
+                    .on_press(Message::FullReset))
                     .width(Length::Fill)
                 )
             );
@@ -267,6 +270,31 @@ impl Page {
                     cosmic::Action::App(crate::app::Message::StatusPage(Message::ProfileLoaded(result)))
                 });
                 cosmic::task::batch(vec![a, b])
+            }
+            Message::FullReset => {
+                info!("StatusPage: Full reset requested");
+                self.loading = true;
+                self.error = None;
+                let reset = async move {
+                    match DbusClient::new().await {
+                        Ok(client) => {
+                            info!("StatusPage: Successfully created DbusClient");
+                            match client.get_daemon_status().await {
+                                Ok(status) => Ok(status),
+                                Err(e) => Err(format!("Failed to get daemon status: {}", e)),
+                            }
+                        }
+                        Err(e) => {
+                            error!("StatusPage: Failed to create DbusClient - {}", e);
+                            Err(format!("Failed to connect to daemon: {}", e))
+                        }
+                    }
+                };
+                cosmic::task::future(reset).map(|result| {
+                    cosmic::Action::App(crate::app::Message::StatusPage(Message::StatusLoaded(result)))
+                })
+            
+                
             }
             Message::FetchStatus => {
                 info!("StatusPage: Fetching status from daemon");

@@ -126,23 +126,36 @@ impl ServiceImpl {
     }
 
     async fn full_reset(&self) -> zbus::fdo::Result<()> {
+        use std::fs;
+        use std::process;
+        use log::info;
+
         info!("DBus: full_reset called");
-        
-        // Clear all queues and processing items
+
+        // Clear all queues and processing items (existing logic)
         let processing_repo = self.app_state.persistency().processing_item_repository();
         let download_queue_repo = self.app_state.persistency().download_queue_repository();
         let sync_state_repo = self.app_state.persistency().sync_state_repository();
+        let profile_repo = self.app_state.persistency().user_profile_repository();
 
-        
         processing_repo.clear_all_items().await
             .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to clear processing items: {}", e)))?;
         sync_state_repo.clear_all_items().await
             .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to clear sync state: {}", e)))?;
         download_queue_repo.clear_all_items().await
             .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to clear download queue: {}", e)))?;
-        
+        profile_repo.clear_profile().await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to clear profile: {}", e)))?;
 
-        info!("DBus: full_reset completed successfully");
+        // Delete SQLite DB and token file
+        
+        let token_path = self.app_state.config().project_dirs.config_dir().join("secrets.json");
+        
+        let _ = fs::remove_file(&token_path);
+
+        info!("DBus: full_reset deleted DB and token, exiting for restart.");
+        panic!("Full reset requested");
         Ok(())
     }
+    
 }
