@@ -553,6 +553,27 @@ impl DriveItemWithFuseRepository {
         }
     }
 
+    /// Get all files (not folders) by virtual_path prefix (for sync folder logic)
+    pub async fn get_files_by_virtual_path_prefix(&self, folder_path: &str) -> Result<Vec<DriveItemWithFuse>> {
+        // Always query with a leading slash in the LIKE pattern
+        let pattern = format!("/{}/%", folder_path.trim_start_matches('/'));
+        let rows = sqlx::query(
+            r#"
+            SELECT * FROM drive_items_with_fuse
+            WHERE virtual_path LIKE ? AND is_folder = 0
+            "#,
+        )
+        .bind(&pattern)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(self.row_to_drive_item_with_fuse(row).await?);
+        }
+        Ok(items)
+    }
+
     /// Convert database row to DriveItemWithFuse
     async fn row_to_drive_item_with_fuse(&self, row: sqlx::sqlite::SqliteRow) -> Result<DriveItemWithFuse> {
         // Extract DriveItem fields

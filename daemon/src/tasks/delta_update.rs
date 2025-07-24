@@ -13,7 +13,7 @@ use crate::{
 use onedrive_sync_lib::notifications::{NotificationSender, NotificationUrgency};
 
 /// Default sync interval in seconds
-const DEFAULT_SYNC_INTERVAL_SECS: u64 = 30; // 5 minutes
+const DEFAULT_SYNC_INTERVAL_SECS: u64 = 30; 
 
 /// Default metrics configuration
 const DEFAULT_METRICS_WINDOW: usize = 5;
@@ -600,7 +600,7 @@ impl SyncCycle {
 
     /// Run the complete sync cycle
     pub async fn run(&self) -> Result<()> {
-        let download_folders = self.app_state.config().settings.download_folders.clone();
+        let download_folders = self.app_state.config().settings.read().await.download_folders.clone();
 
         info!(
             "🔄 Starting two-way sync cycle with download folders: {:?}",

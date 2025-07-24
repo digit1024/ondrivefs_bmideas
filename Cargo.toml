@@ -3,5 +3,6 @@ resolver = "3"
 members = [
     "daemon",
     "lib",
-    "ui"
+    "ui",
+    "applet"
 ]

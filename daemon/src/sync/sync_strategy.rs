@@ -40,7 +40,7 @@ impl SyncStrategy {
             crate::persistency::processing_item_repository::ValidationResult::Valid
         } else {
             // Apply conflict resolution strategy
-            let strategy = self.app_state.config().settings.conflict_resolution_strategy.clone();
+            let strategy = self.app_state.config().settings.read().await.conflict_resolution_strategy.clone();
             let resolver = ConflictResolutionFactory::create_strategy(&strategy);
             
             // Check if user has already made a decision for manual resolution

@@ -623,6 +623,12 @@ dependencies = [
 
 [[package]]
 name = "base64"
+version = "0.21.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d297deb1925b89f2ccc13d7635fa0714f12c87adce1c75356b39ca9b7178567"
+
+[[package]]
+name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
@@ -783,12 +789,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "calloop"
+version = "0.14.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10929724661d1c43856fd87c7a127ae944ec55579134fb485e4136fb6a46fdcb"
+dependencies = [
+ "bitflags 2.9.1",
+ "polling 3.8.0",
+ "rustix 0.38.44",
+ "slab",
+ "tracing",
+]
+
+[[package]]
 name = "calloop-wayland-source"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95a66a987056935f7efce4ab5668920b5d0dac4a7c99991a67395f13702ddd20"
 dependencies = [
- "calloop",
+ "calloop 0.13.0",
+ "rustix 0.38.44",
+ "wayland-backend",
+ "wayland-client",
+]
+
+[[package]]
+name = "calloop-wayland-source"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "876a7a1dbbe026a55ef47a500b123af5a9a0914520f061d467914cf21be95daf"
+dependencies = [
+ "calloop 0.14.2",
  "rustix 0.38.44",
  "wayland-backend",
  "wayland-client",
@@ -1102,7 +1133,7 @@ source = "git+https://github.com/pop-os/cosmic-protocols?rev=178eb0b#178eb0b14a0
 dependencies = [
  "cosmic-protocols",
  "libc",
- "smithay-client-toolkit",
+ "smithay-client-toolkit 0.19.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "wayland-client",
  "wayland-protocols",
 ]
@@ -1121,7 +1152,7 @@ dependencies = [
  "known-folders",
  "notify",
  "once_cell",
- "ron",
+ "ron 0.9.0",
  "serde",
  "tokio",
  "tracing",
@@ -1152,6 +1183,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "cosmic-panel-config"
+version = "0.1.0"
+source = "git+https://github.com/pop-os/cosmic-panel#1985e806e082af798e3b542cdd8bc5b32457fe72"
+dependencies = [
+ "anyhow",
+ "cosmic-config",
+ "ron 0.8.1",
+ "serde",
+ "smithay-client-toolkit 0.19.2 (git+https://github.com/smithay/client-toolkit)",
+ "tracing",
+ "wayland-protocols-wlr",
+ "xdg-shell-wrapper-config",
+]
+
+[[package]]
 name = "cosmic-protocols"
 version = "0.1.0"
 source = "git+https://github.com/pop-os/cosmic-protocols?rev=178eb0b#178eb0b14a0e5c192f64f6dee6c40341a8e5ee51"
@@ -1171,12 +1217,12 @@ version = "0.1.0"
 source = "git+https://github.com/pop-os/cosmic-settings-daemon#a36683fd5b7dea4011da278c91d0645117dc39f8"
 dependencies = [
  "cosmic-config",
- "ron",
+ "ron 0.9.0",
  "serde",
  "serde_with",
  "thiserror 2.0.12",
  "tracing",
- "xkbcommon",
+ "xkbcommon 0.7.0",
 ]
 
 [[package]]
@@ -1220,7 +1266,7 @@ dependencies = [
  "dirs 6.0.0",
  "lazy_static",
  "palette",
- "ron",
+ "ron 0.9.0",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
@@ -1569,7 +1615,7 @@ dependencies = [
  "bitflags 2.9.1",
  "mime 0.1.0",
  "raw-window-handle",
- "smithay-client-toolkit",
+ "smithay-client-toolkit 0.19.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "smithay-clipboard",
 ]
 
@@ -2632,7 +2678,7 @@ version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f66d5bd4c6f02bf0542fad85d626775bab9258cf795a4256dcaf3161114d1df"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bytes",
  "futures-channel",
  "futures-core",
@@ -2963,7 +3009,7 @@ dependencies = [
  "winapi",
  "window_clipboard",
  "winit",
- "xkbcommon",
+ "xkbcommon 0.7.0",
  "xkbcommon-dl",
  "xkeysym",
 ]
@@ -3417,6 +3463,7 @@ dependencies = [
  "cosmic-client-toolkit",
  "cosmic-config",
  "cosmic-freedesktop-icons",
+ "cosmic-panel-config",
  "cosmic-settings-config",
  "cosmic-settings-daemon",
  "cosmic-theme",
@@ -3441,7 +3488,7 @@ dependencies = [
  "palette",
  "raw-window-handle",
  "rfd",
- "ron",
+ "ron 0.9.0",
  "rustix 1.0.7",
  "serde",
  "shlex",
@@ -4301,11 +4348,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4895175b425cb1f87721b59f0f286c2092bd4af812243672510e1ac53e2e0ad"
 
 [[package]]
+name = "onedrive-sync-applet"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "env_logger",
+ "futures-util",
+ "i18n-embed",
+ "i18n-embed-fl",
+ "libcosmic",
+ "log",
+ "once_cell",
+ "onedrive-sync-lib",
+ "open",
+ "rust-embed",
+ "serde",
+ "tokio",
+ "tracing",
+ "vergen",
+ "zbus 5.7.1",
+]
+
+[[package]]
 name = "onedrive-sync-daemon"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "base64",
+ "base64 0.22.1",
  "chrono",
  "clap",
  "ctrlc",
@@ -5095,7 +5164,7 @@ version = "0.12.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cbc931937e6ca3a06e3b6c0aa7841849b160a90351d6ab467a8b9b9959767531"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bytes",
  "encoding_rs",
  "futures-core",
@@ -5194,11 +5263,23 @@ dependencies = [
 
 [[package]]
 name = "ron"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b91f7eff05f748767f183df4320a63d6936e9c6107d97c9e6bdd9784f4289c94"
+dependencies = [
+ "base64 0.21.7",
+ "bitflags 2.9.1",
+ "serde",
+ "serde_derive",
+]
+
+[[package]]
+name = "ron"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63f3aa105dea217ef30d89581b65a4d527a19afc95ef5750be3890e8d3c5b837"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bitflags 2.9.1",
  "serde",
  "serde_derive",
@@ -5458,7 +5539,7 @@ dependencies = [
  "ab_glyph",
  "log",
  "memmap2 0.9.5",
- "smithay-client-toolkit",
+ "smithay-client-toolkit 0.19.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "tiny-skia",
 ]
 
@@ -5578,7 +5659,7 @@ version = "3.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2c45cd61fefa9db6f254525d46e392b852e0e61d9a1fd36e5bd183450a556d5"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "chrono",
  "hex",
  "indexmap 1.9.3",
@@ -5768,8 +5849,8 @@ checksum = "3457dea1f0eb631b4034d61d4d8c32074caa6cd1ab2d59f2327bd8461e2c0016"
 dependencies = [
  "bitflags 2.9.1",
  "bytemuck",
- "calloop",
- "calloop-wayland-source",
+ "calloop 0.13.0",
+ "calloop-wayland-source 0.3.0",
  "cursor-icon",
  "libc",
  "log",
@@ -5784,7 +5865,35 @@ dependencies = [
  "wayland-protocols",
  "wayland-protocols-wlr",
  "wayland-scanner",
- "xkbcommon",
+ "xkbcommon 0.7.0",
+ "xkeysym",
+]
+
+[[package]]
+name = "smithay-client-toolkit"
+version = "0.19.2"
+source = "git+https://github.com/smithay/client-toolkit#e39457f2654e604a736b9fbaa62d48f5d26fcc25"
+dependencies = [
+ "bitflags 2.9.1",
+ "bytemuck",
+ "calloop 0.14.2",
+ "calloop-wayland-source 0.4.0",
+ "cursor-icon",
+ "libc",
+ "log",
+ "memmap2 0.9.5",
+ "pkg-config",
+ "rustix 1.0.7",
+ "thiserror 2.0.12",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-csd-frame",
+ "wayland-cursor",
+ "wayland-protocols",
+ "wayland-protocols-misc",
+ "wayland-protocols-wlr",
+ "wayland-scanner",
+ "xkbcommon 0.8.0",
  "xkeysym",
 ]
 
@@ -5795,7 +5904,7 @@ source = "git+https://github.com/pop-os/smithay-clipboard?tag=pop-dnd-5#5a3007de
 dependencies = [
  "libc",
  "raw-window-handle",
- "smithay-client-toolkit",
+ "smithay-client-toolkit 0.19.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "wayland-backend",
 ]
 
@@ -5905,7 +6014,7 @@ version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee6798b1838b6a0f69c007c133b8df5866302197e404e8b6ee8ed3e3a5e68dc6"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bytes",
  "chrono",
  "crc",
@@ -5982,7 +6091,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aa003f0038df784eb8fecbbac13affe3da23b45194bd57dba231c8f48199c526"
 dependencies = [
  "atoi",
- "base64",
+ "base64 0.22.1",
  "bitflags 2.9.1",
  "byteorder",
  "bytes",
@@ -6026,7 +6135,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db58fcd5a53cf07c184b154801ff91347e4c30d17a3562a635ff028ad5deda46"
 dependencies = [
  "atoi",
- "base64",
+ "base64 0.22.1",
  "bitflags 2.9.1",
  "byteorder",
  "chrono",
@@ -6814,7 +6923,7 @@ version = "0.42.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b84ea542ae85c715f07b082438a4231c3760539d902e11d093847a0b22963032"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "data-url",
  "flate2",
  "fontdb 0.18.0",
@@ -7073,6 +7182,19 @@ dependencies = [
  "wayland-client",
  "wayland-scanner",
  "wayland-server",
+]
+
+[[package]]
+name = "wayland-protocols-misc"
+version = "0.3.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "635cf2968bd88599445b25a2eeef655d463bb04f9aed04e4bf8c2018f3d4fc41"
+dependencies = [
+ "bitflags 2.9.1",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-scanner",
 ]
 
 [[package]]
@@ -7806,7 +7928,7 @@ dependencies = [
  "bitflags 2.9.1",
  "block2 0.5.1",
  "bytemuck",
- "calloop",
+ "calloop 0.13.0",
  "cfg_aliases 0.2.1",
  "concurrent-queue",
  "core-foundation 0.9.4",
@@ -7828,7 +7950,7 @@ dependencies = [
  "redox_syscall 0.4.1",
  "rustix 0.38.44",
  "sctk-adwaita",
- "smithay-client-toolkit",
+ "smithay-client-toolkit 0.19.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "smol_str",
  "tracing",
  "unicode-segmentation",
@@ -7934,6 +8056,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "xdg-shell-wrapper-config"
+version = "0.1.0"
+source = "git+https://github.com/pop-os/cosmic-panel#1985e806e082af798e3b542cdd8bc5b32457fe72"
+dependencies = [
+ "serde",
+ "wayland-protocols-wlr",
+]
+
+[[package]]
 name = "xkbcommon"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7941,6 +8072,17 @@ checksum = "13867d259930edc7091a6c41b4ce6eee464328c6ff9659b7e4c668ca20d4c91e"
 dependencies = [
  "libc",
  "memmap2 0.8.0",
+ "xkeysym",
+]
+
+[[package]]
+name = "xkbcommon"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d66ca9352cbd4eecbbc40871d8a11b4ac8107cfc528a6e14d7c19c69d0e1ac9"
+dependencies = [
+ "libc",
+ "memmap2 0.9.5",
  "xkeysym",
 ]
 

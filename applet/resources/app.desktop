@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Onedrive Sync Ui
+Comment=onedrive-sync applet for POP OS Cosmic 
+Type=Application
+Icon=open-onedrive-ok
+Exec=onedrive-sync-ui %F
+Terminal=false
+StartupNotify=true
+Categories=COSMIC
+Keywords=COSMIC
+X-CosmicApplet=true
+X-CosmicHoverPopup=Auto

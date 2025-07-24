@@ -194,7 +194,7 @@ impl SyncProcessor {
         );
 
         // Add to download queue if it should be downloaded
-        if self.should_download(&item.drive_item) {
+        if self.should_download(&item.drive_item).await {
             let local_file_path = local_path.join(item.drive_item.id.clone());
             download_queue_repo
                 .add_to_download_queue(&item.drive_item.id, &local_file_path)
@@ -233,7 +233,7 @@ impl SyncProcessor {
 
         // Check if etag changed and file should be downloaded
         if let Some(existing) = &existing_item {
-            if self.etag_changed(&existing.drive_item, &item.drive_item) && self.should_download(&item.drive_item) {
+            if self.etag_changed(&existing.drive_item, &item.drive_item) && self.should_download(&item.drive_item).await {
                 let local_file_path = local_path.join(item.drive_item.id.clone());
                 download_queue_repo
                     .add_to_download_queue(&item.drive_item.id, &local_file_path)
@@ -790,9 +790,9 @@ impl SyncProcessor {
     /// 2. If no download folders configured, download everything
     /// 3. Check if item's parent path matches any configured download folder
     /// 4. Path matching strips "/drive/root:/" prefix and uses exact folder matching
-    fn should_download(&self, item: &crate::onedrive_service::onedrive_models::DriveItem) -> bool {
+    async fn should_download(&self, item: &crate::onedrive_service::onedrive_models::DriveItem) -> bool {
         // Get configured download folders from settings
-        let download_folders = self.app_state.config().settings.download_folders.clone();
+        let download_folders = self.app_state.config().settings.read().await.download_folders.clone();
         
         // Skip folders - they are downloaded on demand when accessed
         if item.folder.is_some() {

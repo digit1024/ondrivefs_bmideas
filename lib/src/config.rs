@@ -2,6 +2,7 @@
 use anyhow::{Result, anyhow, Context};
 use log::warn;
 use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
 use std::fs;
 use std::path::PathBuf;
 
@@ -18,7 +19,7 @@ static SETTINGS_FILE_NAME: &str = "settings.json";
 
 
 pub struct ProjectConfig {
-    pub settings: Settings,
+    pub settings: RwLock<Settings>,
     pub project_dirs: ProjectDirs,
     
 }
@@ -38,8 +39,10 @@ impl ProjectConfig {
         }
     
         let settings = Settings::new(&proj_dirs.config_dir().join(SETTINGS_FILE_NAME)).await?;
-        Ok(Self { settings, project_dirs: proj_dirs })
+        
+        Ok(Self { settings: RwLock::new(settings), project_dirs: proj_dirs })
     }
+    
     pub fn download_dir(&self) -> PathBuf { 
         self.project_dirs.data_dir().join("downloads")
     }

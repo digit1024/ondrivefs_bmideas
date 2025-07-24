@@ -79,6 +79,7 @@ impl AppState {
             scheduler,
         })
     }
+    
 
     /// Get a reference to the project configuration
     pub fn config(&self) -> &ProjectConfig {

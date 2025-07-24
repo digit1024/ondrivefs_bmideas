@@ -5,6 +5,7 @@ use zbus::interface;
 use log::{info, error, debug};
 
 use crate::persistency::sync_state_repository;
+use crate::file_manager::FileManager;
 
 pub struct ServiceImpl {
     app_state: Arc<crate::app_state::AppState>,
@@ -174,4 +175,83 @@ impl ServiceImpl {
         Ok(())
     }
     
+    /// List all sync folders
+    async fn list_sync_folders(&self) -> zbus::fdo::Result<Vec<String>> {
+        let folders = self.app_state.config().settings.read().await.download_folders.clone();
+        Ok(folders)
+    }
+
+    /// Add a sync folder (store in settings, queue files for download)
+    async fn add_sync_folder(&self, folder_path: String) -> zbus::fdo::Result<bool> {
+        let mut settings = self.app_state.config().settings.read().await.clone();
+        let normalized = folder_path.trim_start_matches('/').to_string();
+        if settings.download_folders.contains(&normalized) {
+            return Ok(false);
+        }
+        settings.download_folders.push(normalized.clone());
+        // Save settings
+        let config_path = self.app_state.config().project_dirs.config_dir().join("settings.json");
+        if let Err(e) = settings.save_to_file(&config_path) {
+            error!("Failed to save settings: {}", e);
+            return Ok(false);
+        }
+        let mut settings_guard = self.app_state.config().settings.write().await;
+        
+        settings_guard.download_folders.push(normalized.clone());
+        // Query files and queue for download
+        let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
+        let download_queue_repo = self.app_state.persistency().download_queue_repository();
+        let file_manager = self.app_state.file_manager();
+        match drive_item_with_fuse_repo.get_files_by_virtual_path_prefix(&normalized).await {
+            Ok(files) => {
+                for file in files {
+                    let local_path = file_manager.get_download_dir().join(&file.drive_item.id);
+                    let _ = download_queue_repo.add_to_download_queue(&file.drive_item.id, &local_path).await;
+                }
+            }
+            Err(e) => {
+                error!("Failed to query files for sync folder: {}", e);
+                // Not critical, just continue
+            }
+        }
+        Ok(true)
+    }
+
+    /// Remove a sync folder (remove from settings, delete downloaded files)
+    async fn remove_sync_folder(&self, folder_path: String) -> zbus::fdo::Result<bool> {
+        let mut settings = self.app_state.config().settings.read().await.clone();
+        let normalized = folder_path.trim_start_matches('/').to_string();
+        if !settings.download_folders.contains(&normalized) {
+            return Ok(false);
+        }
+        settings.download_folders.retain(|f| f != &normalized);
+        // Save settings
+        let config_path = self.app_state.config().project_dirs.config_dir().join("settings.json");
+        if let Err(e) = settings.save_to_file(&config_path) {
+            error!("Failed to save settings: {}", e);
+            return Ok(false);
+        }
+        //Update settings live 
+        let mut settings_guard = self.app_state.config().settings.write().await;
+        
+        settings_guard.download_folders.retain(|f| f != &normalized);
+
+        // Query files and delete from downloads
+        let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
+        let file_manager = self.app_state.file_manager();
+
+        match drive_item_with_fuse_repo.get_files_by_virtual_path_prefix(&normalized).await {
+            Ok(files) => {
+                for file in files {
+                    let local_path = file_manager.get_download_dir().join(&file.drive_item.id);
+                    let _ = file_manager.delete_file(&local_path).await;
+                }
+            }
+            Err(e) => {
+                error!("Failed to query files for sync folder: {}", e);
+                // Not critical, just continue
+            }
+        }
+        Ok(true)
+    }
 }

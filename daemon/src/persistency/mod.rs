@@ -3,7 +3,7 @@
 //! This module provides database functionality for storing OneDrive metadata,
 //! sync state, and other persistent data using SQLx with SQLite.
 
-pub mod drive_item_repository;
+
 pub mod drive_item_with_fuse_repository;
 pub mod sync_state_repository;
 pub mod download_queue_repository;
