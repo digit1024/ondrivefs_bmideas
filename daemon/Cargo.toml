@@ -7,7 +7,7 @@ version = "0.0.1"
 
 edition = "2024"
 [lints.rust]
-dead_code = "allow"
+
 unused_variables = "allow"
 unused_imports = "allow"
 async_fn_in_trait = "allow"
@@ -33,7 +33,7 @@ webbrowser = "1.0.5"
 tiny_http = "0.12"
 urlencoding = "2.1"
 env_logger = "0.10"
-
+fuser-async = "0.1.1"
 # Database dependencies
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid"] }
 chrono = { version = "0.4", features = ["serde"] }

@@ -1,5 +1,6 @@
 use crate::app_state::AppState;
-use crate::persistency::processing_item_repository::{ProcessingItem, ProcessingStatus, ChangeType, ChangeOperation, ValidationResult};
+use crate::persistency::drive_item_with_fuse_repository::DriveItemWithFuseRepository;
+use crate::persistency::processing_item_repository::{ChangeOperation, ChangeType, ProcessingItem, ProcessingItemRepository, ProcessingStatus, ValidationResult};
 use crate::sync::sync_strategy::SyncStrategy;
 use crate::sync::conflict_resolution::ConflictResolution;
 use std::sync::Arc;
@@ -10,23 +11,29 @@ use std::path::PathBuf;
 pub struct SyncProcessor {
     strategy: SyncStrategy,
     app_state: Arc<AppState>,
+    processing_repo: ProcessingItemRepository,
+    drive_item_with_fuse_repo: DriveItemWithFuseRepository,
 }
 
 impl SyncProcessor {
     pub fn new(app_state: Arc<AppState>) -> Self {
+        let processing_repo = app_state.persistency().processing_item_repository();
+        let drive_item_with_fuse_repo = app_state.persistency().drive_item_with_fuse_repository();
         Self {
             strategy: SyncStrategy::new(app_state.clone()),
             app_state,
+            processing_repo,
+            drive_item_with_fuse_repo,
         }
     }
 
     /// Process all items with priority: Remote first, then Local
     pub async fn process_all_items(&self) -> Result<()> {
-        let processing_repo = self.app_state.persistency().processing_item_repository();
+        
 
         // 1. Process Remote changes first
         debug!("🔄 Processing remote changes...");
-        let remote_items = processing_repo.get_unprocessed_items_by_change_type(&ChangeType::Remote).await?;
+        let remote_items = self.processing_repo.get_unprocessed_items_by_change_type(&ChangeType::Remote).await?;
         for item in remote_items {
             if let Err(e) = self.process_single_item(&item).await {
                 error!("❌ Failed to process remote item: {}", e);
@@ -37,7 +44,7 @@ impl SyncProcessor {
         debug!("🔄 Processing local changes...");
         loop {
             // Always fetch the next unprocessed local item
-            if let Some(item) = processing_repo.get_next_unprocessed_item_by_change_type(&ChangeType::Local).await? {
+            if let Some(item) = self.processing_repo.get_next_unprocessed_item_by_change_type(&ChangeType::Local).await? {
                 if let Err(e) = self.process_single_item(&item).await {
                     error!("❌ Failed to process local item: {}", e);
                 }
@@ -52,7 +59,6 @@ impl SyncProcessor {
 
     /// Process a single item with validation and conflict resolution
     async fn process_single_item(&self, item: &ProcessingItem) -> Result<()> {
-        let processing_repo = self.app_state.persistency().processing_item_repository();
         
         // Get the database ID for this item
         let db_id = item.id.ok_or_else(|| anyhow::anyhow!("ProcessingItem has no database ID"))?;
@@ -63,7 +69,7 @@ impl SyncProcessor {
         match validation_result {
             ValidationResult::Valid => {
                 // Mark as validated and ready for processing
-                processing_repo.update_status_by_id(db_id, &ProcessingStatus::Validated).await?;
+                self.processing_repo.update_status_by_id(db_id, &ProcessingStatus::Validated).await?;
                 
                 // Process the item based on its change type and operation
                 match item.change_type {
@@ -73,12 +79,12 @@ impl SyncProcessor {
             }
             ValidationResult::Invalid(errors) => {
                 // Mark as conflicted with error details
-                processing_repo.update_status_by_id(db_id, &ProcessingStatus::Conflicted).await?;
+                self.processing_repo.update_status_by_id(db_id, &ProcessingStatus::Conflicted).await?;
                 
                 let error_strings: Vec<String> = errors.iter()
                     .map(|e| e.human_readable())
                     .collect();
-                processing_repo.update_validation_errors_by_id(db_id, &error_strings).await?;
+                self.processing_repo.update_validation_errors_by_id(db_id, &error_strings).await?;
                 
                 // Log human-readable errors
                 for error in &errors {
@@ -103,13 +109,9 @@ impl SyncProcessor {
                     ConflictResolution::Skip => {
                         debug!("⏭️ Skipping item: {}", 
                               item.drive_item.name.as_deref().unwrap_or("unnamed"));
-                        processing_repo.update_status_by_id(db_id, &ProcessingStatus::Cancelled).await?;
+                        self.processing_repo.update_status_by_id(db_id, &ProcessingStatus::Cancelled).await?;
                     }
-                    ConflictResolution::Merge => {
-                        debug!("🔄 Merging item: {}", 
-                              item.drive_item.name.as_deref().unwrap_or("unnamed"));
-                        self.apply_merge_resolution(item).await?;
-                    }
+                    
                     ConflictResolution::Manual => {
                         // This should not happen with automatic resolution
                         warn!("⚠️ Manual resolution requested but not implemented");
@@ -142,6 +144,9 @@ impl SyncProcessor {
             ChangeOperation::Rename { .. } => {
                 self.handle_remote_rename(item).await?;
             }
+            ChangeOperation::NoChange => {
+                error!("⏭️ No change for item detected : {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
+            }
         }
         processing_repo.update_status_by_id(db_id, &ProcessingStatus::Done).await?;
         Ok(())
@@ -167,6 +172,9 @@ impl SyncProcessor {
             }
             ChangeOperation::Rename { .. } => {
                 self.handle_local_rename(item).await?;
+            }
+            ChangeOperation::NoChange => {
+                error!("⏭️ No change for item detecded from local: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
             }
         }
         processing_repo.update_status_by_id(db_id, &ProcessingStatus::Done).await?;
@@ -718,7 +726,11 @@ impl SyncProcessor {
 
     // Conflict resolution handlers
     async fn apply_remote_resolution(&self, item: &ProcessingItem) -> Result<()> {
-        // TODO: Implement remote resolution logic
+        if item.change_type == crate::persistency::processing_item_repository::ChangeType::Remote { 
+            //TODO: Implement remote resolution logic
+        }else{
+            //TODO: Implement local resolution logic
+        }
         Ok(())
     }
 

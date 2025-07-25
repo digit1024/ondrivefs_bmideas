@@ -13,9 +13,9 @@ pub trait ConflictResolver {
 pub enum ConflictResolution {
     UseRemote,     // Use remote version
     UseLocal,      // Use local version
-    Merge,         // Attempt to merge (for text files)
     Skip,          // Skip this item
     Manual,        // Wait for user decision
+
 }
 
 impl ConflictResolution {
@@ -23,7 +23,7 @@ impl ConflictResolution {
         match self {
             ConflictResolution::UseRemote => "use_remote",
             ConflictResolution::UseLocal => "use_local",
-            ConflictResolution::Merge => "merge",
+            
             ConflictResolution::Skip => "skip",
             ConflictResolution::Manual => "manual",
         }

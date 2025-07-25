@@ -76,6 +76,7 @@ pub enum ChangeOperation {
     Delete,
     Move { old_path: String, new_path: String },
     Rename { old_name: String, new_name: String },
+    NoChange,
 }
 
 impl ChangeOperation {
@@ -86,6 +87,7 @@ impl ChangeOperation {
             ChangeOperation::Delete => "delete",
             ChangeOperation::Move { .. } => "move",
             ChangeOperation::Rename { .. } => "rename",
+            ChangeOperation::NoChange => "no_change",
         }
     }
 
@@ -102,6 +104,7 @@ impl ChangeOperation {
                 old_name: String::new(), 
                 new_name: String::new() 
             }),
+            "no_change" => Some(ChangeOperation::NoChange),
             _ => None,
         }
     }
@@ -111,7 +114,7 @@ impl ChangeOperation {
 pub enum UserDecision {
     UseRemote,
     UseLocal,
-    Merge,
+    
     Skip,
     Rename { new_name: String },
 }
@@ -121,7 +124,7 @@ impl UserDecision {
         match self {
             UserDecision::UseRemote => "use_remote",
             UserDecision::UseLocal => "use_local",
-            UserDecision::Merge => "merge",
+            
             UserDecision::Skip => "skip",
             UserDecision::Rename { .. } => "rename",
         }
@@ -131,7 +134,7 @@ impl UserDecision {
         match s {
             "use_remote" => Some(UserDecision::UseRemote),
             "use_local" => Some(UserDecision::UseLocal),
-            "merge" => Some(UserDecision::Merge),
+            
             "skip" => Some(UserDecision::Skip),
             "rename" => Some(UserDecision::Rename { 
                 new_name: String::new() 
@@ -946,5 +949,30 @@ impl ProcessingItemRepository {
             validation_errors,
             user_decision,
         })
+    }
+    pub async fn get_pending_processing_item_by_drive_item_id_and_change_type(&self, drive_item_id: &str, change_type: &ChangeType) -> Result<Option<ProcessingItem>> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
+                   mime_type, download_url, is_deleted, parent_id, parent_path,
+                   status, local_path, error_message, last_status_update, retry_count, priority,
+                   change_type, change_operation, conflict_resolution, validation_errors, user_decision
+            FROM processing_items 
+            WHERE drive_item_id = ? AND change_type = ? AND status IN ('new', 'validated')
+            AND ( parent_path  NOT LIKE '/root/.%' OR (name ='root' and parent_path is null))
+            ORDER BY id ASC LIMIT 1
+            "#,
+        )
+        .bind(drive_item_id)
+        .bind(change_type.as_str())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some(row) = row {
+            let processing_item = self.row_to_processing_item(row).await?;
+            Ok(Some(processing_item))
+        } else {
+            Ok(None)
+        }
     }
 } 
