@@ -430,7 +430,7 @@ impl DriveItemWithFuseRepository {
         sqlx::query(
             r#"
             UPDATE drive_items_with_fuse 
-            SET parent_ino = ?, virtual_path = ?, , 
+            SET parent_ino = ?, virtual_path = ?, 
                 file_source = ?, sync_status = ?, updated_at = CURRENT_TIMESTAMP
             WHERE onedrive_id = ?
             "#,
@@ -640,8 +640,6 @@ impl DriveItemWithFuseRepository {
         // Extract Fuse metadata fields
         let parent_ino: Option<i64> = row.try_get("parent_ino")?;
         let virtual_path: Option<String> = row.try_get("virtual_path")?;
-        let display_path: Option<String> = row.try_get("display_path")?;
-        let local_path: Option<String> = row.try_get("local_path")?;
         let file_source_str: Option<String> = row.try_get("file_source")?;
         let sync_status: Option<String> = row.try_get("sync_status")?;
 
