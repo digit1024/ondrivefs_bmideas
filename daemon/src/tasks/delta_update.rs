@@ -173,20 +173,21 @@ impl SyncCycle {
     /// Check if etag changed (indicates file modification)
     fn some_attribute_changed(&self, existing: &DriveItem, new: &DriveItem) -> bool {
         
-        if 
-        existing.etag != new.etag ||
-        existing.name != new.name ||
-        existing.size != new.size ||
-        existing.last_modified != new.last_modified ||
-        existing.created_date != new.created_date
+        let etag_changed = existing.etag != new.etag;
+        let name_changed = existing.name != new.name;
+        let size_changed = existing.size != new.size;
+        let last_modified_changed = existing.last_modified != new.last_modified;
+        let created_date_changed = existing.created_date != new.created_date;
         
-        {
+        if etag_changed || name_changed || size_changed || last_modified_changed || created_date_changed {
+            debug!("🔄 Item changed: {} (etag: {}, name: {}, size: {}, last_modified: {}, created_date: {})", 
+                   new.name.as_deref().unwrap_or("unnamed"),
+                   etag_changed, name_changed, size_changed, last_modified_changed, created_date_changed);
             return true;
-        }else{
+        } else {
+            debug!("✅ Item unchanged: {} (etag matches)", new.name.as_deref().unwrap_or("unnamed"));
             return false;
         }
-
-        
     }
 
 
@@ -303,12 +304,20 @@ impl SyncCycle {
         let items = self.get_delta_changes().await?;
         info!("📊 Retrieved {} delta items", items.len());
         
-        // Create ProcessingItems for remote changes
+        // Create ProcessingItems for remote changes (skip items with no actual changes)
         
         for item in &items {
             let change_operation = self.detect_change_operation(item);
+            
+            // Skip creating processing items for items that haven't actually changed
+            if change_operation == crate::persistency::processing_item_repository::ChangeOperation::NoChange {
+                debug!("⏭️ Skipping item with no changes: {} ({})", 
+                       item.name.as_deref().unwrap_or("unnamed"), item.id);
+                continue;
+            }
+            
             let processing_item = ProcessingItem::new_remote(item.clone(), change_operation);
-            let _id =self.processing_repo.store_processing_item(&processing_item).await?;
+            let _id = self.processing_repo.store_processing_item(&processing_item).await?;
         }
 
         // Process all items using the new two-way sync system
@@ -344,7 +353,8 @@ impl SyncCycle {
                 } else if self.some_attribute_changed(&existing.drive_item, item) {
                     crate::persistency::processing_item_repository::ChangeOperation::Update
                 } else {
-                    crate::persistency::processing_item_repository::ChangeOperation::Update
+                    // No attributes changed, including etag - this means no actual change occurred
+                    crate::persistency::processing_item_repository::ChangeOperation::NoChange
                 }
             }
             Ok(None) => {
