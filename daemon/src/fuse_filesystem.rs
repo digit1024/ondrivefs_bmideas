@@ -17,11 +17,12 @@ use tokio::runtime::Handle;
 use std::path::PathBuf;
 use sqlx::Pool;
 const FUSE_CAP_READDIRPLUS: u32 = 0x00000010;
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 
 /// OneDrive FUSE filesystem implementation using DriveItemWithFuse
 pub struct OneDriveFuse {
     drive_item_with_fuse_repo: Arc<DriveItemWithFuseRepository>,
-    download_queue_repo: Arc<DownloadQueueRepository>,
     file_manager: Arc<DefaultFileManager>,
     app_state: Arc<crate::app_state::AppState>,
 }
@@ -45,7 +46,6 @@ impl OneDriveFuse {
         
         Ok(Self {
             drive_item_with_fuse_repo: Arc::new(drive_item_with_fuse_repo),
-            download_queue_repo: Arc::new(download_queue_repo),
             file_manager,
             app_state,
         })
@@ -104,26 +104,24 @@ impl OneDriveFuse {
 
     /// Get DriveItemWithFuse by inode
     async fn get_item_by_ino(&self, ino: u64) -> Result<Option<DriveItemWithFuse>> {
-        if ino == 1 {
-            // Special handling for root inode
-            let root_item = sync_await(self.drive_item_with_fuse_repo.get_drive_item_with_fuse_by_virtual_ino(1))?;
-            if root_item.is_some() {
-                Ok(root_item)
+        let item = sync_await(self.drive_item_with_fuse_repo.get_drive_item_with_fuse_by_virtual_ino(ino))?;
+        if item.is_some() {
+            Ok(item)
         } else {
-                // Return temporary stub for root
+            if ino == 1 {
                 Ok(Some(self.create_temp_root_stub()))
+            } else {
+                Ok(None)
             }
-        } else {
-            sync_await(self.drive_item_with_fuse_repo.get_drive_item_with_fuse_by_virtual_ino(ino))
         }
+        
+        
     }
 
 
 
     /// Get DriveItemWithFuse by path
     async fn get_item_by_path(&self, path: &str) -> Result<Option<DriveItemWithFuse>> {
-        // For now, we'll search by virtual_path
-        // In a production system, you might want to add a path index
         let item = sync_await(self.drive_item_with_fuse_repo.get_drive_item_with_fuse_by_virtual_path(path));
         item
         
@@ -136,23 +134,11 @@ impl OneDriveFuse {
 
     /// Check if file exists locally with upload folder priority
     fn file_exists_locally(&self, onedrive_id: &str) -> Option<PathBuf> {
-        // Priority 1: Check upload folder first
-        let upload_path = self.file_manager.get_upload_dir().join(onedrive_id);
-        if upload_path.exists() && upload_path.is_file() {
-            return Some(upload_path);
-        }
-        
-        // Priority 2: Check download folder
-        let download_path = self.file_manager.get_download_dir().join(onedrive_id);
-        if download_path.exists() && download_path.is_file() {
-            return Some(download_path);
-        }
-        
-            None
-        }
+        self.file_manager.get_local_path_if_file_exists(onedrive_id)
+    }
 
-    /// Read data from a local file with upload folder priority
-    fn read_local_file(&self, item: &DriveItemWithFuse, offset: i64, size: u32) -> Result<Vec<u8>> {
+    /// Read data from a local staging folder
+    fn read_local_file(&self, item: &DriveItemWithFuse, offset: u64, size: u32) -> Result<Vec<u8>> {
         let onedrive_id = item.id();
         
         // Get local file path with upload folder priority
@@ -160,17 +146,12 @@ impl OneDriveFuse {
             .ok_or_else(|| anyhow::anyhow!("Local file not found for OneDrive ID: {}", onedrive_id))?;
 
         // Read file data
-        let file_data = std::fs::read(&local_path)?;
-        
-        // Handle offset and size
-        let start = offset as usize;
-        let end = std::cmp::min(start + size as usize, file_data.len());
-        
-        if start >= file_data.len() {
-            return Ok(vec![]);
-        }
-        
-        Ok(file_data[start..end].to_vec())
+        let mut file = std::fs::File::open(&local_path)?;
+        file.seek(std::io::SeekFrom::Start(offset))?;
+        let mut buffer = vec![0u8; size as usize];
+        let bytes_read = file.read(&mut buffer)?;
+        buffer.truncate(bytes_read);
+        Ok(buffer)
     }
 
     /// Generate placeholder content for remote files with .onedrivedownload extension
@@ -257,7 +238,7 @@ impl OneDriveFuse {
     }
 
     /// Apply local change directly to DriveItemWithFuse table
-    async fn apply_local_change(&self, change_type: &str, parent_ino: u64, name: &str, is_folder: bool) -> Result<u64> {
+    async fn apply_local_change_to_db_repository(&self, change_type: &str, parent_ino: u64, name: &str, is_folder: bool) -> Result<u64> {
         let temporary_id = self.generate_temporary_id();
         
         // Get parent item to extract parent_id and parent_path
@@ -337,7 +318,7 @@ impl OneDriveFuse {
     }
 
     /// Update item as modified (for write operations)
-    async fn mark_item_as_modified(&self, ino: u64) -> Result<()> {
+    async fn mark_db_item_as_modified(&self, ino: u64) -> Result<()> {
         if let Some(mut item) = sync_await(self.get_item_by_ino(ino))? {
             item.set_file_source(FileSource::Local);
             item.set_sync_status("pending".to_string());
@@ -361,6 +342,9 @@ impl OneDriveFuse {
             
             // Check if a ProcessingItem already exists for this OneDrive ID
             let onedrive_id = item.id();
+            
+             
+
             if let Ok(Some(existing_processing_item)) = sync_await(processing_repo.get_processing_item(onedrive_id)) {
                 // Check if the existing ProcessingItem is still in a state where we can update it
                 match existing_processing_item.status {
@@ -474,50 +458,24 @@ impl fuser::Filesystem for OneDriveFuse {
     ) {
         debug!("READDIR: ino={}, offset={}", ino, offset);
 
-        // Handle root directory special case
-        if ino == 1 {
-            let onedot_entry = (1, fuser::FileType::Directory, ".".to_string());
-            let twodot_entry = (1, fuser::FileType::Directory, "..".to_string());
-            let mut entries: Vec<(u64, fuser::FileType, String)> = vec![onedot_entry, twodot_entry];
+        
+     
 
-            // Fetch all children of root
-            if let Ok(children) = sync_await(self.get_children_by_parent_ino(ino)) {
-                for child in children {
-                    let file_type = if child.is_folder() {
-                        fuser::FileType::Directory
-                    } else {
-                        fuser::FileType::RegularFile
-                    };
-                    let name = if child.is_folder() {
-                        child.name().unwrap_or_default().to_string()
-                    } else {
-                        let base_name = child.name().unwrap_or_default();
-                        if self.file_exists_locally(child.id()).is_some() {
-                            base_name.to_string()
-                        } else {
-                            format!("{}.onedrivedownload", base_name)
-                        }
-                    };
-                    entries.push((child.virtual_ino().unwrap_or(0), file_type, name));
-                }
-            }
-            for (i, (ino, kind, name)) in entries.into_iter().enumerate().skip(offset as usize) {
-                if reply.add(ino, (i + 1) as i64, kind, &name) {
-                    break;
-                }
-            }
-            reply.ok();
-            return;
-        }
 
-        // Handle regular directories
+        // We need to get the item anyway to create an entry for ..
         if let Ok(Some(parent_item)) = sync_await(self.get_item_by_ino(ino)) {
-            if !parent_item.is_folder() {
+            if ino != 1 &&!parent_item.is_folder()  {
                 reply.error(libc::ENOTDIR);
                 return;
             }
             let onedot_entry = (ino, fuser::FileType::Directory, ".".to_string());
-            let twodot_entry = (parent_item.parent_ino().unwrap_or(1), fuser::FileType::Directory, "..".to_string());
+            let twodot_entry = if ino == 1 {
+                (1, fuser::FileType::Directory, "..".to_string())
+            }else{
+                (parent_item.parent_ino().unwrap_or(1), fuser::FileType::Directory, "..".to_string())
+            };
+            
+            
             let mut entries: Vec<(u64, fuser::FileType, String)> = vec![onedot_entry, twodot_entry];
             if let Ok(children) = sync_await(self.get_children_by_parent_ino(ino)) {
                 for child in children {
@@ -572,14 +530,14 @@ impl fuser::Filesystem for OneDriveFuse {
             // Check if file exists locally with upload folder priority
             if let Some(_) = self.file_exists_locally(item.id()) {
                 // File exists locally - read it
-                match self.read_local_file(&item, offset, size) {
+                match self.read_local_file(&item, offset as u64, size) {
                     Ok(data) => reply.data(&data),
                     Err(e) => {
                         warn!("Failed to read local file: {}", e);
                         reply.error(libc::EIO);
                     }
                 }
-                        } else {
+                } else {
                 // File doesn't exist locally - return placeholder with .onedrivedownload extension
                 let placeholder_content = self.generate_placeholder_content(&item);
             let start = offset as usize;
@@ -614,7 +572,12 @@ impl fuser::Filesystem for OneDriveFuse {
             let onedrive_id = item.id();
             
             // Always write to upload folder (priority 1)
-            let upload_path = self.file_manager.get_upload_dir().join(onedrive_id);
+            let local_path = self.file_manager.get_local_path_if_file_exists(onedrive_id);
+            if local_path.is_none() {
+                reply.error(libc::ENOENT);
+                return;
+            }
+            let upload_path = local_path.unwrap();
             
             // Write data to uploads file
             let write_result = if offset == 0 {
@@ -645,7 +608,7 @@ impl fuser::Filesystem for OneDriveFuse {
             }
 
             // Mark item as modified
-            if let Err(e) = sync_await(self.mark_item_as_modified(ino)) {
+            if let Err(e) = sync_await(self.mark_db_item_as_modified(ino)) {
                 warn!("Failed to mark item as modified: {}", e);
             }
 
@@ -668,7 +631,7 @@ impl fuser::Filesystem for OneDriveFuse {
         let name_str = name.to_string_lossy();
         info!("CREATE: parent={}, name={}", parent, name_str);
 
-        match sync_await(self.apply_local_change("create_file", parent, &name_str, false)) {
+        match sync_await(self.apply_local_change_to_db_repository("create_file", parent, &name_str, false)) {
             Ok(inode) => {
                 let attr = self.create_default_attr(inode, false);
                 reply.created(&Duration::from_secs(1), &attr, 0, 0, 0);
@@ -692,7 +655,7 @@ impl fuser::Filesystem for OneDriveFuse {
         let name_str = name.to_string_lossy();
         info!("MKDIR: parent={}, name={}", parent, name_str);
 
-        match sync_await(self.apply_local_change("create_folder", parent, &name_str, true)) {
+        match sync_await(self.apply_local_change_to_db_repository("create_folder", parent, &name_str, true)) {
             Ok(inode) => {
                 let attr = self.create_default_attr(inode, true);
                 reply.entry(&Duration::from_secs(1), &attr, 0);
@@ -967,6 +930,14 @@ impl fuser::Filesystem for OneDriveFuse {
             // Mark as modified
             item.set_file_source(FileSource::Local);
             item.set_sync_status("pending".to_string());
+            // Update parent ino
+            item.set_parent_ino(newparent);
+            // Update paretn id ( onedriveId of parent)
+            let new_parent_item = sync_await(self.get_item_by_ino(newparent)).unwrap_or(None);
+            if let Some(new_parent_item) = new_parent_item {
+                item.set_parent_id(new_parent_item.drive_item.id);
+            }
+            
 
             // Preserve the existing local_path if it exists
             let existing_local_path = item.local_path().map(|p| p.to_string());
@@ -1051,7 +1022,7 @@ impl fuser::Filesystem for OneDriveFuse {
         if let Ok(Some(item)) = sync_await(self.get_item_by_ino(ino)) {
             // Mark as modified if any attributes changed
             if size.is_some() || mtime.is_some() {
-                if let Err(e) = sync_await(self.mark_item_as_modified(ino)) {
+                if let Err(e) = sync_await(self.mark_db_item_as_modified(ino)) {
                     warn!("Failed to mark item as modified: {}", e);
                 }
             }
@@ -1096,45 +1067,7 @@ impl fuser::Filesystem for OneDriveFuse {
     ) {
         warn!("READDIRPLUS: ino={}, offset={}", ino, offset);
 
-        // Handle root directory special case
-        if ino == 1 {
-            let onedot_entry = (1, fuser::FileType::Directory, ".".to_string());
-            let twodot_entry = (1, fuser::FileType::Directory, "..".to_string());
-            let mut entries: Vec<(u64, fuser::FileType, String)> = vec![onedot_entry, twodot_entry];
-
-            if let Ok(children) = sync_await(self.get_children_by_parent_ino(ino)) {
-                for child in children {
-                    let file_type = if child.is_folder() {
-                        fuser::FileType::Directory
-                    } else {
-                        fuser::FileType::RegularFile
-                    };
-                    let name = if child.is_folder() {
-                        child.name().unwrap_or_default().to_string()
-                    } else {
-                        let base_name = child.name().unwrap_or_default();
-                        if self.file_exists_locally(child.id()).is_some() {
-                            base_name.to_string()
-                        } else {
-                            format!("{}.onedrivedownload", base_name)
-                        }
-                    };
-                    entries.push((child.virtual_ino().unwrap_or(0), file_type, name));
-                }
-            }
-            for (i, (ino, kind, name)) in entries.iter().enumerate().skip(offset as usize) {
-                let attr = if let Ok(Some(item)) = sync_await(self.get_item_by_ino(*ino)) {
-                    self.item_to_file_attr(&item)
-                } else {
-                    self.create_default_attr(*ino, kind == &fuser::FileType::Directory)
-                };
-                if reply.add(*ino, (i + 1) as i64, &name, &Duration::from_secs(3), &attr, 0) {
-                    break;
-                }
-            }
-            reply.ok();
-            return;
-        }
+  
 
         // Handle regular directories
         if let Ok(Some(parent_item)) = sync_await(self.get_item_by_ino(ino)) {
@@ -1143,7 +1076,11 @@ impl fuser::Filesystem for OneDriveFuse {
                 return;
             }
             let onedot_entry = (ino, fuser::FileType::Directory, ".".to_string());
-            let twodot_entry = (parent_item.parent_ino().unwrap_or(1), fuser::FileType::Directory, "..".to_string());
+            let twodot_entry = if ino == 1 {
+                (1, fuser::FileType::Directory, "..".to_string())
+            }else{
+                (parent_item.parent_ino().unwrap_or(1), fuser::FileType::Directory, "..".to_string())
+            };
             let mut entries: Vec<(u64, fuser::FileType, String)> = vec![onedot_entry, twodot_entry];
             if let Ok(children) = sync_await(self.get_children_by_parent_ino(ino)) {
                 for child in children {

@@ -380,8 +380,6 @@ impl SyncProcessor {
     async fn handle_local_create(&self, item: &ProcessingItem) -> Result<()> {
         debug!("📤 Processing local create: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
         
-        let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
-        let processing_repo = self.app_state.persistency().processing_item_repository();
         
         // Get local path from the processing item
         let local_path = if let Some(local_path) = &item.local_path {
@@ -405,14 +403,14 @@ impl SyncProcessor {
                     let real_onedrive_id = &result.onedrive_id;
                     
                     // Update DriveItemWithFuse
-                    drive_item_with_fuse_repo.update_onedrive_id(temporary_id, real_onedrive_id).await?;
+                    self.drive_item_with_fuse_repo.update_onedrive_id(temporary_id, real_onedrive_id).await?;
                     
                     // Update ProcessingItems
-                    processing_repo.update_onedrive_id(temporary_id, real_onedrive_id).await?;
+                    self.processing_repo.update_onedrive_id(temporary_id, real_onedrive_id).await?;
                     
                     // Update parent IDs for any children that reference this temporary ID
-                    drive_item_with_fuse_repo.update_parent_id_for_children(temporary_id, real_onedrive_id).await?;
-                    processing_repo.update_parent_id_for_children(temporary_id, real_onedrive_id).await?;
+                    self.drive_item_with_fuse_repo.update_parent_id_for_children(temporary_id, real_onedrive_id).await?;
+                    self.processing_repo.update_parent_id_for_children(temporary_id, real_onedrive_id).await?;
                     
                     debug!("🔄 Updated database references: {} -> {}", temporary_id, real_onedrive_id);
                     
@@ -421,12 +419,12 @@ impl SyncProcessor {
                         Ok(full_drive_item) => {
                             // Setup FUSE metadata for the created folder with real OneDrive data
                     let local_downloads_path = self.app_state.config().project_dirs.data_dir().join("downloads");
-                            let _inode = self.setup_fuse_metadata(&full_drive_item, &drive_item_with_fuse_repo, &local_downloads_path).await?;
+                            let _inode = self.setup_fuse_metadata(&full_drive_item, &self.drive_item_with_fuse_repo, &local_downloads_path).await?;
                             
                             // Update the processing item with the real OneDrive data
                             let mut updated_processing_item = item.clone();
                             updated_processing_item.drive_item = full_drive_item;
-                            processing_repo.update_processing_item(&updated_processing_item).await?;
+                            self.processing_repo.update_processing_item(&updated_processing_item).await?;
                             
                             debug!("✅ Updated processing item with real OneDrive data for folder: {}", folder_name);
                         }
@@ -449,15 +447,8 @@ impl SyncProcessor {
             let parent_id = if let Some(parent_ref) = &item.drive_item.parent_reference {
                 parent_ref.id.clone()
             } else {
-                // If no parent reference, use root folder ID
-                // We need to get the root folder ID from OneDrive
-                match self.app_state.onedrive_client.get_item_by_path("/").await {
-                    Ok(root_item) => root_item.id,
-                    Err(e) => {
-                        error!("❌ Failed to get root folder ID: {}", e);
-                        return Err(e);
-                    }
-                }
+                return Err(anyhow::anyhow!("No parent reference specified for local create operation"));
+          
             };
             
             // Read file data from local path
@@ -474,14 +465,14 @@ impl SyncProcessor {
                                 let real_onedrive_id = &result.onedrive_id;
                                 
                                 // Update DriveItemWithFuse
-                                drive_item_with_fuse_repo.update_onedrive_id(temporary_id, real_onedrive_id).await?;
+                                self.drive_item_with_fuse_repo.update_onedrive_id(temporary_id, real_onedrive_id).await?;
                                 
                                 // Update ProcessingItems
-                                processing_repo.update_onedrive_id(temporary_id, real_onedrive_id).await?;
+                                self.processing_repo.update_onedrive_id(temporary_id, real_onedrive_id).await?;
                                 
                                 // Update parent IDs for any children that reference this temporary ID
-                                drive_item_with_fuse_repo.update_parent_id_for_children(temporary_id, real_onedrive_id).await?;
-                                processing_repo.update_parent_id_for_children(temporary_id, real_onedrive_id).await?;
+                                self.drive_item_with_fuse_repo.update_parent_id_for_children(temporary_id, real_onedrive_id).await?;
+                                self.processing_repo.update_parent_id_for_children(temporary_id, real_onedrive_id).await?;
                                 
                                 debug!("🔄 Updated database references: {} -> {}", temporary_id, real_onedrive_id);
                                 
@@ -495,12 +486,12 @@ impl SyncProcessor {
                                         
                                         // Setup FUSE metadata for the uploaded file with real OneDrive data
                                 let local_downloads_path = self.app_state.config().project_dirs.data_dir().join("downloads");
-                                        let _inode = self.setup_fuse_metadata(&full_drive_item, &drive_item_with_fuse_repo, &local_downloads_path).await?;
+                                        let _inode = self.setup_fuse_metadata(&full_drive_item, &self.drive_item_with_fuse_repo, &local_downloads_path).await?;
                                         
                                         // Update the processing item with the real OneDrive data
                                         let mut updated_processing_item = item.clone();
                                         updated_processing_item.drive_item = full_drive_item;
-                                        processing_repo.update_processing_item(&updated_processing_item).await?;
+                                        self.processing_repo.update_processing_item(&updated_processing_item).await?;
                                         
                                         debug!("✅ Updated processing item with real OneDrive data for file: {}", file_name);
                                     }
@@ -532,8 +523,6 @@ impl SyncProcessor {
     async fn handle_local_update(&self, item: &ProcessingItem) -> Result<()> {
         debug!("📤 Processing local update: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
         
-        let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
-        let processing_repo = self.app_state.persistency().processing_item_repository();
         
         // Get local path from the processing item
         let local_path = if let Some(local_path) = &item.local_path {
@@ -546,7 +535,7 @@ impl SyncProcessor {
         if item.drive_item.folder.is_some() {
             // For folders, just update metadata (no content to update)
             let local_downloads_path = self.app_state.config().project_dirs.data_dir().join("downloads");
-            let _inode = self.setup_fuse_metadata(&item.drive_item, &drive_item_with_fuse_repo, &local_downloads_path).await?;
+            let _inode = self.setup_fuse_metadata(&item.drive_item, &self.drive_item_with_fuse_repo, &local_downloads_path).await?;
             debug!("📁 Updated folder metadata: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
         } else {
             // For files, read the file and update on OneDrive
@@ -582,12 +571,12 @@ impl SyncProcessor {
                                 
                                         // Setup FUSE metadata for the updated file with real OneDrive data
                                 let local_downloads_path = self.app_state.config().project_dirs.data_dir().join("downloads");
-                                        let _inode = self.setup_fuse_metadata(&full_drive_item, &drive_item_with_fuse_repo, &local_downloads_path).await?;
+                                        let _inode = self.setup_fuse_metadata(&full_drive_item, &self.drive_item_with_fuse_repo, &local_downloads_path).await?;
                                         
                                         // Update the processing item with the real OneDrive data
                                         let mut updated_processing_item = item.clone();
                                         updated_processing_item.drive_item = full_drive_item;
-                                        processing_repo.update_processing_item(&updated_processing_item).await?;
+                                        self.processing_repo.update_processing_item(&updated_processing_item).await?;
                                         
                                         debug!("✅ Updated processing item with real OneDrive data for file: {}", 
                                               item.drive_item.name.as_deref().unwrap_or("unnamed"));

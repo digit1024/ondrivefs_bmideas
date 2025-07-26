@@ -230,6 +230,9 @@ impl SyncCycle {
                             5000,
                         ).await;
                     }
+                    // we should move the file to the local folder
+                    self.app_state.file_manager.move_downloaded_file_to_local_folder(drive_item_id.as_str()).await?;
+                    
                 }
                 Err(e) => {
                     download_queue_repo

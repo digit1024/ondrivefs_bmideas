@@ -1,5 +1,6 @@
 use crate::onedrive_service::onedrive_models::DownloadResult;
 use anyhow::{Context, Result};
+use libc::LOCK_NB;
 use log::{info, warn, error};
 use std::path::{Path, PathBuf};
 use tokio::fs;
@@ -40,21 +41,13 @@ pub trait FileManager {
     fn get_download_dir(&self) -> PathBuf;
     /// Get the uploads directory
     fn get_upload_dir(&self) -> PathBuf;
+    /// Get the uploads directory
+    fn get_local_dir(&self) -> PathBuf;
     
     
 }
 
-/// Trait for synchronous file operations (dyn compatible)
-pub trait SyncFileManager {
-    /// Check if a file exists
-    fn file_exists(&self, path: &Path) -> bool;
-    
-    /// Convert virtual path to downloaded file path
-    fn file_exists_in_download(&self, onedirive_id: &str) -> bool;
-    fn file_exists_in_upload(&self, onedrive_id: &str) -> bool;
-    fn file_exists_in_locally(&self, onedrive_id: &str) -> bool;// check both
 
-}
 
 /// Default implementation of FileManager
 #[derive(Clone)]
@@ -71,12 +64,6 @@ impl DefaultFileManager {
         Ok(Self { config })
     }
 
-    /// Get the user's home directory
-    fn get_home_directory() -> Result<PathBuf> {
-        std::env::var("HOME")
-            .map(PathBuf::from)
-            .map_err(|_| anyhow::anyhow!("HOME environment variable not set"))
-    }
 
     /// Ensure a directory exists, creating it if necessary
     async fn ensure_directory_exists(path: &Path) -> Result<()> {
@@ -101,11 +88,30 @@ impl DefaultFileManager {
         let upload_path = self.config.upload_dir().join(onedrive_id);
         upload_path.exists() && upload_path.is_file()
     }
-    pub fn file_exists_in_locally(&self, onedrive_id: &str) -> bool {
-        let download_path = self.config.download_dir().join(onedrive_id);
-        let upload_path = self.config.upload_dir().join(onedrive_id);
-        download_path.exists() && download_path.is_file() || upload_path.exists() && upload_path.is_file()
+    pub fn get_local_path_if_file_exists(&self, onedrive_id: &str) -> Option<PathBuf> {
+        let local_path = self.config.local_dir().join(onedrive_id);
+        if local_path.exists() && local_path.is_file() {
+            return Some(local_path);
+        }
+        None
     }
+    pub async fn move_downloaded_file_to_local_folder(&self, onedrive_id: &str) -> Result<()> {
+        let download = self.get_download_dir().join(onedrive_id);
+        let local = self.get_local_dir().join(onedrive_id);
+        fs::rename(download, local).await?;
+        Ok(())
+    }
+    pub async fn create_a_snapshot_for_upload(&self, onedrive_id: &str) -> Result<()> {
+        
+        let local = self.get_local_dir().join(onedrive_id);
+        let upload = self.get_upload_dir().join(onedrive_id);
+        let local_snapshot = local.clone().with_extension("upload");
+        fs::copy(local, local_snapshot.clone()).await?;
+        // rename the local file to the upload file
+        fs::rename(local_snapshot, upload).await?;
+        Ok(())
+    }
+    
 }
 
 impl FileManager for DefaultFileManager {
@@ -178,27 +184,9 @@ impl FileManager for DefaultFileManager {
     fn get_upload_dir(&self) -> PathBuf {
         self.config.upload_dir()
     }
-
-    
+    fn get_local_dir(&self) -> PathBuf {    
+        self.config.local_dir()
+    }
 }
 
-impl SyncFileManager for DefaultFileManager {
-    fn file_exists(&self, path: &Path) -> bool {
-        path.exists() && path.is_file()
-    }
-    fn file_exists_in_download(&self, onedrive_id: &str) -> bool {
-        let download_path = self.config.download_dir().join(onedrive_id);
-        download_path.exists() && download_path.is_file()
-    }
-    fn file_exists_in_upload(&self, onedrive_id: &str) -> bool {
-        let upload_path = self.config.upload_dir().join(onedrive_id);
-        upload_path.exists() && upload_path.is_file()
-    }
-    fn file_exists_in_locally(&self, onedrive_id: &str) -> bool {
-        let download_path = self.config.download_dir().join(onedrive_id);
-        let upload_path = self.config.upload_dir().join(onedrive_id);
-        download_path.exists() && download_path.is_file() || upload_path.exists() && upload_path.is_file()
-    }
-    
-   
-}
+

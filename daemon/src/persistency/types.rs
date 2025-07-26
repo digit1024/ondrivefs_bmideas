@@ -179,6 +179,13 @@ impl DriveItemWithFuse {
     pub fn fuse_metadata_mut(&mut self) -> &mut FuseMetadata {
         &mut self.fuse_metadata
     }
+    
+    pub(crate) fn set_parent_id(&mut self, id: String) {
+        self.drive_item_mut().parent_reference = Some(crate::onedrive_service::onedrive_models::ParentReference {
+            id: id,
+            path: None,
+        });
+    }
 }
 
 // Delegate common accessors to DriveItem

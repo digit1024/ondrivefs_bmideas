@@ -31,8 +31,9 @@ impl ProjectConfig {
         .expect("Failed to get project directories");
         let d   = proj_dirs.data_dir().join("downloads");
         let u   = proj_dirs.data_dir().join("uploads");
+        let l   = proj_dirs.data_dir().join("local");
     
-        for x in [proj_dirs.config_dir(), proj_dirs.cache_dir(), proj_dirs.data_dir(), &d.to_path_buf(), &u.to_path_buf()] {
+        for x in [proj_dirs.config_dir(), proj_dirs.cache_dir(), proj_dirs.data_dir(), &d.to_path_buf(), &u.to_path_buf() , &l.to_path_buf()] {
             if !x.exists() {
                 fs::create_dir_all(x).context("Failed to create config directory")?;
             }
@@ -45,6 +46,10 @@ impl ProjectConfig {
     
     pub fn download_dir(&self) -> PathBuf { 
         self.project_dirs.data_dir().join("downloads")
+    }
+
+    pub fn local_dir(&self) -> PathBuf { 
+        self.project_dirs.data_dir().join("local")
     }
     pub fn upload_dir(&self) -> PathBuf {
         self.project_dirs.data_dir().join("uploads")
