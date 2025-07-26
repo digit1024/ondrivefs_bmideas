@@ -958,4 +958,65 @@ impl ProcessingItemRepository {
             Ok(None)
         }
     }
+
+    /// Get the latest local processing item for a drive item that can be updated (for squashing FUSE writes)
+    pub async fn get_latest_updatable_local_processing_item(&self, drive_item_id: &str) -> Result<Option<ProcessingItem>> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
+                   mime_type, download_url, is_deleted, parent_id, parent_path,
+                   status, error_message, last_status_update, retry_count, priority,
+                   change_type, change_operation, conflict_resolution, validation_errors, user_decision
+            FROM processing_items 
+            WHERE drive_item_id = ? 
+            AND change_type = 'local' 
+            AND status IN ('new', 'validated')
+            AND change_operation = 'update'
+            ORDER BY id DESC LIMIT 1
+            "#,
+        )
+        .bind(drive_item_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some(row) = row {
+            let processing_item = self.row_to_processing_item(row).await?;
+            Ok(Some(processing_item))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Update a processing item with new drive item data (used for squashing FUSE writes)
+    pub async fn update_processing_item_drive_data(&self, db_id: i64, updated_drive_item: &DriveItem) -> Result<()> {
+        let parent_id = updated_drive_item.parent_reference.as_ref().map(|p| p.id.clone());
+        let parent_path = updated_drive_item.parent_reference.as_ref().and_then(|p| p.path.clone());
+
+        sqlx::query(
+            r#"
+            UPDATE processing_items SET
+                name = ?, etag = ?, last_modified = ?, created_date = ?, size = ?, is_folder = ?,
+                mime_type = ?, download_url = ?, is_deleted = ?, parent_id = ?, parent_path = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            "#,
+        )
+        .bind(&updated_drive_item.name)
+        .bind(&updated_drive_item.etag)
+        .bind(&updated_drive_item.last_modified)
+        .bind(&updated_drive_item.created_date)
+        .bind(updated_drive_item.size.map(|s| s as i64))
+        .bind(updated_drive_item.folder.is_some())
+        .bind(updated_drive_item.file.as_ref().and_then(|f| f.mime_type.clone()))
+        .bind(&updated_drive_item.download_url)
+        .bind(updated_drive_item.deleted.is_some())
+        .bind(parent_id)
+        .bind(parent_path)
+        .bind(db_id)
+        .execute(&self.pool)
+        .await?;
+
+        debug!("Updated processing item {} with new drive data for squashing", db_id);
+        Ok(())
+    }
 } 

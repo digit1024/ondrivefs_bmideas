@@ -335,48 +335,30 @@ impl OneDriveFuse {
             
             let processing_repo = crate::persistency::processing_item_repository::ProcessingItemRepository::new(self.app_state.persistency().pool().clone());
             
-            // Check if a ProcessingItem already exists for this OneDrive ID
+            // Check if a ProcessingItem already exists for this OneDrive ID that can be updated (squashed)
             let onedrive_id = item.id();
             
-             
-
-            if let Ok(Some(existing_processing_item)) = sync_await(processing_repo.get_processing_item(onedrive_id)) {
-                // Check if the existing ProcessingItem is still in a state where we can update it
-                match existing_processing_item.status {
-                    crate::persistency::processing_item_repository::ProcessingStatus::New |
-                    crate::persistency::processing_item_repository::ProcessingStatus::Validated => {
-                        // Update the existing ProcessingItem instead of creating a new one
-                        // This "squashes" multiple write operations into a single ProcessingItem
-                        debug!("🔄 Updating existing ProcessingItem for OneDrive ID: {} (squashing changes)", onedrive_id);
-                        
-                        
-                        
-                        // Update the last_modified timestamp to reflect the latest change
-                        let mut updated_drive_item = item.drive_item().clone();
-                        updated_drive_item.last_modified = Some(chrono::Utc::now().to_rfc3339());
-                        
-                        // Update the ProcessingItem with the latest drive item data
-                        // Note: We don't update the change_operation since it should remain as Update
-                        // The sync processor will handle the actual file content from the local path
-                    }
-                    _ => {
-                        // ProcessingItem is in a different state (processing, done, error, etc.)
-                        // Create a new ProcessingItem for this write operation
-                        debug!("📝 Creating new ProcessingItem for OneDrive ID: {} (existing item in {:?} state)", 
-                               onedrive_id, existing_processing_item.status);
-                        
-                        let processing_item = crate::persistency::processing_item_repository::ProcessingItem::new_local(
-                            item.drive_item().clone(),
-                            crate::persistency::processing_item_repository::ChangeOperation::Update
-                            
-                        );
-                        
-                        let _id = sync_await(processing_repo.store_processing_item(&processing_item))?;
-                    }
-                }
+            if let Ok(Some(existing_processing_item)) = sync_await(
+                processing_repo.get_latest_updatable_local_processing_item(onedrive_id)
+            ) {
+                // Found an existing local processing item that can be updated - squash this write operation
+                debug!("🔄 Squashing FUSE write into existing ProcessingItem for OneDrive ID: {} (DB ID: {})", 
+                       onedrive_id, existing_processing_item.id.unwrap_or(0));
+                
+                // Update the last_modified timestamp to reflect the latest change
+                let mut updated_drive_item = item.drive_item().clone();
+                updated_drive_item.last_modified = Some(chrono::Utc::now().to_rfc3339());
+                
+                // Update the existing ProcessingItem with the latest drive item data
+                let db_id = existing_processing_item.id.ok_or_else(|| {
+                    anyhow::anyhow!("ProcessingItem has no database ID")
+                })?;
+                
+                sync_await(processing_repo.update_processing_item_drive_data(db_id, &updated_drive_item))?;
+                
             } else {
-                // No existing ProcessingItem found, create a new one
-                debug!("📝 Creating new ProcessingItem for OneDrive ID: {}", onedrive_id);
+                // No existing updatable ProcessingItem found, create a new one
+                debug!("📝 Creating new ProcessingItem for OneDrive ID: {} (no existing updatable item found)", onedrive_id);
                 
                 let processing_item = crate::persistency::processing_item_repository::ProcessingItem::new_local(
                     item.drive_item().clone(),
