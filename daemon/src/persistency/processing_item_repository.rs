@@ -179,7 +179,7 @@ pub struct ProcessingItem {
     pub id: Option<i64>,  // Auto-incremented database ID
     pub drive_item: DriveItem,
     pub status: ProcessingStatus,
-    pub local_path: Option<PathBuf>,
+    
     pub error_message: Option<String>,
     pub last_status_update: Option<String>,
     pub retry_count: i32,
@@ -198,7 +198,7 @@ impl ProcessingItem {
             id: None,
             drive_item,
             status: ProcessingStatus::New,
-            local_path: None,
+            
             error_message: None,
             last_status_update: None,
             retry_count: 0,
@@ -216,7 +216,7 @@ impl ProcessingItem {
             id: None,
             drive_item,
             status: ProcessingStatus::New,
-            local_path: None,
+            
             error_message: None,
             last_status_update: None,
             retry_count: 0,
@@ -229,12 +229,12 @@ impl ProcessingItem {
         }
     }
 
-    pub fn new_local(drive_item: DriveItem, operation: ChangeOperation, local_path: PathBuf) -> Self {
+    pub fn new_local(drive_item: DriveItem, operation: ChangeOperation) -> Self {
         Self {
             id: None,
             drive_item,
             status: ProcessingStatus::New,
-            local_path: Some(local_path),
+            
             error_message: None,
             last_status_update: None,
             retry_count: 0,
@@ -273,7 +273,7 @@ impl ProcessingItemRepository {
     pub async fn store_processing_item(&self, item: &ProcessingItem) -> Result<i64> {
         let parent_id = item.drive_item.parent_reference.as_ref().map(|p| p.id.clone());
         let parent_path = item.drive_item.parent_reference.as_ref().and_then(|p| p.path.clone());
-        let local_path_str = item.local_path.as_ref().map(|p| p.to_string_lossy().to_string());
+        
         let validation_errors_json = serde_json::to_string(&item.validation_errors)?;
         let user_decision_json = item.user_decision.as_ref().map(|d| serde_json::to_string(d)).transpose()?;
 
@@ -282,9 +282,9 @@ impl ProcessingItemRepository {
             INSERT INTO processing_items (
                 drive_item_id, name, etag, last_modified, created_date, size, is_folder,
                 mime_type, download_url, is_deleted, parent_id, parent_path,
-                status, local_path, error_message, last_status_update, retry_count, priority,
+                status, error_message, last_status_update, retry_count, priority,
                 change_type, change_operation, conflict_resolution, validation_errors, user_decision
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&item.drive_item.id)
@@ -300,7 +300,7 @@ impl ProcessingItemRepository {
         .bind(parent_id)
         .bind(parent_path)
         .bind(item.status.as_str())
-        .bind(local_path_str)
+        
         .bind(&item.error_message)
         .bind(&item.last_status_update)
         .bind(item.retry_count)
@@ -331,7 +331,7 @@ impl ProcessingItemRepository {
             r#"
             SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path,
-                   status, local_path, error_message, last_status_update, retry_count, priority,
+                   status, error_message, last_status_update, retry_count, priority,
                    change_type, change_operation, conflict_resolution, validation_errors, user_decision
             FROM processing_items WHERE id = ?
             "#,
@@ -354,7 +354,7 @@ impl ProcessingItemRepository {
             r#"
             SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path,
-                   status, local_path, error_message, last_status_update, retry_count, priority,
+                   status, error_message, last_status_update, retry_count, priority,
                    change_type, change_operation, conflict_resolution, validation_errors, user_decision
             FROM processing_items WHERE drive_item_id = ?
             "#,
@@ -377,7 +377,7 @@ impl ProcessingItemRepository {
             r#"
             SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path,
-                   status, local_path, error_message, last_status_update, retry_count, priority,
+                   status, error_message, last_status_update, retry_count, priority,
                    change_type, change_operation, conflict_resolution, validation_errors, user_decision
             FROM processing_items ORDER BY id ASC
             "#,
@@ -400,7 +400,7 @@ impl ProcessingItemRepository {
             r#"
             SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path,
-                   status, local_path, error_message, last_status_update, retry_count, priority,
+                   status, error_message, last_status_update, retry_count, priority,
                    change_type, change_operation, conflict_resolution, validation_errors, user_decision
             FROM processing_items WHERE status = ? ORDER BY id ASC
             "#,
@@ -472,24 +472,7 @@ impl ProcessingItemRepository {
     }
 
     /// Update local path for a processing item
-    pub async fn update_local_path(&self, id: &str, local_path: &PathBuf) -> Result<()> {
-        let local_path_str = local_path.to_string_lossy().to_string();
-        
-        sqlx::query(
-            r#"
-            UPDATE processing_items 
-            SET local_path = ?, last_status_update = datetime('now')
-            WHERE drive_item_id = ?
-            "#,
-        )
-        .bind(local_path_str)
-        .bind(id)
-        .execute(&self.pool)
-        .await?;
-
-        debug!("Updated processing item {} local path: {:?}", id, local_path);
-        Ok(())
-    }
+   
 
     /// Delete a processing item by ID
     pub async fn delete_processing_item(&self, id: &str) -> Result<()> {
@@ -527,7 +510,7 @@ impl ProcessingItemRepository {
             r#"
             SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path,
-                   status, local_path, error_message, last_status_update, retry_count, priority,
+                   status, error_message, last_status_update, retry_count, priority,
                    change_type, change_operation, conflict_resolution, validation_errors, user_decision
             FROM processing_items 
             WHERE change_type = ? AND status IN ('new', 'validated')
@@ -553,7 +536,7 @@ impl ProcessingItemRepository {
             r#"
             SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path,
-                   status, local_path, error_message, last_status_update, retry_count, priority,
+                   status, error_message, last_status_update, retry_count, priority,
                    change_type, change_operation, conflict_resolution, validation_errors, user_decision
             FROM processing_items 
             WHERE change_type = ? AND status IN ('new', 'validated')
@@ -580,7 +563,7 @@ impl ProcessingItemRepository {
             r#"
             SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path,
-                   status, local_path, error_message, last_status_update, retry_count, priority,
+                   status, error_message, last_status_update, retry_count, priority,
                    change_type, change_operation, conflict_resolution, validation_errors, user_decision
             FROM processing_items 
             WHERE status IN ('new', 'validated')
@@ -765,7 +748,7 @@ impl ProcessingItemRepository {
         let db_id = item.id.ok_or_else(|| anyhow::anyhow!("ProcessingItem has no database ID"))?;
         let parent_id = item.drive_item.parent_reference.as_ref().map(|p| p.id.clone());
         let parent_path = item.drive_item.parent_reference.as_ref().and_then(|p| p.path.clone());
-        let local_path_str = item.local_path.as_ref().map(|p| p.to_string_lossy().to_string());
+        
         let validation_errors_json = serde_json::to_string(&item.validation_errors)?;
         let user_decision_json = item.user_decision.as_ref().map(|d| serde_json::to_string(d)).transpose()?;
 
@@ -774,7 +757,7 @@ impl ProcessingItemRepository {
             UPDATE processing_items SET
                 drive_item_id = ?, name = ?, etag = ?, last_modified = ?, created_date = ?, size = ?, is_folder = ?,
                 mime_type = ?, download_url = ?, is_deleted = ?, parent_id = ?, parent_path = ?,
-                status = ?, local_path = ?, error_message = ?, last_status_update = ?, retry_count = ?, priority = ?,
+                status = ?, error_message = ?, last_status_update = ?, retry_count = ?, priority = ?,
                 change_type = ?, change_operation = ?, conflict_resolution = ?, validation_errors = ?, user_decision = ?,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
@@ -793,7 +776,7 @@ impl ProcessingItemRepository {
         .bind(parent_id)
         .bind(parent_path)
         .bind(item.status.as_str())
-        .bind(local_path_str)
+        
         .bind(&item.error_message)
         .bind(&item.last_status_update)
         .bind(item.retry_count)
@@ -819,7 +802,7 @@ impl ProcessingItemRepository {
             r#"
             SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path,
-                   status, local_path, error_message, last_status_update, retry_count, priority,
+                   status, error_message, last_status_update, retry_count, priority,
                    change_type, change_operation, conflict_resolution, validation_errors, user_decision
             FROM processing_items WHERE parent_id = ?
             "#,
@@ -853,7 +836,7 @@ impl ProcessingItemRepository {
         let parent_id: Option<String> = row.try_get("parent_id")?;
         let parent_path: Option<String> = row.try_get("parent_path")?;
         let status_str: String = row.try_get("status")?;
-        let local_path_str: Option<String> = row.try_get("local_path")?;
+        
         let error_message: Option<String> = row.try_get("error_message")?;
         let last_status_update: Option<String> = row.try_get("last_status_update")?;
         let retry_count: i32 = row.try_get("retry_count")?;
@@ -912,7 +895,7 @@ impl ProcessingItemRepository {
         let status = ProcessingStatus::from_str(&status_str)
             .ok_or_else(|| anyhow::anyhow!("Invalid status: {}", status_str))?;
 
-        let local_path = local_path_str.map(PathBuf::from);
+        
 
         let change_type = ChangeType::from_str(&change_type_str)
             .ok_or_else(|| anyhow::anyhow!("Invalid change_type: {}", change_type_str))?;
@@ -938,7 +921,7 @@ impl ProcessingItemRepository {
             id: Some(db_id),
             drive_item,
             status,
-            local_path,
+            
             error_message,
             last_status_update,
             retry_count,
@@ -955,7 +938,7 @@ impl ProcessingItemRepository {
             r#"
             SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path,
-                   status, local_path, error_message, last_status_update, retry_count, priority,
+                   status, error_message, last_status_update, retry_count, priority,
                    change_type, change_operation, conflict_resolution, validation_errors, user_decision
             FROM processing_items 
             WHERE drive_item_id = ? AND change_type = ? AND status IN ('new', 'validated')

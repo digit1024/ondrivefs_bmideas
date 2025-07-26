@@ -7,7 +7,7 @@
 pub mod drive_item_with_fuse_repository;
 pub mod sync_state_repository;
 pub mod download_queue_repository;
-pub mod upload_queue_repository;
+
 pub mod profile_repository;
 pub mod processing_item_repository;
 
@@ -69,47 +69,19 @@ impl PersistencyManager {
         info!("Initializing database schema...");
 
         // Create tables for OneDrive models
-        self.create_drive_items_table().await?;
+        
         self.create_drive_items_with_fuse_table().await?;
         self.create_sync_state_table().await?;
         self.create_download_queue_table().await?;
-        self.create_upload_queue_table().await?;
         self.create_user_profiles_table().await?;
         self.create_processing_items_table().await?;
-        self.create_local_changes_table().await?;
+        
 
         info!("Database schema initialized successfully");
         Ok(())
     }
 
-    /// Create the drive_items table for storing OneDrive file/folder metadata
-    async fn create_drive_items_table(&self) -> Result<()> {
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS drive_items (
-                id TEXT PRIMARY KEY,
-                name TEXT,
-                etag TEXT,
-                last_modified TEXT,
-                created_date TEXT,
-                size INTEGER,
-                is_folder BOOLEAN,
-                mime_type TEXT,
-                download_url TEXT,
-                is_deleted BOOLEAN DEFAULT FALSE,
-                parent_id TEXT,
-                parent_path TEXT,
-                local_path TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
-    }
+    
 
     /// Create the drive_items_with_fuse table for storing OneDrive file/folder metadata with Fuse data
     async fn create_drive_items_with_fuse_table(&self) -> Result<()> {
@@ -215,28 +187,7 @@ impl PersistencyManager {
         Ok(())
     }
 
-    /// Create the upload_queue table for tracking pending uploads
-    async fn create_upload_queue_table(&self) -> Result<()> {
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS upload_queue (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                local_path TEXT NOT NULL,
-                parent_id TEXT,
-                file_name TEXT NOT NULL,
-                priority INTEGER DEFAULT 0,
-                status TEXT DEFAULT 'pending',
-                retry_count INTEGER DEFAULT 0,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
-    }
+ 
 
     /// Create the user_profiles table for storing user profile information
     async fn create_user_profiles_table(&self) -> Result<()> {
@@ -325,59 +276,6 @@ impl PersistencyManager {
         Ok(())
     }
 
-    /// Create the local_changes table for storing local file system changes
-    async fn create_local_changes_table(&self) -> Result<()> {
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS local_changes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                temporary_id TEXT NOT NULL,     -- "temp_001", "temp_002", etc.
-                onedrive_id TEXT,              -- Assigned during API call
-                change_type TEXT NOT NULL,     -- 'create_file', 'create_folder', 'modify', 'delete', 'move', 'rename'
-                status TEXT DEFAULT 'new',     -- 'new', 'implemented', 'reflected', 'failed'
-                
-                -- For CREATE operations
-                parent_id TEXT,                -- OneDrive parent folder ID
-                file_name TEXT,                -- Name for new files/folders
-                
-                -- For MOVE operations  
-                old_inode INTEGER,            -- Original inode
-                new_inode INTEGER,            -- New inode
-                
-                -- For RENAME operations
-                old_name TEXT,                 -- Original name
-                new_name TEXT,                 -- New name
-                
-                -- For UPDATE operations
-                old_etag TEXT,                 -- Original ETag
-                new_etag TEXT,                 -- New ETag
-                
-                -- File metadata (for all operations)
-                file_size INTEGER,
-                mime_type TEXT,
-                temp_created_date TEXT,
-                temp_last_modified TEXT,
-                temp_is_folder BOOLEAN,
-                
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-
-        // Create indexes for performance
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_local_changes_status ON local_changes(status)")
-            .execute(&self.pool)
-            .await?;
-        
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_local_changes_type ON local_changes(change_type)")
-            .execute(&self.pool)
-            .await?;
-
-        Ok(())
-    }
 
     /// Get the processing item repository
     pub fn processing_item_repository(&self) -> processing_item_repository::ProcessingItemRepository {
@@ -397,10 +295,7 @@ impl PersistencyManager {
         download_queue_repository::DownloadQueueRepository::new(self.pool.clone())
     }
 
-    /// Get the upload queue repository
-    pub fn upload_queue_repository(&self) -> upload_queue_repository::UploadQueueRepository {
-        upload_queue_repository::UploadQueueRepository::new(self.pool.clone())
-    }
+
 
     /// Get the user profile repository
     pub fn user_profile_repository(&self) -> profile_repository::ProfileRepository {

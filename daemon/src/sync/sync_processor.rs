@@ -1,4 +1,5 @@
 use crate::app_state::AppState;
+use crate::file_manager::FileManager;
 use crate::persistency::drive_item_with_fuse_repository::DriveItemWithFuseRepository;
 use crate::persistency::processing_item_repository::{ChangeOperation, ChangeType, ProcessingItem, ProcessingItemRepository, ProcessingStatus, ValidationResult};
 use crate::sync::sync_strategy::SyncStrategy;
@@ -382,11 +383,7 @@ impl SyncProcessor {
         
         
         // Get local path from the processing item
-        let local_path = if let Some(local_path) = &item.local_path {
-            PathBuf::from(local_path)
-        } else {
-            return Err(anyhow::anyhow!("No local path specified for local create operation"));
-        };
+        let local_path = self.app_state.file_manager().get_local_dir().join(&item.drive_item.id);
         
         // Check if it's a folder or file
         if item.drive_item.folder.is_some() {
@@ -480,7 +477,7 @@ impl SyncProcessor {
                                 match self.app_state.onedrive_client.get_item_by_id(real_onedrive_id).await {
                                     Ok(full_drive_item) => {
                                         // Move file from upload folder to download folder
-                                        if let Err(e) = self.move_file_to_download_folder(&local_path, real_onedrive_id).await {
+                                        if let Err(e) = self.move_file_to_its_new_name(&local_path, real_onedrive_id).await {
                                             warn!("⚠️ Failed to move file to download folder: {}", e);
                                 }
                                         
@@ -525,11 +522,8 @@ impl SyncProcessor {
         
         
         // Get local path from the processing item
-        let local_path = if let Some(local_path) = &item.local_path {
-            PathBuf::from(local_path)
-        } else {
-            return Err(anyhow::anyhow!("No local path specified for local update operation"));
-        };
+        let local_path =  self.app_state.file_manager().get_local_dir().join(&item.drive_item.id);
+        
         
         // Check if it's a folder or file
         if item.drive_item.folder.is_some() {
@@ -752,7 +746,7 @@ impl SyncProcessor {
         
         // Set local path for downloaded files
         let local_file_path = local_path.join(item.id.clone());
-        item_with_fuse.set_display_path(local_file_path.to_string_lossy().to_string());
+        
         
         // Preserve existing inode if item already exists
         if let Some(existing) = &existing_item {
@@ -773,7 +767,7 @@ impl SyncProcessor {
         }
         
         // Store the item and get the inode (preserved or new)
-        let inode = drive_item_with_fuse_repo.store_drive_item_with_fuse(&item_with_fuse, Some(local_file_path.clone())).await?;
+        let inode = drive_item_with_fuse_repo.store_drive_item_with_fuse(&item_with_fuse).await?;
         
         Ok(inode)
     }
@@ -918,33 +912,28 @@ impl SyncProcessor {
         Ok(parent_path)
     }
 
-    /// Safely move a file from upload folder to download folder
-    async fn move_file_to_download_folder(&self, upload_path: &PathBuf, onedrive_id: &str) -> Result<()> {
-        let download_path = self.app_state.config().project_dirs.data_dir().join("downloads").join(onedrive_id);
+    // /// Safely move a file from upload folder to download folder
+    async fn move_file_to_its_new_name(&self, old_path: &PathBuf, onedrive_id: &str) -> Result<()> {
         
-        // Remove existing file in download folder if it exists
-        if download_path.exists() {
-            if let Err(e) = std::fs::remove_file(&download_path) {
-                warn!("⚠️ Failed to remove existing file in download folder: {}: {}", 
-                      download_path.display(), e);
-            }
-        }
+        
+        
+        let destination_path = self.app_state.file_manager().get_local_dir().join(onedrive_id);
         
         // Move file from upload to download
-        match std::fs::rename(upload_path, &download_path) {
+        match std::fs::rename(old_path, &destination_path) {
             Ok(_) => {
                 debug!("📁 Moved file from upload to download: {} -> {}", 
-                      upload_path.display(), download_path.display());
+                      old_path.display(), destination_path.display());
                 Ok(())
             }
             Err(e) => {
                 warn!("⚠️ Failed to move file from upload to download: {} -> {}: {}", 
-                      upload_path.display(), download_path.display(), e);
+                      old_path.display(), destination_path.display(), e);
                 
                 // Try to clean up the upload file if move failed
-                if let Err(cleanup_err) = std::fs::remove_file(upload_path) {
+                if let Err(cleanup_err) = std::fs::remove_file(old_path) {
                     warn!("⚠️ Failed to clean up upload file after move failure: {}: {}", 
-                          upload_path.display(), cleanup_err);
+                          old_path.display(), cleanup_err);
                 }
                 
                 Err(anyhow::anyhow!("Failed to move file: {}", e))

@@ -482,11 +482,8 @@ async fn handle_file_path(file_path: &str) -> Result<()> {
                 let file_manager = app.app_state.file_manager();
                 
                 // Use the local path from the item if available, otherwise construct it
-                let local_path = if let Some(local_path_str) = item_with_fuse.local_path() {
-                    PathBuf::from(local_path_str)
-                } else {
-                    file_manager.get_download_dir().join(onedrive_id.clone())
-                };
+                let local_path =  file_manager.get_download_dir().join(onedrive_id.clone());
+                
                 
                 // Add to download queue
                 download_queue_repo.add_to_download_queue(&onedrive_id, &local_path).await?;
