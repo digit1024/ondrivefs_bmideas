@@ -71,8 +71,15 @@ impl SyncCycle {
             task: Box::new(move || {
                 let app_state = app_state.clone();
                 Box::pin(async move {
-                    let sync_cycle = SyncCycle::new(app_state);
-                    sync_cycle.run().await
+                                    // Execute sync cycle with panic recovery
+                let sync_cycle = SyncCycle::new(app_state);
+                let result = sync_cycle.run().await;
+                
+                if let Err(ref e) = result {
+                    error!("Sync cycle failed: {}", e);
+                }
+                
+                result
                 })
             }),
         };
@@ -180,7 +187,7 @@ impl SyncCycle {
         let created_date_changed = existing.created_date != new.created_date;
         
         if etag_changed || name_changed || size_changed || last_modified_changed || created_date_changed {
-            debug!("🔄 Item changed: {} (etag: {}, name: {}, size: {}, last_modified: {}, created_date: {})", 
+            info!("🔄 Item changed: {} (etag: {}, name: {}, size: {}, last_modified: {}, created_date: {})", 
                    new.name.as_deref().unwrap_or("unnamed"),
                    etag_changed, name_changed, size_changed, last_modified_changed, created_date_changed);
             return true;
