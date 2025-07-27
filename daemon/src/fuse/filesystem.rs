@@ -100,6 +100,11 @@ impl OneDriveFuse {
         &self.drive_item_with_fuse_repo
     }
 
+    /// Get file manager
+    pub fn file_manager(&self) -> &Arc<DefaultFileManager> {
+        &self.file_manager
+    }
+
     /// Get app state
     pub fn app_state(&self) -> &Arc<crate::app_state::AppState> {
         &self.app_state

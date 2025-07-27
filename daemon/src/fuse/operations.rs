@@ -299,6 +299,13 @@ impl fuser::Filesystem for OneDriveFuse {
         match sync_await(self.database().apply_local_change_to_db_repository("create", parent, &name_str, false)) {
             Ok(ino) => {
                 if let Ok(Some(item)) = sync_await(self.database().get_item_by_ino(ino)) {
+                    // Create the actual file in the local directory
+                    if let Err(e) = sync_await(self.file_manager().create_empty_file(item.id())) {
+                        error!("Failed to create local file: {}", e);
+                        reply.error(libc::EIO);
+                        return;
+                    }
+                    
                     // Try to open the file
                     match self.file_handles().get_or_create_file_handle(ino, item.id()) {
                         Ok(handle_id) => {

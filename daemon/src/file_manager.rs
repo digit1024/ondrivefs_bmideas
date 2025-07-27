@@ -1,7 +1,7 @@
 use crate::onedrive_service::onedrive_models::DownloadResult;
 use anyhow::{Context, Result};
 use libc::LOCK_NB;
-use log::{info, warn, error};
+use log::{info, warn, error, debug};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use onedrive_sync_lib::config::ProjectConfig;
@@ -109,6 +109,23 @@ impl DefaultFileManager {
         fs::copy(local, local_snapshot.clone()).await?;
         // rename the local file to the upload file
         fs::rename(local_snapshot, upload).await?;
+        Ok(())
+    }
+
+    /// Create an empty file in the local directory for a given OneDrive ID
+    pub async fn create_empty_file(&self, onedrive_id: &str) -> Result<()> {
+        let local_path = self.get_local_dir().join(onedrive_id);
+        
+        // Ensure parent directory exists
+        if let Some(parent) = local_path.parent() {
+            Self::ensure_directory_exists(parent).await?;
+        }
+        
+        // Create empty file
+        fs::write(&local_path, &[]).await
+            .with_context(|| format!("Failed to create empty file: {}", local_path.display()))?;
+        
+        debug!("📄 Created empty file: {} ({})", local_path.display(), onedrive_id);
         Ok(())
     }
     
