@@ -1,6 +1,7 @@
 //! Database operations for FUSE filesystem
 
 use crate::persistency::drive_item_with_fuse_repository::DriveItemWithFuseRepository;
+use crate::persistency::cached_drive_item_with_fuse_repository::CachedDriveItemWithFuseRepository;
 use crate::persistency::types::{DriveItemWithFuse, FileSource};
 use crate::onedrive_service::onedrive_models::DriveItem;
 use anyhow::Result;
@@ -12,11 +13,11 @@ use std::time::SystemTime;
 
 /// Database operations manager for the FUSE filesystem
 pub struct DatabaseManager {
-    drive_item_with_fuse_repo: Arc<DriveItemWithFuseRepository>,
+    drive_item_with_fuse_repo: Arc<CachedDriveItemWithFuseRepository>,
 }
 
 impl DatabaseManager {
-    pub fn new(drive_item_with_fuse_repo: Arc<DriveItemWithFuseRepository>) -> Self {
+    pub fn new(drive_item_with_fuse_repo: Arc<CachedDriveItemWithFuseRepository>) -> Self {
         Self { drive_item_with_fuse_repo }
     }
 
@@ -27,7 +28,9 @@ impl DatabaseManager {
             Ok(item)
         } else {
             if ino == 1 {
-                Ok(Some(crate::fuse::drive_item_manager::DriveItemManager::create_temp_root_stub(&self.drive_item_with_fuse_repo)))
+                // Access the inner repository for the stub creation
+                let inner_repo = self.drive_item_with_fuse_repo.inner();
+                Ok(Some(crate::fuse::drive_item_manager::DriveItemManager::create_temp_root_stub(inner_repo)))
             } else {
                 Ok(None)
             }

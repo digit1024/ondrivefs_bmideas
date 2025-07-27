@@ -5,6 +5,7 @@
 
 
 pub mod drive_item_with_fuse_repository;
+pub mod cached_drive_item_with_fuse_repository;
 pub mod sync_state_repository;
 pub mod download_queue_repository;
 

@@ -1,6 +1,7 @@
 //! Main FUSE filesystem implementation
 
 use crate::persistency::drive_item_with_fuse_repository::DriveItemWithFuseRepository;
+use crate::persistency::cached_drive_item_with_fuse_repository::CachedDriveItemWithFuseRepository;
 use crate::persistency::download_queue_repository::DownloadQueueRepository;
 use crate::file_manager::DefaultFileManager;
 use anyhow::Result;
@@ -14,7 +15,7 @@ use crate::fuse::database::DatabaseManager;
 
 /// OneDrive FUSE filesystem implementation using DriveItemWithFuse
 pub struct OneDriveFuse {
-    drive_item_with_fuse_repo: Arc<DriveItemWithFuseRepository>,
+    drive_item_with_fuse_repo: Arc<CachedDriveItemWithFuseRepository>,
     file_manager: Arc<DefaultFileManager>,
     app_state: Arc<crate::app_state::AppState>,
     
@@ -32,7 +33,11 @@ impl OneDriveFuse {
         file_manager: Arc<DefaultFileManager>,
         app_state: Arc<crate::app_state::AppState>,
     ) -> Result<Self> {
-        let drive_item_with_fuse_repo = Arc::new(DriveItemWithFuseRepository::new(pool));
+        let drive_item_with_fuse_repo = Arc::new(
+            CachedDriveItemWithFuseRepository::new_with_default_ttl(
+                Arc::new(DriveItemWithFuseRepository::new(pool))
+            )
+        );
         
         let file_handle_manager = FileHandleManager::new(
             file_manager.clone(),
@@ -96,7 +101,7 @@ impl OneDriveFuse {
     }
 
     /// Get drive item with fuse repository
-    pub fn drive_item_with_fuse_repo(&self) -> &Arc<DriveItemWithFuseRepository> {
+    pub fn drive_item_with_fuse_repo(&self) -> &Arc<CachedDriveItemWithFuseRepository> {
         &self.drive_item_with_fuse_repo
     }
 
