@@ -47,7 +47,67 @@ pub struct DriveItem {
     pub deleted: Option<DeletedFacet>,
     #[serde(rename = "parentReference")]
     pub parent_reference: Option<ParentReference>,
-    
+}
+
+impl DriveItem {
+    /// Set the size of the drive item
+    pub fn set_size(&mut self, size: u64) {
+        self.size = Some(size);
+    }
+
+    /// Set the last modified timestamp
+    pub fn set_last_modified(&mut self, last_modified: String) {
+        self.last_modified = Some(last_modified);
+    }
+
+    /// Set the ETag
+    pub fn set_etag(&mut self, etag: String) {
+        self.etag = Some(etag);
+    }
+
+    /// Set the name
+    pub fn set_name(&mut self, name: String) {
+        self.name = Some(name);
+    }
+
+    /// Set the created date
+    pub fn set_created_date(&mut self, created_date: String) {
+        self.created_date = Some(created_date);
+    }
+
+    /// Set the download URL
+    pub fn set_download_url(&mut self, download_url: String) {
+        self.download_url = Some(download_url);
+    }
+
+    /// Set the parent reference
+    pub fn set_parent_reference(&mut self, parent_reference: ParentReference) {
+        self.parent_reference = Some(parent_reference);
+    }
+
+    /// Set the folder facet
+    pub fn set_folder(&mut self, folder: FolderFacet) {
+        self.folder = Some(folder);
+        self.file = None; // Clear file facet when setting folder
+    }
+
+    /// Set the file facet
+    pub fn set_file(&mut self, file: FileFacet) {
+        self.file = Some(file);
+        self.folder = None; // Clear folder facet when setting file
+    }
+
+    /// Mark as deleted
+    pub fn mark_deleted(&mut self) {
+        self.deleted = Some(DeletedFacet {
+            state: "deleted".to_string(),
+        });
+    }
+
+    /// Clear deleted status
+    pub fn clear_deleted(&mut self) {
+        self.deleted = None;
+    }
 }
 
 /// FolderFacet: Represents the folder facet of a drive item.

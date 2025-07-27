@@ -8,7 +8,7 @@ mod app_state;
 mod auth;
 mod connectivity;
 mod file_manager;
-mod fuse_filesystem;
+mod fuse;
 mod log_appender;
 mod message_broker;
 mod onedrive_service;
@@ -32,7 +32,7 @@ use tokio::sync::broadcast;
 use tokio::time::{sleep, Duration};
 use fuser::MountOption;
 use crate::app_state::{AppState, app_state_factory};
-use crate::fuse_filesystem::OneDriveFuse;
+use crate::fuse::OneDriveFuse;
 use crate::log_appender::setup_logging;
 use crate::persistency::download_queue_repository::DownloadQueueRepository;
 use crate::persistency::profile_repository::ProfileRepository;
@@ -370,7 +370,7 @@ async fn main() -> Result<()> {
     let sync_cycle = SyncCycle::new(app.app_state.clone());
     let mut scheduler = crate::scheduler::periodic_scheduler::PeriodicScheduler::new();
     let sync_task = sync_cycle.get_task().await?;
-    scheduler.add_task(sync_task);
+    //scheduler.add_task(sync_task);
     
     let scheduler_shutdown_rx = shutdown_manager.subscribe();
     let scheduler_handle = tokio::spawn(async move {
