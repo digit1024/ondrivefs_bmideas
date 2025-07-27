@@ -132,7 +132,7 @@ impl fuser::Filesystem for OneDriveFuse {
 
     fn lookup(&mut self, _req: &fuser::Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         let name_str = name.to_string_lossy();
-        info!("LOOKUP: parent={}, name={}", parent, name_str);
+        debug!("LOOKUP: parent={}, name={}", parent, name_str);
 
     
 
@@ -156,7 +156,7 @@ impl fuser::Filesystem for OneDriveFuse {
     }
 
     fn getattr(&mut self, _req: &fuser::Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
-        info!("GETATTR: ino={}", ino);
+        debug!("GETATTR: ino={}", ino);
 
         if let Ok(Some(item)) = sync_await(self.database().get_item_by_ino(ino)) {
             reply.attr(&Duration::from_secs(3), &AttributeManager::item_to_file_attr(&item));
@@ -174,7 +174,7 @@ impl fuser::Filesystem for OneDriveFuse {
         offset: i64,
         mut reply: ReplyDirectory,
     ) {
-        info!("READDIR: ino={}, offset={}", ino, offset);
+        debug!("READDIR: ino={}, offset={}", ino, offset);
         let dots_added = self.add_dot_entries_if_needed(ino, &mut reply, offset);
         let mut current_offset = offset;
         let mut entries_added = if dots_added {2} else {0};
@@ -220,7 +220,7 @@ impl fuser::Filesystem for OneDriveFuse {
                 };
             
                 // Try to add to reply buffer
-                info!("Adding entry: {} at offset {}", name, entry_offset);
+                debug!("Adding entry: {} at offset {}", name, entry_offset);
                 if reply.add(child.virtual_ino().unwrap_or(0), entry_offset, file_type, name) {
                     // Buffer is full, we're done
                     reply.ok();
@@ -249,7 +249,7 @@ impl fuser::Filesystem for OneDriveFuse {
         _lock_owner: Option<u64>,
         reply: ReplyData,
     ) {
-        info!("READ: ino={}, fh={}, offset={}, size={}", ino, fh, offset, size);
+        debug!("READ: ino={}, fh={}, offset={}, size={}", ino, fh, offset, size);
 
         if fh == 0 {
             // Directory read - return empty data
@@ -303,7 +303,7 @@ impl fuser::Filesystem for OneDriveFuse {
         _lock_owner: Option<u64>,
         reply: ReplyWrite,
     ) {
-        info!("WRITE: ino={}, fh={}, offset={}, size={}", ino, fh, offset, data.len());
+        debug!("WRITE: ino={}, fh={}, offset={}, size={}", ino, fh, offset, data.len());
 
         match self.file_handles().write_to_handle(fh, offset as u64, data) {
             Ok(_) => {
@@ -327,7 +327,7 @@ impl fuser::Filesystem for OneDriveFuse {
         reply: ReplyCreate,
     ) {
         let name_str = name.to_string_lossy();
-        info!("CREATE: parent={}, name={}", parent, name_str);
+        debug!("CREATE: parent={}, name={}", parent, name_str);
 
         match sync_await(self.database().apply_local_change_to_db_repository("create", parent, &name_str, false)) {
             Ok(ino) => {
@@ -376,7 +376,7 @@ impl fuser::Filesystem for OneDriveFuse {
         reply: ReplyEntry,
     ) {
         let name_str = name.to_string_lossy();
-        info!("MKDIR: parent={}, name={}", parent, name_str);
+        debug!("MKDIR: parent={}, name={}", parent, name_str);
 
         match sync_await(self.database().apply_local_change_to_db_repository("mkdir", parent, &name_str, true)) {
             Ok(ino) => {
@@ -405,7 +405,7 @@ impl fuser::Filesystem for OneDriveFuse {
         reply: fuser::ReplyEmpty,
     ) {
         let name_str = name.to_string_lossy();
-        info!("UNLINK: parent={}, name={}", parent, name_str);
+        debug!("UNLINK: parent={}, name={}", parent, name_str);
 
         // Get the item to be deleted
         if let Ok(Some(item)) = sync_await(self.drive_item_with_fuse_repo().get_drive_item_with_fuse_by_parent_ino_and_name(parent, &name_str)) {
@@ -441,7 +441,7 @@ impl fuser::Filesystem for OneDriveFuse {
         reply: fuser::ReplyEmpty,
     ) {
         let name_str = name.to_string_lossy();
-        info!("RMDIR: parent={}, name={}", parent, name_str);
+        debug!("RMDIR: parent={}, name={}", parent, name_str);
 
         // Get the directory to be deleted
         if let Ok(Some(item)) = sync_await(self.drive_item_with_fuse_repo().get_drive_item_with_fuse_by_parent_ino_and_name(parent, &name_str)) {
@@ -585,7 +585,7 @@ impl fuser::Filesystem for OneDriveFuse {
         offset: i64,
         mut reply: ReplyDirectoryPlus,
     ){
-        info!("READDIRPLUS: ino={}, fh={}, offset={}", ino, fh, offset);
+        debug!("READDIRPLUS: ino={}, fh={}, offset={}", ino, fh, offset);
         if let Ok(children) = sync_await(self.database().get_children_by_parent_ino(ino)) {
             let mut entries = Vec::new();
             
@@ -608,9 +608,9 @@ impl fuser::Filesystem for OneDriveFuse {
                 let dotdot_ino = item.parent_ino().unwrap_or(1);
                 let parent_item = sync_await(self.database().get_item_by_ino(dotdot_ino)).unwrap().unwrap();
                 entries.push((dot_ino, fuser::FileType::Directory, ".".to_string(), AttributeManager::item_to_file_attr(&item), 0 as u64));
-                info!("Adding . entry: {}", dot_ino );
+                debug!("Adding . entry: {}", dot_ino );
                 entries.push((dotdot_ino, fuser::FileType::Directory, "..".to_string(), AttributeManager::item_to_file_attr(&parent_item), 0 as u64));
-                info!("Adding .. entry: {}", dotdot_ino);
+                debug!("Adding .. entry: {}", dotdot_ino);
             
             
             // Add child entries
@@ -639,12 +639,12 @@ impl fuser::Filesystem for OneDriveFuse {
             for (i, (ino, kind, name, attr, geno)) in entries.iter().enumerate() {
                 
                 
-                    info!("Adding entry: {} at offset {}", name, i+1);
+                    debug!("Adding entry: {} at offset {}", name, i+1);
                 if(offset < i as i64 +1){
                     
                     if reply.add(*ino, i as i64+1, name, &Duration::from_secs(5), &attr, geno.clone() ) {
                         
-                        info!("Failed to add");
+                        debug!("Failed to add");
                         
                         break;
                     }

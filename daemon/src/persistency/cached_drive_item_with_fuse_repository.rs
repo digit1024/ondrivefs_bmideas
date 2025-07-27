@@ -34,23 +34,23 @@ impl CachedDriveItemWithFuseRepository {
 
     // Cache management methods
     async fn get_from_cache(&self, inode: u64) -> Option<DriveItemWithFuse> {
-        let cache = self.cache.read().await;
-        if let Some((item, timestamp)) = cache.get(&inode) {
-            if Utc::now().signed_duration_since(*timestamp) < self.cache_ttl {
-                debug!("Cache hit for inode: {}", inode);
-                return Some(item.clone());
-            }
-        }
+        // let cache = self.cache.read().await;
+        // if let Some((item, timestamp)) = cache.get(&inode) {
+        //     if Utc::now().signed_duration_since(*timestamp) < self.cache_ttl {
+        //         info!("Cache hit for inode: {}", inode);
+        //         return Some(item.clone());
+        //     }
+        // }
         None
     }
 
     async fn set_in_cache(&self, inode: u64, item: DriveItemWithFuse) {
-        let mut cache = self.cache.write().await;
-        cache.insert(inode, (item, Utc::now()));
-        drop(cache);
-        debug!("Cached item for inode: {}", inode);
+        // let mut cache = self.cache.write().await;
+        // cache.insert(inode, (item, Utc::now()));
+        // drop(cache);
+        // debug!("Cached item for inode: {}", inode);
         
-        self.clean_old_if_cache_gt_2k().await;
+        // self.clean_old_if_cache_gt_2k().await;
     }
  /// Cleans old entries if Cache reached 2000 entries
      async fn clean_old_if_cache_gt_2k(&self) {
