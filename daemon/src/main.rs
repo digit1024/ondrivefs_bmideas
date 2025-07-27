@@ -455,8 +455,12 @@ async fn handle_file_path(file_path: &str) -> Result<()> {
     // Initialize minimal app state for database access
     let app = AppSetup::initialize().await?;
     
-    // Parse the file path to extract OneDrive ID and virtual path
-    // The file should be a JSON placeholder with OneDrive metadata
+    // Check if this is a .onedrivedownload file (new virtual file system)
+    if file_path.ends_with(".onedrivedownload") {
+        return handle_virtual_file(file_path, &app).await;
+    }
+    
+    // Legacy JSON placeholder handling
     match parse_onedrive_file(file_path) {
         Ok((onedrive_id, virtual_path)) => {
             info!("📥 Queuing download for OneDrive ID: {}", onedrive_id);
@@ -524,6 +528,116 @@ async fn handle_file_path(file_path: &str) -> Result<()> {
     }
     
     Ok(())
+}
+
+/// Handle .onedrivedownload virtual files from the new FUSE system
+async fn handle_virtual_file(file_path: &str, app: &AppSetup) -> Result<()> {
+    info!("📁 Handling virtual file: {}", file_path);
+    
+    // Extract the virtual path from the file path
+    // Example: /home/digit1024/OneDrive/Apps/Designer/file.txt.onedrivedownload
+    // Should become: /Apps/Designer/file.txt
+    let virtual_path = extract_virtual_path_from_file_path(file_path)?;
+    info!("🔍 Looking for virtual path: {}", virtual_path);
+    
+    // Get database repositories
+    let pool = app.app_state.persistency().pool().clone();
+    let drive_item_with_fuse_repo = crate::persistency::drive_item_with_fuse_repository::DriveItemWithFuseRepository::new(pool.clone());
+    let download_queue_repo = DownloadQueueRepository::new(pool);
+    
+    // Try to find the item by virtual path (much more efficient than loading all items)
+    let item = drive_item_with_fuse_repo.get_drive_item_with_fuse_by_virtual_path(&virtual_path).await?;
+    
+    if let Some(item_with_fuse) = item {
+        let onedrive_id = item_with_fuse.id();
+        let filename = item_with_fuse.name().unwrap_or("unknown");
+        info!("📁 Found item: {} (OneDrive ID: {})", filename, onedrive_id);
+        
+        // Use file manager from app state
+        let file_manager = app.app_state.file_manager();
+        
+        // Get the inode for this file to determine local path
+        let local_path = if let Some(ino) = item_with_fuse.virtual_ino() {
+            file_manager.get_download_dir().join(ino.to_string())
+        } else {
+            file_manager.get_download_dir().join(onedrive_id.clone())
+        };
+        
+        // Add to download queue
+        download_queue_repo.add_to_download_queue(&onedrive_id, &local_path).await?;
+        
+        info!("✅ Download queued successfully for: {}", filename);
+        info!("💾 Local path: {}", local_path.display());
+
+        // Send desktop notification
+        let notification_sender = NotificationSender::new().await;
+        if let Ok(sender) = notification_sender {
+            let _ = sender.send_notification(
+                "Open OneDrive",
+                0,
+                "cloud-upload",
+                "Open OneDrive",
+                &format!("File {} added to download queue", filename),
+                vec![],
+                vec![("urgency", &NotificationUrgency::Normal.to_u8().to_string())],
+                5000,
+            ).await;
+        }
+    } else {
+        warn!("⚠️ Item not found in database for virtual path: {}", virtual_path);
+        
+        // Send error notification
+        let notification_sender = NotificationSender::new().await;
+        if let Ok(sender) = notification_sender {
+            let _ = sender.send_notification(
+                "Open OneDrive",
+                0,
+                "dialog-error",
+                "Open OneDrive",
+                &format!("File not found in OneDrive: {}", virtual_path),
+                vec![],
+                vec![("urgency", &NotificationUrgency::Critical.to_u8().to_string())],
+                5000,
+            ).await;
+        }
+        
+        return Err(anyhow::anyhow!("File not found in OneDrive: {}", virtual_path));
+    }
+    
+    Ok(())
+}
+
+/// Extract virtual path from file path
+/// 
+/// Example: 
+/// Input: "/home/digit1024/OneDrive/Apps/Designer/file.txt.onedrivedownload"
+/// Output: "/Apps/Designer/file.txt"
+fn extract_virtual_path_from_file_path(file_path: &str) -> Result<String> {
+    let path = std::path::Path::new(file_path);
+    
+    // Convert to string and find "OneDrive" in the path
+    let path_str = path.to_string_lossy();
+    let onedrive_index = path_str.find("OneDrive")
+        .ok_or_else(|| anyhow::anyhow!("OneDrive directory not found in path: {}", file_path))?;
+    
+    // Extract everything after "OneDrive/"
+    let after_onedrive = &path_str[onedrive_index + "OneDrive".len()..];
+    
+    // Remove .onedrivedownload suffix if present
+    let virtual_path = if after_onedrive.ends_with(".onedrivedownload") {
+        &after_onedrive[..after_onedrive.len() - ".onedrivedownload".len()]
+    } else {
+        after_onedrive
+    };
+    
+    // Ensure it starts with "/"
+    let virtual_path = if virtual_path.starts_with('/') {
+        virtual_path.to_string()
+    } else {
+        format!("/{}", virtual_path)
+    };
+    
+    Ok(virtual_path)
 }
 
 /// Parse a OneDrive file path to extract OneDrive ID and virtual path using DriveItemWithFuse
