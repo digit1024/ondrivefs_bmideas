@@ -30,8 +30,9 @@ impl fuser::Filesystem for OneDriveFuse {
                     reply.opened(handle_id, 0);
                 }
                 Err(e) => {
-                    debug!("📂 File not found in local folder for inode but the Inode is real (downloadfile){}: {}", ino, e);
-                    reply.opened(0,0);
+                    debug!("📂 File not found in local folder for inode {}: {}", ino, e);
+                    // Return virtual file handle for .onedrivedownload files
+                    reply.opened(1, 0); // VIRTUAL_FILE_HANDLE_ID
                 }
             }
         } else {
@@ -44,6 +45,13 @@ impl fuser::Filesystem for OneDriveFuse {
         
         if fh == 0 {
             // Directory - nothing to close
+            reply.ok();
+            return;
+        }
+
+        // Handle virtual file handles (no cleanup needed)
+        if fh == 1 { // VIRTUAL_FILE_HANDLE_ID
+            debug!("📂 Released virtual file handle {} for inode {}", fh, ino);
             reply.ok();
             return;
         }
@@ -245,6 +253,29 @@ impl fuser::Filesystem for OneDriveFuse {
             // Directory read - return empty data
             reply.data(&[]);
             return;
+        }
+
+        // Check if this is a virtual file handle
+        if fh == 1 { // VIRTUAL_FILE_HANDLE_ID
+            if let Ok(Some(item)) = sync_await(self.database().get_item_by_ino(ino)) {
+                if !item.is_folder() {
+                    let content = self.file_operations().generate_placeholder_content(&item);
+                    
+                    // Handle offset and size properly
+                    let content_len = content.len() as i64;
+                    let start = offset.min(content_len);
+                    let end = (offset + size as i64).min(content_len);
+                    
+                    if start < end {
+                        let slice = &content[start as usize..end as usize];
+                        reply.data(slice);
+                    } else {
+                        reply.data(&[]); // Empty response for out-of-bounds reads
+                    }
+                    return;
+                }
+            }
+            // If it's a folder or item not found, fall through to normal error handling
         }
 
         match self.file_handles().read_from_handle(fh, offset as u64, size) {

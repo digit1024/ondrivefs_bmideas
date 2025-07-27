@@ -11,6 +11,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use crate::fuse::utils::sync_await;
 
+const VIRTUAL_FILE_HANDLE_ID: u64 = 1;
+
 /// File handle for caching open files
 #[derive(Debug)]
 pub struct OpenFileHandle {
@@ -35,7 +37,7 @@ impl FileHandleManager {
     ) -> Self {
         Self {
             open_handles: Arc::new(Mutex::new(HashMap::new())),
-            next_handle_id: Arc::new(Mutex::new(1)),
+            next_handle_id: Arc::new(Mutex::new(2)), // Start from 2, 1 is reserved for virtual files
             file_manager,
             app_state,
         }
@@ -55,7 +57,20 @@ impl FileHandleManager {
             }
         }
         
-        // Get local file path
+        // Check if this is a virtual file (no local file exists)
+        if self.file_manager.get_local_path_if_file_exists(ino).is_none() {
+            // Get item from database to check if it's a folder
+            if let Ok(Some(item)) = sync_await(self.get_item_by_ino(ino)) {
+                // Only create virtual handles for files, not folders
+                if !item.is_folder() {
+                    debug!("📂 Creating virtual file handle {} for inode {} (no local file)", 
+                           VIRTUAL_FILE_HANDLE_ID, ino);
+                    return Ok(VIRTUAL_FILE_HANDLE_ID);
+                }
+            }
+        }
+        
+        // Get local file path for real files
         let local_path = self.file_manager.get_local_path_if_file_exists(ino)
             .ok_or_else(|| anyhow::anyhow!("File not found in local folder for inode: {}", ino))?;
         
@@ -161,6 +176,11 @@ impl FileHandleManager {
         } else {
             Err(anyhow::anyhow!("No item found for inode: {}", ino))
         }
+    }
+
+    /// Get item by inode from database
+    async fn get_item_by_ino(&self, ino: u64) -> Result<Option<crate::persistency::types::DriveItemWithFuse>> {
+        self.app_state.persistency().drive_item_with_fuse_repository().get_drive_item_with_fuse_by_virtual_ino(ino).await
     }
 
     /// Create a processing item for a dirty handle
