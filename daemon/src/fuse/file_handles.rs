@@ -41,23 +41,23 @@ impl FileHandleManager {
         }
     }
 
-    /// Get or create a file handle for the given inode and OneDrive ID
-    pub fn get_or_create_file_handle(&self, ino: u64, onedrive_id: &str) -> Result<u64> {
+    /// Get or create a file handle for the given inode
+    pub fn get_or_create_file_handle(&self, ino: u64) -> Result<u64> {
         let mut handles = self.open_handles.lock().unwrap();
         let mut next_id = self.next_handle_id.lock().unwrap();
         
         // Check if file is already open for this inode
         for (handle_id, handle) in handles.iter() {
-            if handle.onedrive_id == onedrive_id {
-                debug!("📂 Reusing existing file handle {} for inode {} ({})", 
-                       handle_id, ino, onedrive_id);
+            if handle.ino == ino {
+                debug!("📂 Reusing existing file handle {} for inode {}", 
+                       handle_id, ino);
                 return Ok(*handle_id);
             }
         }
         
         // Get local file path
-        let local_path = self.file_manager.get_local_path_if_file_exists(onedrive_id)
-            .ok_or_else(|| anyhow::anyhow!("File not found in local folder: {}", onedrive_id))?;
+        let local_path = self.file_manager.get_local_path_if_file_exists(ino)
+            .ok_or_else(|| anyhow::anyhow!("File not found in local folder for inode: {}", ino))?;
         
         // Create new file handle
         let file = std::fs::OpenOptions::new()
@@ -68,16 +68,20 @@ impl FileHandleManager {
         let handle_id = *next_id;
         *next_id += 1;
         
+        // Get OneDrive ID from database for the handle (needed for sync operations)
+        let onedrive_id = sync_await(self.get_onedrive_id_for_inode(ino))
+            .unwrap_or_else(|_| format!("unknown_{}", ino));
+        
         let open_handle = OpenFileHandle {
             file,
-            onedrive_id: onedrive_id.to_string(),
+            onedrive_id,
             ino,
             is_dirty: false,
         };
         
         handles.insert(handle_id, open_handle);
-        debug!("📂 Created new file handle {} for inode {} ({}) at {}", 
-               handle_id, ino, onedrive_id, local_path.display());
+        debug!("📂 Created new file handle {} for inode {} at {}", 
+               handle_id, ino, local_path.display());
         
         Ok(handle_id)
     }
@@ -147,6 +151,15 @@ impl FileHandleManager {
                 debug!("📂 Cleaned up file handle {} for inode {} ({})", key, ino, handle.onedrive_id);
                 drop(handle.file);
             }
+        }
+    }
+
+    /// Get OneDrive ID for a given inode from database
+    async fn get_onedrive_id_for_inode(&self, ino: u64) -> Result<String> {
+        if let Ok(Some(item)) = sync_await(self.app_state.persistency().drive_item_with_fuse_repository().get_drive_item_with_fuse_by_virtual_ino(ino)) {
+            Ok(item.id().to_string())
+        } else {
+            Err(anyhow::anyhow!("No item found for inode: {}", ino))
         }
     }
 

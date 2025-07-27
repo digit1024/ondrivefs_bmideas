@@ -521,8 +521,16 @@ impl SyncProcessor {
         debug!("📤 Processing local update: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
         
         
-        // Get local path from the processing item
-        let local_path =  self.app_state.file_manager().get_local_dir().join(&item.drive_item.id);
+        // Get local path using inode from database
+        let local_path = if let Ok(Some(item_with_fuse)) = self.drive_item_with_fuse_repo.get_drive_item_with_fuse(&item.drive_item.id).await {
+            if let Some(ino) = item_with_fuse.virtual_ino() {
+                self.app_state.file_manager().get_local_dir().join(ino.to_string())
+            } else {
+                self.app_state.file_manager().get_local_dir().join(&item.drive_item.id)
+            }
+        } else {
+            self.app_state.file_manager().get_local_dir().join(&item.drive_item.id)
+        };
         
         
         // Check if it's a folder or file

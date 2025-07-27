@@ -23,7 +23,7 @@ impl fuser::Filesystem for OneDriveFuse {
             }
             
             // For files, try to open from local folder
-            match self.file_handles().get_or_create_file_handle(ino, item.id()) {
+            match self.file_handles().get_or_create_file_handle(ino) {
                 Ok(handle_id) => {
                     debug!("📂 Opened file handle {} for inode {} ({})", 
                            handle_id, ino, item.name().unwrap_or("unknown"));
@@ -57,7 +57,7 @@ impl fuser::Filesystem for OneDriveFuse {
                         Ok(()) // No update needed for folders
                     } else {
                         // Get the file path for the item
-                        if let Some(file_path) = self.file_operations().file_exists_locally(&item.drive_item().id) {
+                        if let Some(file_path) = self.file_operations().file_exists_locally(item.virtual_ino().unwrap_or(0)) {
                             // Update DriveItem with file metadata
                             let mut updated_drive_item = item.drive_item().clone();
                             match sync_await(DriveItemManager::update_drive_item_from_file(&mut updated_drive_item, &file_path)) {
@@ -200,7 +200,7 @@ impl fuser::Filesystem for OneDriveFuse {
                     } else {
                         fuser::FileType::RegularFile
                     };
-                    let name = if self.file_operations().file_exists_locally(&child.drive_item().id).is_none() && !child.is_folder(){
+                    let name = if self.file_operations().file_exists_locally(child.virtual_ino().unwrap_or(0)).is_none() && !child.is_folder(){
                         format!("{}.onedrivedownload", child.name().unwrap_or("unknown"))
                     } else {
                         child.name().unwrap_or("unknown").to_string()
@@ -300,14 +300,14 @@ impl fuser::Filesystem for OneDriveFuse {
             Ok(ino) => {
                 if let Ok(Some(item)) = sync_await(self.database().get_item_by_ino(ino)) {
                     // Create the actual file in the local directory
-                    if let Err(e) = sync_await(self.file_manager().create_empty_file(item.id())) {
+                    if let Err(e) = sync_await(self.file_manager().create_empty_file(ino)) {
                         error!("Failed to create local file: {}", e);
                         reply.error(libc::EIO);
                         return;
                     }
                     
                     // Try to open the file
-                    match self.file_handles().get_or_create_file_handle(ino, item.id()) {
+                    match self.file_handles().get_or_create_file_handle(ino) {
                         Ok(handle_id) => {
                             reply.created(
                                 &Duration::from_secs(3),

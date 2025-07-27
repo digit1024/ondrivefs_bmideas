@@ -88,16 +88,16 @@ impl DefaultFileManager {
         let upload_path = self.config.upload_dir().join(onedrive_id);
         upload_path.exists() && upload_path.is_file()
     }
-    pub fn get_local_path_if_file_exists(&self, onedrive_id: &str) -> Option<PathBuf> {
-        let local_path = self.config.local_dir().join(onedrive_id);
+    pub fn get_local_path_if_file_exists(&self, ino: u64) -> Option<PathBuf> {
+        let local_path = self.config.local_dir().join(ino.to_string());
         if local_path.exists() && local_path.is_file() {
             return Some(local_path);
         }
         None
     }
-    pub async fn move_downloaded_file_to_local_folder(&self, onedrive_id: &str) -> Result<()> {
-        let download = self.get_download_dir().join(onedrive_id);
-        let local = self.get_local_dir().join(onedrive_id);
+    pub async fn move_downloaded_file_to_local_folder(&self, ino: u64) -> Result<()> {
+        let download = self.get_download_dir().join(ino.to_string());
+        let local = self.get_local_dir().join(ino.to_string());
         fs::rename(download, local).await?;
         Ok(())
     }
@@ -112,9 +112,9 @@ impl DefaultFileManager {
         Ok(())
     }
 
-    /// Create an empty file in the local directory for a given OneDrive ID
-    pub async fn create_empty_file(&self, onedrive_id: &str) -> Result<()> {
-        let local_path = self.get_local_dir().join(onedrive_id);
+    /// Create an empty file in the local directory for a given inode
+    pub async fn create_empty_file(&self, ino: u64) -> Result<()> {
+        let local_path = self.get_local_dir().join(ino.to_string());
         
         // Ensure parent directory exists
         if let Some(parent) = local_path.parent() {
@@ -125,7 +125,7 @@ impl DefaultFileManager {
         fs::write(&local_path, &[]).await
             .with_context(|| format!("Failed to create empty file: {}", local_path.display()))?;
         
-        debug!("📄 Created empty file: {} ({})", local_path.display(), onedrive_id);
+        debug!("📄 Created empty file: {} (ino: {})", local_path.display(), ino);
         Ok(())
     }
     

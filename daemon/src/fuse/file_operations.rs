@@ -15,16 +15,16 @@ impl FileOperationsManager {
         Self { file_manager }
     }
 
-    /// Check if file exists locally with upload folder priority
-    pub fn file_exists_locally(&self, onedrive_id: &str) -> Option<PathBuf> {
-        self.file_manager.get_local_path_if_file_exists(onedrive_id)
+    /// Check if file exists locally by inode
+    pub fn file_exists_locally(&self, ino: u64) -> Option<PathBuf> {
+        self.file_manager.get_local_path_if_file_exists(ino)
     }
 
     /// Read data from a local staging folder
     pub fn read_local_file(&self, item: &DriveItemWithFuse, offset: u64, size: u32) -> Result<Vec<u8>> {
-        let onedrive_id = item.id();
+        let ino = item.virtual_ino().unwrap_or(0);
         
-        if let Some(local_path) = self.file_exists_locally(onedrive_id) {
+        if let Some(local_path) = self.file_exists_locally(ino) {
             let mut file = std::fs::File::open(&local_path)?;
             file.seek(std::io::SeekFrom::Start(offset))?;
             

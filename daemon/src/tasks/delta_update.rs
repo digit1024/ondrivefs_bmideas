@@ -238,8 +238,14 @@ impl SyncCycle {
                             5000,
                         ).await;
                     }
-                    // we should move the file to the local folder
-                    self.app_state.file_manager.move_downloaded_file_to_local_folder(drive_item_id.as_str()).await?;
+                    // Get the inode for this file
+                    let drive_item_with_fuse_repo = DriveItemWithFuseRepository::new(self.app_state.persistency().pool().clone());
+                    if let Ok(Some(item)) = drive_item_with_fuse_repo.get_drive_item_with_fuse(&drive_item_id).await {
+                        if let Some(ino) = item.virtual_ino() {
+                            // Move the file to the local folder using inode
+                            self.app_state.file_manager.move_downloaded_file_to_local_folder(ino).await?;
+                        }
+                    }
                     
                 }
                 Err(e) => {
@@ -278,11 +284,23 @@ impl SyncCycle {
             // Get the length before moving the data
             let data_len = download_result.file_data.len();
 
+            // Get the inode for this file to determine local path
+            let drive_item_with_fuse_repo = DriveItemWithFuseRepository::new(self.app_state.persistency().pool().clone());
+            let actual_local_path = if let Ok(Some(item)) = drive_item_with_fuse_repo.get_drive_item_with_fuse(drive_item_id).await {
+                if let Some(ino) = item.virtual_ino() {
+                    self.app_state.config().project_dirs.data_dir().join("downloads").join(ino.to_string())
+                } else {
+                    local_path.to_path_buf()
+                }
+            } else {
+                local_path.to_path_buf()
+            };
+
             // Write downloaded data to local file
-            std::fs::write(local_path, download_result.file_data).with_context(|| {
+            std::fs::write(&actual_local_path, download_result.file_data).with_context(|| {
                 format!(
                     "Failed to write file {}: {}",
-                    local_path.display(),
+                    actual_local_path.display(),
                     drive_item_id
                 )
             })?;
