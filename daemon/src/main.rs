@@ -370,7 +370,7 @@ async fn main() -> Result<()> {
     let sync_cycle = SyncCycle::new(app.app_state.clone());
     let mut scheduler = crate::scheduler::periodic_scheduler::PeriodicScheduler::new();
     let sync_task = sync_cycle.get_task().await?;
-    //scheduler.add_task(sync_task);
+    scheduler.add_task(sync_task);
     
     let scheduler_shutdown_rx = shutdown_manager.subscribe();
     let scheduler_handle = tokio::spawn(async move {
