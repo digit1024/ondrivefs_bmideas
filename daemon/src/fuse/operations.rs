@@ -5,7 +5,7 @@ use crate::fuse::utils::{sync_await, FUSE_CAP_READDIRPLUS};
 use crate::fuse::attributes::AttributeManager;
 use crate::fuse::drive_item_manager::DriveItemManager;
 use fuser::{
-    FileAttr, FileType, KernelConfig, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEntry, ReplyStatfs, ReplyWrite
+    FileAttr, FileType, KernelConfig, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyDirectoryPlus, ReplyEntry, ReplyStatfs, ReplyWrite
 };
 use libc::c_int;
 use log::{debug, info, warn, error};
@@ -156,7 +156,7 @@ impl fuser::Filesystem for OneDriveFuse {
     }
 
     fn getattr(&mut self, _req: &fuser::Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
-        debug!("GETATTR: ino={}", ino);
+        info!("GETATTR: ino={}", ino);
 
         if let Ok(Some(item)) = sync_await(self.database().get_item_by_ino(ino)) {
             reply.attr(&Duration::from_secs(3), &AttributeManager::item_to_file_attr(&item));
@@ -173,7 +173,7 @@ impl fuser::Filesystem for OneDriveFuse {
         offset: i64,
         mut reply: ReplyDirectory,
     ) {
-        debug!("READDIR: ino={}, offset={}", ino, offset);
+        info!("READDIR: ino={}, offset={}", ino, offset);
 
         if let Ok(children) = sync_await(self.database().get_children_by_parent_ino(ino)) {
             let mut entries = Vec::new();
@@ -192,43 +192,63 @@ impl fuser::Filesystem for OneDriveFuse {
             };
             
             // Add "." and ".." entries
-            if offset == 0 {
+            
                 let dot_ino = item.virtual_ino().unwrap_or(ino);
                 let dotdot_ino = item.parent_ino().unwrap_or(1);
                 entries.push((dot_ino, fuser::FileType::Directory, ".".to_string()));
+                info!("Adding . entry: {}", dot_ino);
                 entries.push((dotdot_ino, fuser::FileType::Directory, "..".to_string()));
-            }
+                info!("Adding .. entry: {}", dotdot_ino);
+            
             
             // Add child entries
             for (i, child) in children.iter().enumerate() {
-                let entry_offset = (i + 2) as i64; // +2 for "." and ".."
-                if entry_offset >= offset {
-                    let file_type = if child.is_folder() {
-                        fuser::FileType::Directory
-                    } else {
-                        fuser::FileType::RegularFile
-                    };
-                    let name = if self.file_operations().file_exists_locally(child.virtual_ino().unwrap_or(0)).is_none() && !child.is_folder(){
-                        format!("{}.onedrivedownload", child.name().unwrap_or("unknown"))
-                    } else {
-                        child.name().unwrap_or("unknown").to_string()
-                    };
-                    entries.push((child.virtual_ino().unwrap_or(0), file_type, name));
-                }
+                
+                let file_type = if child.is_folder() {
+                    fuser::FileType::Directory
+                } else {
+                    fuser::FileType::RegularFile
+                };
+                let name = if self.file_operations().file_exists_locally(child.virtual_ino().unwrap_or(0)).is_none() && !child.is_folder(){
+                    format!("{}.onedrivedownload", child.name().unwrap_or("unknown"))
+                } else {
+                    child.name().unwrap_or("unknown").to_string()
+                };
+                entries.push((child.virtual_ino().unwrap_or(0), file_type, name));
+                
             }
 
-            let mut current_offset = offset+1 ;
+
+            // let entries = vec![
+            //     (1, FileType::Directory, "."),
+            //     (1, FileType::Directory, ".."),
+            //     (2, FileType::RegularFile, "hello.txt"),
+            // ];
+            // for (i, entry) in entries.into_iter().enumerate().skip(offset as usize) {
+            //     // i + 1 means the index of the next entry
+            //     if reply.add(entry.0, (i + 1) as i64, entry.1, entry.2) {
+            //         break;
+            //     }
+            // }
+            // reply.ok();
+
+            let mut current_offset = 1 ;
             // Add entries with proper offset handling
             for (i, (ino, kind, name)) in entries.iter().enumerate() {
                 
-
                 
-                
-                if !reply.add(*ino, current_offset, *kind, name) {
-                    break;
+                    info!("Adding entry: {} at offset {}", name, i+1);
+                if(offset < i as i64 +1){
+                    if reply.add(*ino, i as i64+1, *kind, name) {
+                        
+                        info!("Failed to add");
+                        
+                        break;
+                    }
                 }
-                current_offset += 1;
+            
             }
+            
             
             reply.ok();
         } else {
@@ -247,7 +267,7 @@ impl fuser::Filesystem for OneDriveFuse {
         _lock_owner: Option<u64>,
         reply: ReplyData,
     ) {
-        debug!("READ: ino={}, fh={}, offset={}, size={}", ino, fh, offset, size);
+        info!("READ: ino={}, fh={}, offset={}, size={}", ino, fh, offset, size);
 
         if fh == 0 {
             // Directory read - return empty data
@@ -301,7 +321,7 @@ impl fuser::Filesystem for OneDriveFuse {
         _lock_owner: Option<u64>,
         reply: ReplyWrite,
     ) {
-        debug!("WRITE: ino={}, fh={}, offset={}, size={}", ino, fh, offset, data.len());
+        info!("WRITE: ino={}, fh={}, offset={}, size={}", ino, fh, offset, data.len());
 
         match self.file_handles().write_to_handle(fh, offset as u64, data) {
             Ok(_) => {
@@ -325,7 +345,7 @@ impl fuser::Filesystem for OneDriveFuse {
         reply: ReplyCreate,
     ) {
         let name_str = name.to_string_lossy();
-        debug!("CREATE: parent={}, name={}", parent, name_str);
+        info!("CREATE: parent={}, name={}", parent, name_str);
 
         match sync_await(self.database().apply_local_change_to_db_repository("create", parent, &name_str, false)) {
             Ok(ino) => {
@@ -374,7 +394,7 @@ impl fuser::Filesystem for OneDriveFuse {
         reply: ReplyEntry,
     ) {
         let name_str = name.to_string_lossy();
-        debug!("MKDIR: parent={}, name={}", parent, name_str);
+        info!("MKDIR: parent={}, name={}", parent, name_str);
 
         match sync_await(self.database().apply_local_change_to_db_repository("mkdir", parent, &name_str, true)) {
             Ok(ino) => {
@@ -403,7 +423,7 @@ impl fuser::Filesystem for OneDriveFuse {
         reply: fuser::ReplyEmpty,
     ) {
         let name_str = name.to_string_lossy();
-        debug!("UNLINK: parent={}, name={}", parent, name_str);
+        info!("UNLINK: parent={}, name={}", parent, name_str);
 
         // Get the item to be deleted
         if let Ok(Some(item)) = sync_await(self.drive_item_with_fuse_repo().get_drive_item_with_fuse_by_parent_ino_and_name(parent, &name_str)) {
@@ -439,7 +459,7 @@ impl fuser::Filesystem for OneDriveFuse {
         reply: fuser::ReplyEmpty,
     ) {
         let name_str = name.to_string_lossy();
-        debug!("RMDIR: parent={}, name={}", parent, name_str);
+        info!("RMDIR: parent={}, name={}", parent, name_str);
 
         // Get the directory to be deleted
         if let Ok(Some(item)) = sync_await(self.drive_item_with_fuse_repo().get_drive_item_with_fuse_by_parent_ino_and_name(parent, &name_str)) {
@@ -574,6 +594,87 @@ impl fuser::Filesystem for OneDriveFuse {
             255,           // Max filename length
             0,             // Fragment size
         );
+    }
+    fn readdirplus(
+        &mut self,
+        _req: &fuser::Request<'_>,
+        ino: u64,
+        fh: u64,
+        offset: i64,
+        mut reply: ReplyDirectoryPlus,
+    ){
+        info!("READDIRPLUS: ino={}, fh={}, offset={}", ino, fh, offset);
+        if let Ok(children) = sync_await(self.database().get_children_by_parent_ino(ino)) {
+            let mut entries = Vec::new();
+            
+            // Get the current item
+            let item = match sync_await(self.database().get_item_by_ino(ino)) {
+                Ok(Some(item)) => item,
+                Ok(None) => {
+                    reply.error(libc::ENOENT);
+                    return;
+                }
+                Err(_) => {
+                    reply.error(libc::EIO);
+                    return;
+                }
+            };
+            
+            // Add "." and ".." entries
+            
+                let dot_ino = item.virtual_ino().unwrap_or(ino);
+                let dotdot_ino = item.parent_ino().unwrap_or(1);
+                let parent_item = sync_await(self.database().get_item_by_ino(dotdot_ino)).unwrap().unwrap();
+                entries.push((dot_ino, fuser::FileType::Directory, ".".to_string(), AttributeManager::item_to_file_attr(&item), 0 as u64));
+                info!("Adding . entry: {}", dot_ino );
+                entries.push((dotdot_ino, fuser::FileType::Directory, "..".to_string(), AttributeManager::item_to_file_attr(&parent_item), 0 as u64));
+                info!("Adding .. entry: {}", dotdot_ino);
+            
+            
+            // Add child entries
+            for (i, child) in children.iter().enumerate() {
+                
+                let file_type = if child.is_folder() {
+                    fuser::FileType::Directory
+                } else {
+                    fuser::FileType::RegularFile
+                };
+                let name = if self.file_operations().file_exists_locally(child.virtual_ino().unwrap_or(0)).is_none() && !child.is_folder(){
+                    format!("{}.onedrivedownload", child.name().unwrap_or("unknown"))
+                } else {
+                    child.name().unwrap_or("unknown").to_string()
+                };
+                let attr = AttributeManager::item_to_file_attr(&child);
+                entries.push((child.virtual_ino().unwrap_or(0), file_type, name, attr , 0 as u64));
+                
+            }
+
+
+   
+
+            let mut current_offset = 1 ;
+            // Add entries with proper offset handling
+            for (i, (ino, kind, name, attr, geno)) in entries.iter().enumerate() {
+                
+                
+                    info!("Adding entry: {} at offset {}", name, i+1);
+                if(offset < i as i64 +1){
+                    
+                    if reply.add(*ino, i as i64+1, name, &Duration::from_secs(5), &attr, geno.clone() ) {
+                        
+                        info!("Failed to add");
+                        
+                        break;
+                    }
+                }
+            
+            }
+            
+            
+            reply.ok();
+        } else {
+            reply.error(libc::ENOENT);
+        }
     }
 
     fn init(
