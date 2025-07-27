@@ -300,7 +300,7 @@ impl DriveItemWithFuseRepository {
             SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path, 
                    parent_ino, virtual_path,  file_source, sync_status
-            FROM drive_items_with_fuse WHERE parent_ino = ? ORDER BY name LIMIT ? OFFSET ?
+            FROM drive_items_with_fuse WHERE parent_ino = ? ORDER BY virtual_ino LIMIT ? OFFSET ?
             "#,
         )
         .bind(parent_ino as i64)

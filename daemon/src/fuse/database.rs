@@ -47,6 +47,11 @@ impl DatabaseManager {
         crate::fuse::utils::sync_await(self.drive_item_with_fuse_repo.get_children_by_parent_ino(parent_ino))
     }
 
+    /// Get children by parent inode, paginated
+    pub async fn get_children_by_parent_ino_paginated(&self, parent_ino: u64, offset: usize, limit: usize) -> Result<Vec<DriveItemWithFuse>> {
+        crate::fuse::utils::sync_await(self.drive_item_with_fuse_repo.get_children_by_parent_ino_paginated(parent_ino, offset, limit))
+    }
+
     /// Mark database item as modified
     pub async fn mark_db_item_as_modified(&self, ino: u64) -> Result<()> {
         if let Ok(Some(item)) = self.get_item_by_ino(ino).await {

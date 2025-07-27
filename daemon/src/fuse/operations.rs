@@ -165,6 +165,7 @@ impl fuser::Filesystem for OneDriveFuse {
         }
     }
 
+
     fn readdir(
         &mut self,
         _req: &fuser::Request,
@@ -174,34 +175,31 @@ impl fuser::Filesystem for OneDriveFuse {
         mut reply: ReplyDirectory,
     ) {
         info!("READDIR: ino={}, offset={}", ino, offset);
+        let dots_added = self.add_dot_entries_if_needed(ino, &mut reply, offset);
+        let mut current_offset = offset;
+        let mut entries_added = if dots_added {2} else {0};
+        let batch_size = 100; // Fetch 100 items at a time
+        // for offset 0 actual offset woudl be 0 
+        // but if we have not added entries so offset was lets say 2 actual offset woudl be offset - 2
+        let mut actual_offset: usize = if dots_added {offset as usize} else {(offset -2) as usize}; //actual offset is the offset of the first child
 
-        if let Ok(children) = sync_await(self.database().get_children_by_parent_ino(ino)) {
-            let mut entries = Vec::new();
-            
-            // Get the current item
-            let item = match sync_await(self.database().get_item_by_ino(ino)) {
-                Ok(Some(item)) => item,
-                Ok(None) => {
-                    reply.error(libc::ENOENT);
-                    return;
-                }
+        loop{
+            let children = match sync_await(self.database().get_children_by_parent_ino_paginated(
+                ino, 
+                actual_offset, 
+                batch_size
+            )) {
+                Ok(children) => children,
                 Err(_) => {
                     reply.error(libc::EIO);
                     return;
                 }
             };
-            
-            // Add "." and ".." entries
-            
-                let dot_ino = item.virtual_ino().unwrap_or(ino);
-                let dotdot_ino = item.parent_ino().unwrap_or(1);
-                entries.push((dot_ino, fuser::FileType::Directory, ".".to_string()));
-                info!("Adding . entry: {}", dot_ino);
-                entries.push((dotdot_ino, fuser::FileType::Directory, "..".to_string()));
-                info!("Adding .. entry: {}", dotdot_ino);
-            
-            
-            // Add child entries
+    
+            // If no more children, we're done
+            if children.is_empty() {
+                break;
+            }
             for (i, child) in children.iter().enumerate() {
                 
                 let file_type = if child.is_folder() {
@@ -214,46 +212,30 @@ impl fuser::Filesystem for OneDriveFuse {
                 } else {
                     child.name().unwrap_or("unknown").to_string()
                 };
-                entries.push((child.virtual_ino().unwrap_or(0), file_type, name));
                 
-            }
-
-
-            // let entries = vec![
-            //     (1, FileType::Directory, "."),
-            //     (1, FileType::Directory, ".."),
-            //     (2, FileType::RegularFile, "hello.txt"),
-            // ];
-            // for (i, entry) in entries.into_iter().enumerate().skip(offset as usize) {
-            //     // i + 1 means the index of the next entry
-            //     if reply.add(entry.0, (i + 1) as i64, entry.1, entry.2) {
-            //         break;
-            //     }
-            // }
-            // reply.ok();
-
-            let mut current_offset = 1 ;
-            // Add entries with proper offset handling
-            for (i, (ino, kind, name)) in entries.iter().enumerate() {
-                
-                
-                    info!("Adding entry: {} at offset {}", name, i+1);
-                if(offset < i as i64 +1){
-                    if reply.add(*ino, i as i64+1, *kind, name) {
-                        
-                        info!("Failed to add");
-                        
-                        break;
-                    }
+                let entry_offset = if dots_added { 
+                    offset as i64 + i as i64 + 3  // Add 2 for "." and ".."
+                } else { 
+                    offset as i64 + i as i64 +1
+                };
+            
+                // Try to add to reply buffer
+                info!("Adding entry: {} at offset {}", name, entry_offset);
+                if reply.add(child.virtual_ino().unwrap_or(0), entry_offset, file_type, name) {
+                    // Buffer is full, we're done
+                    reply.ok();
+                    return;
                 }
-            
+                actual_offset += 1;
+                
+                
             }
-            
-            
-            reply.ok();
-        } else {
-            reply.error(libc::ENOENT);
+
         }
+        reply.ok();
+        
+
+     
     }
 
     fn read(

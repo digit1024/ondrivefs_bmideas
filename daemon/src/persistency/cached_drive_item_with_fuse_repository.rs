@@ -29,7 +29,7 @@ impl CachedDriveItemWithFuseRepository {
 
     /// Create a new cached repository with default TTL (5 minutes)
     pub fn new_with_default_ttl(repo: Arc<DriveItemWithFuseRepository>) -> Self {
-        Self::new(repo, Duration::seconds(5))
+        Self::new(repo, Duration::seconds(60))
     }
 
     // Cache management methods
