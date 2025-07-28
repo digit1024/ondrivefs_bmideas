@@ -59,7 +59,7 @@ impl SyncProcessor {
     }
 
     /// Process a single item with validation and conflict resolution
-    async fn process_single_item(&self, item: &ProcessingItem) -> Result<()> {
+    pub async fn process_single_item(&self, item: &ProcessingItem) -> Result<()> {
         
         // Get the database ID for this item
         let db_id = item.id.ok_or_else(|| anyhow::anyhow!("ProcessingItem has no database ID"))?;

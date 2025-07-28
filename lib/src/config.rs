@@ -94,7 +94,7 @@ pub enum ConflictResolutionStrategy {
 
 impl Default for ConflictResolutionStrategy {
     fn default() -> Self {
-        ConflictResolutionStrategy::AlwaysRemote
+        ConflictResolutionStrategy::Manual
     }
 }
 

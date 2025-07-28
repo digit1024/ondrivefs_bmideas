@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::sync::Mutex;
 use onedrive_sync_daemon::app_state::AppState;
+use onedrive_sync_daemon::log_appender::setup_logging;
 
 /// Global test environment that persists across all tests
 pub static TEST_ENV: Lazy<Arc<Mutex<TestEnv>>> = Lazy::new(|| {
@@ -91,6 +92,10 @@ impl TestEnv {
         // Create AppState
         let app_state = AppState::new().await
             .context("Failed to create AppState")?;
+        
+        // Setup logging for tests
+        setup_logging(&self.data_dir).await
+            .context("Failed to setup logging")?;
         
         // Initialize database schema
         app_state.persistency().init_database().await
