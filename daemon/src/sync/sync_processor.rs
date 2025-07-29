@@ -5,7 +5,7 @@ use crate::persistency::processing_item_repository::{ChangeOperation, ChangeType
 use crate::sync::sync_strategy::SyncStrategy;
 use crate::sync::conflict_resolution::ConflictResolution;
 use std::sync::Arc;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use log::{info, warn, error, debug};
 use std::path::PathBuf;
 
@@ -524,15 +524,13 @@ impl SyncProcessor {
         
         
         // Get local path using inode from database
-        let local_path = if let Ok(Some(item_with_fuse)) = self.drive_item_with_fuse_repo.get_drive_item_with_fuse(&item.drive_item.id).await {
-            if let Some(ino) = item_with_fuse.virtual_ino() {
-                self.app_state.file_manager().get_local_dir().join(ino.to_string())
-            } else {
-                self.app_state.file_manager().get_local_dir().join(&item.drive_item.id)
-            }
-        } else {
-            self.app_state.file_manager().get_local_dir().join(&item.drive_item.id)
-        };
+        let mut fs = self.drive_item_with_fuse_repo.get_drive_item_with_fuse(&item.drive_item.id).await.context("Failed to obtain FUSE item")?.unwrap();
+        let path = self.app_state.file_manager().get_local_dir().join(fs.virtual_ino().unwrap().to_string());
+        if !path.exists() {
+            return Err(anyhow::anyhow!("Local file does not exist: {}", path.display()));
+        }
+        
+        
         
         
         // Check if it's a folder or file
@@ -543,67 +541,20 @@ impl SyncProcessor {
             debug!("📁 Updated folder metadata: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
         } else {
             // For files, read the file and update on OneDrive
-            if local_path.exists() {
-                match std::fs::read(&local_path) {
-                    Ok(file_data) => {
-                        match self.app_state.onedrive_client.update_file(&file_data, &item.drive_item.id).await {
-                            Ok(result) => {
-                                info!("📤 Updated file on OneDrive: {} -> {}", local_path.display(), result.onedrive_id);
-                                
-                                // Get the full DriveItem from OneDrive to update with complete metadata
-                                match self.app_state.onedrive_client.get_item_by_id(&result.onedrive_id).await {
-                                    Ok(full_drive_item) => {
-                                        // Move file from upload folder to download folder
-                                        let download_path = self.app_state.config().project_dirs.data_dir().join("downloads").join(&result.onedrive_id);
-                                        
-                                        // Remove existing file in download folder if it exists
-                                        if download_path.exists() {
-                                            if let Err(e) = std::fs::remove_file(&download_path) {
-                                                warn!("⚠️ Failed to remove existing file in download folder: {}: {}", 
-                                                      download_path.display(), e);
-                                            }
-                                        }
-                                        
-                                        // Move file from upload to download
-                                        if let Err(e) = std::fs::rename(&local_path, &download_path) {
-                                            warn!("⚠️ Failed to move file from upload to download: {} -> {}: {}", 
-                                                  local_path.display(), download_path.display(), e);
-                                        } else {
-                                            debug!("📁 Moved file from upload to download: {} -> {}", 
-                                                  local_path.display(), download_path.display());
-                                }
-                                
-                                        // Setup FUSE metadata for the updated file with real OneDrive data
-                                let local_downloads_path = self.app_state.config().project_dirs.data_dir().join("downloads");
-                                        let _inode = self.setup_fuse_metadata(&full_drive_item, &self.drive_item_with_fuse_repo, &local_downloads_path).await?;
-                                        
-                                        // Update the processing item with the real OneDrive data
-                                        let mut updated_processing_item = item.clone();
-                                        updated_processing_item.drive_item = full_drive_item;
-                                        self.processing_repo.update_processing_item(&updated_processing_item).await?;
-                                        
-                                        debug!("✅ Updated processing item with real OneDrive data for file: {}", 
-                                              item.drive_item.name.as_deref().unwrap_or("unnamed"));
-                                    }
-                                    Err(e) => {
-                                        warn!("⚠️ Failed to get full DriveItem for updated file: {}", e);
-                                        // Continue anyway since we have the basic info
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                error!("❌ Failed to update file on OneDrive: {}", e);
-                                return Err(e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("❌ Failed to read local file for update: {}", e);
-                        return Err(anyhow::anyhow!("Failed to read local file: {}", e));
-                    }
-                }
+
+            if path.exists() {
+                let file_data = std::fs::read(&path).context("Failed to read local file")?;
+                let result = self.app_state.onedrive_client.update_file(&file_data, &item.drive_item.id).await.context("Failed to update file on OneDrive")?;
+                info!("📤 Updated file on OneDrive: {} -> {}", path.display(), result.onedrive_id);
+                fs.set_sync_status("synced".to_string());
+                
+                fs.drive_item.set_etag(result.etag.clone().unwrap());
+                fs.drive_item.set_size(result.size.clone().unwrap());
+                self.drive_item_with_fuse_repo.store_drive_item_with_fuse(&fs).await.context("Failed to store modifiedFUSE item")?;
+
+                
             } else {
-                return Err(anyhow::anyhow!("Local file does not exist: {}", local_path.display()));
+                return Err(anyhow::anyhow!("Local file does not exist: {}", path.display()));
             }
         }
         
