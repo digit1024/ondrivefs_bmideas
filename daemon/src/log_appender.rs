@@ -59,7 +59,7 @@ fn get_log_level() -> LevelFilter {
             "warn" => LevelFilter::Warn,
             "error" => LevelFilter::Error,
             "off" => LevelFilter::Off,
-            _ => LevelFilter::Debug, // Default fallback
+            _ => LevelFilter::Info, // Default fallback
         }
     } else {
         // Default to Info level to reduce noise

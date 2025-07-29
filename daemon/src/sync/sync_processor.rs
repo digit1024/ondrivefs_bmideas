@@ -38,6 +38,7 @@ impl SyncProcessor {
         for item in remote_items {
             if let Err(e) = self.process_single_item(&item).await {
                 error!("❌ Failed to process remote item: {}", e);
+                self.processing_repo.update_status_by_id(item.id.unwrap(), &ProcessingStatus::Error).await?;
             }
         }
 
@@ -48,6 +49,7 @@ impl SyncProcessor {
             if let Some(item) = self.processing_repo.get_next_unprocessed_item_by_change_type(&ChangeType::Local).await? {
                 if let Err(e) = self.process_single_item(&item).await {
                     error!("❌ Failed to process local item: {}", e);
+                    self.processing_repo.update_status_by_id(item.id.unwrap(), &ProcessingStatus::Error).await?;
                 }
             } else {
                 // No more unprocessed items

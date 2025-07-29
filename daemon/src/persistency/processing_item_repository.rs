@@ -513,7 +513,7 @@ impl ProcessingItemRepository {
                    status, error_message, last_status_update, retry_count, priority,
                    change_type, change_operation, conflict_resolution, validation_errors, user_decision
             FROM processing_items 
-            WHERE change_type = ? AND status IN ('new', 'validated')
+            WHERE change_type = ? AND status IN ('new', 'validated', 'error')
             AND ( parent_path  NOT LIKE '/root/.%' OR (name ='root' and parent_path is null))
             ORDER BY id ASC LIMIT 1
             "#,
@@ -539,7 +539,7 @@ impl ProcessingItemRepository {
                    status, error_message, last_status_update, retry_count, priority,
                    change_type, change_operation, conflict_resolution, validation_errors, user_decision
             FROM processing_items 
-            WHERE change_type = ? AND status IN ('new', 'validated')
+            WHERE change_type = ? AND status IN ('new', 'validated', 'error')
             AND ( parent_path  NOT LIKE '/root/.%' OR (name ='root' and parent_path is null))
             ORDER BY id ASC
             "#,
@@ -566,7 +566,7 @@ impl ProcessingItemRepository {
                    status, error_message, last_status_update, retry_count, priority,
                    change_type, change_operation, conflict_resolution, validation_errors, user_decision
             FROM processing_items 
-            WHERE status IN ('new', 'validated')
+            WHERE status IN ('new', 'validated', 'error')
             ORDER BY id ASC
             "#,
         )
@@ -941,7 +941,7 @@ impl ProcessingItemRepository {
                    status, error_message, last_status_update, retry_count, priority,
                    change_type, change_operation, conflict_resolution, validation_errors, user_decision
             FROM processing_items 
-            WHERE drive_item_id = ? AND change_type = ? AND status IN ('new', 'validated')
+            WHERE drive_item_id = ? AND change_type = ? AND status IN ('new', 'validated', 'conflicted', 'error')
             AND ( parent_path  NOT LIKE '/root/.%' OR (name ='root' and parent_path is null))
             ORDER BY id ASC LIMIT 1
             "#,
