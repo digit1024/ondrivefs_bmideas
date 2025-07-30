@@ -346,7 +346,7 @@ impl fuser::Filesystem for OneDriveFuse {
                                 &Duration::from_secs(3),
                                 &AttributeManager::item_to_file_attr(&item),
                                 handle_id,
-                                0,
+                                handle_id,
                                 0,
                             );
                         }
