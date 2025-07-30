@@ -1,5 +1,6 @@
 use crate::onedrive_service::onedrive_models::{DriveItem, ParentReference};
 use anyhow::{Context, Result};
+use chrono::{Duration, Utc};
 use log::{debug, warn};
 use sqlx::{Pool, Row, Sqlite};
 use std::path::PathBuf;
@@ -236,7 +237,7 @@ impl ProcessingItem {
             status: ProcessingStatus::New,
             
             error_message: None,
-            last_status_update: None,
+            last_status_update: Some(( Utc::now() - Duration::seconds(6)).format("%Y-%m-%d %H:%M:%S").to_string()),// shoudl be now - 6 seconds to make it valid 
             retry_count: 0,
             priority: 0,
             change_type: ChangeType::Local,
@@ -515,6 +516,7 @@ impl ProcessingItemRepository {
             FROM processing_items 
             WHERE change_type = ? AND status IN ('new', 'validated', 'error')
             AND ( parent_path  NOT LIKE '/root/.%' OR (name ='root' and parent_path is null))
+            and (change_type = 'remote' or last_status_update < datetime('now', '-5 seconds') ) -- this is to avoid processing the same item multiple times
             ORDER BY id ASC LIMIT 1
             "#,
         )
