@@ -187,9 +187,16 @@ impl FileHandleManager {
     async fn create_processing_item_for_handle(&self, onedrive_id: &str) -> Result<()> {
         // Get the item from database
         if let Ok(Some(item)) = sync_await(self.app_state.persistency().drive_item_with_fuse_repository().get_drive_item_with_fuse(&onedrive_id)) {
+            //if onedriveId is local then it's create 
+            let operation  = if onedrive_id.starts_with("local_") {
+                crate::persistency::processing_item_repository::ChangeOperation::Create
+            } else {
+                crate::persistency::processing_item_repository::ChangeOperation::Update
+            };
+            
             let processing_item = ProcessingItem::new_local(
                 item.drive_item().clone(),
-                crate::persistency::processing_item_repository::ChangeOperation::Update,
+                operation
             );
             
             let processing_repo = ProcessingItemRepository::new(

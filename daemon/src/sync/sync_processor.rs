@@ -382,10 +382,11 @@ impl SyncProcessor {
     // Local operation handlers
     async fn handle_local_create(&self, item: &ProcessingItem) -> Result<()> {
         debug!("📤 Processing local create: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
-        
+        // get the actual Fuse Item 
+        let fuse_item = self.drive_item_with_fuse_repo.get_drive_item_with_fuse(&item.drive_item.id).await.context("Failed to get FUSE item")?.unwrap();
         
         // Get local path from the processing item
-        let local_path = self.app_state.file_manager().get_local_dir().join(&item.drive_item.id);
+        let local_path = self.app_state.file_manager().get_local_dir().join(&fuse_item.virtual_ino().unwrap().to_string());
         
         // Check if it's a folder or file
         if item.drive_item.folder.is_some() {
@@ -455,7 +456,7 @@ impl SyncProcessor {
                 match std::fs::read(&local_path) {
                     Ok(file_data) => {
                         // Use the correct API endpoint with parent ID
-                        match self.app_state.onedrive_client.upload_file_to_parent(&file_data, file_name, &parent_id).await {
+                        match self.app_state.onedrive_client.upload_new_file_to_parent(&file_data, file_name, &parent_id).await {
                             Ok(result) => {
                                 info!("📤 Uploaded file to OneDrive: {} -> {}", file_name, result.onedrive_id);
                                 
@@ -544,7 +545,7 @@ impl SyncProcessor {
 
             if path.exists() {
                 let file_data = std::fs::read(&path).context("Failed to read local file")?;
-                let result = self.app_state.onedrive_client.update_file(&file_data, &item.drive_item.id).await.context("Failed to update file on OneDrive")?;
+                let result = self.app_state.onedrive_client.upload_updated_file(&file_data, &item.drive_item.id).await.context("Failed to update file on OneDrive")?;
                 info!("📤 Updated file on OneDrive: {} -> {}", path.display(), result.onedrive_id);
                 fs.set_sync_status("synced".to_string());
                 

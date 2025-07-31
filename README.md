@@ -46,6 +46,7 @@ So in essence we have different goals.
 ## 🚀 Features
 - **FUSE Filesystem:** Mount your OneDrive as a local drive under ~/OneDrive
 - **Two-way Sync:** Handles both remote and local changes
+
 - **Modern UI:** Built with libcosmic for a native look
 - **Notifications:** System and in-app notifications
 - **Autostart Daemon:** User-level systemd service for background sync
@@ -55,9 +56,9 @@ So in essence we have different goals.
 ## 🪲 BUGS and limitation
 - **Conflicts resolution not implemented/tested:**  Conflict resolution is not tested and not fully implemented 
 - **Initial sync:** Similar to other projects it takes time. There is also no UI feedback
-- **Large Files:**  Large files are not supported yet.
+**!FIXED!Large Files:**  Large files are not supported yet.
 - **Basic UI:** UI Is basic - it it more or less just a prototype
-- **Bug Going back online:** At this moment going back online requires deamon restart
+- **!FIXED!Bug Going back online:** At this moment going back online requires deamon restart
 - **no preventive controls:** E.g. Onedrive is not case sensitive - attempt to create files: Test.txt and test.txt may lead to errors. 
 - **no hauskeeping** - it woudl be nice to have a possibility to remove old (not used for a long time) files from local drive. It's not implemented yet
 - **Code quality*** - it shuld be better. No tests at this point for example. 

@@ -186,6 +186,85 @@ impl HttpClient {
 
         Ok(response)
     }
+
+    /// Create an upload session for large files
+    pub async fn create_upload_session(
+        &self,
+        url: &str,
+        body: &crate::onedrive_service::onedrive_models::UploadSessionRequest,
+        auth_header: &str,
+    ) -> Result<crate::onedrive_service::onedrive_models::UploadSessionResponse> {
+        let url = self.get_full_url(url)?;
+        let response = self
+            .client
+            .post(&url)
+            .header("Authorization", auth_header)
+            .header("Content-Type", "application/json")
+            .json(body)
+            .send()
+            .await
+            .context("Failed to create upload session")?
+            .error_for_status()
+            .context("Not a success status")?
+            .json::<crate::onedrive_service::onedrive_models::UploadSessionResponse>()
+            .await
+            .context("Failed to deserialize upload session response")?;
+
+        Ok(response)
+    }
+
+    /// Upload a file chunk to an upload session
+    pub async fn upload_file_chunk(
+        &self,
+        upload_url: &str,
+        chunk_data: &[u8],
+        content_range: &str,
+    ) -> Result<reqwest::Response> {
+        let response = self
+            .client
+            .put(upload_url)
+            .header("Content-Length", chunk_data.len().to_string())
+            .header("Content-Range", content_range)
+            .body(chunk_data.to_vec())
+            .send()
+            .await
+            .context("Failed to upload file chunk")?;
+
+        Ok(response)
+    }
+
+    /// Get upload session status
+    pub async fn get_upload_session_status(
+        &self,
+        upload_url: &str,
+    ) -> Result<crate::onedrive_service::onedrive_models::UploadSessionStatus> {
+        let response = self
+            .client
+            .get(upload_url)
+            .send()
+            .await
+            .context("Failed to get upload session status")?
+            .error_for_status()
+            .context("Not a success status")?
+            .json::<crate::onedrive_service::onedrive_models::UploadSessionStatus>()
+            .await
+            .context("Failed to deserialize upload session status")?;
+
+        Ok(response)
+    }
+
+    /// Cancel an upload session
+    pub async fn cancel_upload_session(&self, upload_url: &str) -> Result<()> {
+        self.client
+            .delete(upload_url)
+            .send()
+            .await
+            .context("Failed to cancel upload session")?
+            .error_for_status()
+            .context("Not a success status")?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

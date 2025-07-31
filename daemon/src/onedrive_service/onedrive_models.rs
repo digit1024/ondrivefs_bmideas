@@ -207,3 +207,69 @@ pub struct UserProfile {
     #[serde(rename = "preferredLanguage")]
     pub preferred_language: Option<String>,
 }
+
+/// Upload session response from Microsoft Graph API
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct UploadSessionResponse {
+    pub upload_url: String,
+    #[serde(rename = "expirationDateTime")]
+    pub expiration_date_time: String,
+}
+
+/// Upload session status response
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct UploadSessionStatus {
+    #[serde(rename = "expirationDateTime")]
+    pub expiration_date_time: String,
+    #[serde(rename = "nextExpectedRanges")]
+    pub next_expected_ranges: Vec<String>,
+}
+
+/// Upload session request body
+#[derive(Debug, Serialize)]
+pub struct UploadSessionRequest {
+    pub item: UploadSessionItem,
+}
+
+/// Upload session item properties
+#[derive(Debug, Serialize)]
+pub struct UploadSessionItem {
+    #[serde(rename = "@microsoft.graph.conflictBehavior")]
+    pub conflict_behavior: String,
+    pub name: String,
+}
+
+/// Represents a file chunk for upload
+#[derive(Debug, Clone)]
+pub struct FileChunk {
+    pub start: u64,
+    pub end: u64,
+    pub data: Vec<u8>,
+}
+
+/// Upload progress information
+#[derive(Debug, Clone)]
+pub struct UploadProgress {
+    pub bytes_uploaded: u64,
+    pub total_bytes: u64,
+    pub chunks_completed: usize,
+    pub total_chunks: usize,
+}
+
+/// Upload session configuration
+#[derive(Debug, Clone)]
+pub struct UploadSessionConfig {
+    pub chunk_size: u64,
+    pub max_retries: u32,
+    pub retry_delay_ms: u64,
+}
+
+impl Default for UploadSessionConfig {
+    fn default() -> Self {
+        Self {
+            chunk_size: 10 * 1024 * 1024, // 10MB
+            max_retries: 3,
+            retry_delay_ms: 1000,
+        }
+    }
+}
