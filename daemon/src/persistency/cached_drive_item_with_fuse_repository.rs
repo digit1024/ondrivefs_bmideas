@@ -318,6 +318,20 @@ impl CachedDriveItemWithFuseRepository {
         Ok(item)
     }
 
+    /// Get a drive item with Fuse metadata by parent inode and name (case-insensitive)
+    pub async fn get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(&self, parent_ino: u64, name: &str) -> Result<Option<DriveItemWithFuse>> {
+        let item = self.inner.get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(parent_ino, name).await?;
+        
+        // If found, cache it by inode
+        if let Some(ref item) = item {
+            if let Some(inode) = item.fuse_metadata.virtual_ino {
+                self.set_in_cache(inode, item.clone()).await;
+            }
+        }
+        
+        Ok(item)
+    }
+
     /// Get all files (not folders) by virtual_path prefix (for sync folder logic)
     pub async fn get_files_by_virtual_path_prefix(&self, folder_path: &str) -> Result<Vec<DriveItemWithFuse>> {
          self.inner.get_files_by_virtual_path_prefix(folder_path).await

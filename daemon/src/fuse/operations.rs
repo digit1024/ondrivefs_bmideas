@@ -135,8 +135,6 @@ impl fuser::Filesystem for OneDriveFuse {
         let name_str = name.to_string_lossy();
         debug!("LOOKUP: parent={}, name={}", parent, name_str);
 
-    
-
         // Strip .onedrivedownload extension if present for lookup
         let lookup_name = if name_str.ends_with(".onedrivedownload") {
             &name_str[..name_str.len() - 17] // Remove ".onedrivedownload"
@@ -144,8 +142,8 @@ impl fuser::Filesystem for OneDriveFuse {
             &name_str
         };
 
-        // Use optimized DB query by parent_ino and name
-        if let Ok(Some(item)) = sync_await(self.drive_item_with_fuse_repo().get_drive_item_with_fuse_by_parent_ino_and_name(parent, lookup_name)) {
+        // Use case-insensitive DB query by parent_ino and name
+        if let Ok(Some(item)) = sync_await(self.drive_item_with_fuse_repo().get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(parent, lookup_name)) {
             reply.entry(
                 &Duration::from_secs(3),
                 &AttributeManager::item_to_file_attr(&item),
@@ -434,8 +432,8 @@ impl fuser::Filesystem for OneDriveFuse {
         let name_str = name.to_string_lossy();
         debug!("UNLINK: parent={}, name={}", parent, name_str);
 
-        // Get the item to be deleted
-        if let Ok(Some(item)) = sync_await(self.drive_item_with_fuse_repo().get_drive_item_with_fuse_by_parent_ino_and_name(parent, &name_str)) {
+        // Get the item to be deleted (case-insensitive lookup)
+        if let Ok(Some(item)) = sync_await(self.drive_item_with_fuse_repo().get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(parent, &name_str)) {
             let onedrive_id = item.id();
             
             // Clean up any open handles for this inode
@@ -470,8 +468,8 @@ impl fuser::Filesystem for OneDriveFuse {
         let name_str = name.to_string_lossy();
         debug!("RMDIR: parent={}, name={}", parent, name_str);
 
-        // Get the directory to be deleted
-        if let Ok(Some(item)) = sync_await(self.drive_item_with_fuse_repo().get_drive_item_with_fuse_by_parent_ino_and_name(parent, &name_str)) {
+        // Get the directory to be deleted (case-insensitive lookup)
+        if let Ok(Some(item)) = sync_await(self.drive_item_with_fuse_repo().get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(parent, &name_str)) {
             let onedrive_id = item.id();
             
             // Check if directory is empty
@@ -519,8 +517,8 @@ impl fuser::Filesystem for OneDriveFuse {
         let newname_str = newname.to_string_lossy();
         debug!("RENAME: parent={}, name={} -> newparent={}, newname={}", parent, name_str, newparent, newname_str);
 
-        // Get the item to be renamed
-        if let Ok(Some(item)) = sync_await(self.drive_item_with_fuse_repo().get_drive_item_with_fuse_by_parent_ino_and_name(parent, &name_str)) {
+        // Get the item to be renamed (case-insensitive lookup)
+        if let Ok(Some(item)) = sync_await(self.drive_item_with_fuse_repo().get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(parent, &name_str)) {
             let mut updated_item = item.clone();
             
             // Update the name
