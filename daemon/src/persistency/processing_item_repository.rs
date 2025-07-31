@@ -542,7 +542,8 @@ impl ProcessingItemRepository {
                    change_type, change_operation, conflict_resolution, validation_errors, user_decision
             FROM processing_items 
             WHERE change_type = ? AND status IN ('new', 'validated', 'error')
-            AND ( parent_path  NOT LIKE '/root/.%' OR (name ='root' and parent_path is null))
+            AND (parent_path IS NULL OR parent_path NOT LIKE '/root/.%')
+
             ORDER BY id ASC
             "#,
         )

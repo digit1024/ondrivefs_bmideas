@@ -36,6 +36,7 @@ impl SyncProcessor {
         debug!("🔄 Processing remote changes...");
         let remote_items = self.processing_repo.get_unprocessed_items_by_change_type(&ChangeType::Remote).await?;
         for item in remote_items {
+            
             if let Err(e) = self.process_single_item(&item).await {
                 error!("❌ Failed to process remote item: {}", e);
                 self.processing_repo.update_status_by_id(item.id.unwrap(), &ProcessingStatus::Error).await?;
@@ -261,7 +262,7 @@ impl SyncProcessor {
     }
 
     async fn handle_remote_delete(&self, item: &ProcessingItem) -> Result<()> {
-        debug!("🗑️ Processing remote delete: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
+        info!("🗑️ Processing remote delete: {}", item.drive_item.name.as_deref().unwrap_or("unnamed"));
         
         let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
         let download_queue_repo = self.app_state.persistency().download_queue_repository();
@@ -283,8 +284,12 @@ impl SyncProcessor {
             self.delete_child_local_files(&item.drive_item.id, &local_path).await?;
         }
         
-        // Setup FUSE metadata and mark as deleted in DB
-        let inode = self.setup_fuse_metadata(&item.drive_item, &drive_item_with_fuse_repo, &local_path).await?;
+        // Remove item from drive_items_with_fuse table
+        if let Err(e) = drive_item_with_fuse_repo.delete_drive_item_with_fuse(&item.drive_item.id).await {
+            warn!("⚠️ Failed to remove item from drive_items_with_fuse: {}", e);
+        } else {
+            debug!("🗑️ Removed item from drive_items_with_fuse: {}", item.drive_item.id);
+        }
 
         // Delete local file if it exists
         if local_file_path.exists() {
@@ -313,10 +318,9 @@ impl SyncProcessor {
         }
 
         debug!(
-            "🗑️ File deleted from OneDrive: {} ({}) with inode {}",
+            "🗑️ File deleted from OneDrive: {} ({})",
             item.drive_item.name.as_deref().unwrap_or("unnamed"),
-            item.drive_item.id,
-            inode
+            item.drive_item.id
         );
         
         Ok(())

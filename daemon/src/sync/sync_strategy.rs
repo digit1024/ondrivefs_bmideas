@@ -95,6 +95,9 @@ impl SyncStrategy {
 
     /// Check for name collisions in the same parent folder
     async fn check_name_collision(&self, item: &ProcessingItem) -> Result<(), String> {
+        if item.change_operation == crate::persistency::processing_item_repository::ChangeOperation::Delete {
+            return Ok(());
+        }   
         if let Some(parent_ref) = &item.drive_item.parent_reference {
             let drive_item_repo = DriveItemWithFuseRepository::new(self.app_state.persistency().pool().clone());
             
