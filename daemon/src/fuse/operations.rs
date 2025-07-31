@@ -4,6 +4,7 @@ use crate::fuse::filesystem::OneDriveFuse;
 use crate::fuse::utils::{sync_await, FUSE_CAP_READDIRPLUS};
 use crate::fuse::attributes::AttributeManager;
 use crate::fuse::drive_item_manager::DriveItemManager;
+use crate::fuse::file_handles::VIRTUAL_FILE_HANDLE_ID;
 use fuser::{
     FileAttr, FileType, KernelConfig, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyDirectoryPlus, ReplyEntry, ReplyStatfs, ReplyWrite
 };
@@ -305,12 +306,38 @@ impl fuser::Filesystem for OneDriveFuse {
     ) {
         debug!("WRITE: ino={}, fh={}, offset={}, size={}", ino, fh, offset, data.len());
 
-        match self.file_handles().write_to_handle(fh, offset as u64, data) {
+        // Handle virtual file handles by converting them to real file handles
+        let actual_fh = if fh == 1 { // VIRTUAL_FILE_HANDLE_ID
+            debug!("📂 Converting virtual file handle {} to real file handle for inode {}", fh, ino);
+            // Create the local file if it doesn't exist
+            if let Err(e) = sync_await(self.file_manager().create_empty_file(ino)) {
+                error!("Failed to create local file for virtual handle: {}", e);
+                reply.error(libc::EIO);
+                return;
+            }
+            
+            // Get a real file handle
+            match self.file_handles().get_or_create_file_handle(ino) {
+                Ok(real_fh) => {
+                    debug!("📂 Created real file handle {} for virtual handle {}", real_fh, fh);
+                    real_fh
+                }
+                Err(e) => {
+                    error!("Failed to create real file handle for virtual handle: {}", e);
+                    reply.error(libc::EIO);
+                    return;
+                }
+            }
+        } else {
+            fh
+        };
+
+        match self.file_handles().write_to_handle(actual_fh, offset as u64, data) {
             Ok(_) => {
                 reply.written(data.len() as u32);
             }
             Err(e) => {
-                error!("Failed to write to handle {}: {}", fh, e);
+                error!("Failed to write to handle {}: {}", actual_fh, e);
                 reply.error(libc::EIO);
             }
         }
@@ -343,7 +370,7 @@ impl fuser::Filesystem for OneDriveFuse {
                     match self.file_handles().get_or_create_file_handle(ino) {
                         Ok(handle_id) => {
                             reply.created(
-                                &Duration::from_secs(3),
+                                &Duration::from_secs(180),
                                 &AttributeManager::item_to_file_attr(&item),
                                 handle_id,
                                 handle_id,

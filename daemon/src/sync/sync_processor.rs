@@ -876,10 +876,17 @@ impl SyncProcessor {
 
     // /// Safely move a file from upload folder to download folder
     async fn move_file_to_its_new_name(&self, old_path: &PathBuf, onedrive_id: &str) -> Result<()> {
+        // Get the FUSE item to get the ino
+        let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
+        let fuse_item = drive_item_with_fuse_repo.get_drive_item_with_fuse(onedrive_id).await?;
         
+        let ino = if let Some(item) = fuse_item {
+            item.virtual_ino().unwrap_or(0)
+        } else {
+            return Err(anyhow::anyhow!("FUSE item not found for onedrive_id: {}", onedrive_id));
+        };
         
-        
-        let destination_path = self.app_state.file_manager().get_local_dir().join(onedrive_id);
+        let destination_path = self.app_state.file_manager().get_local_dir().join(ino.to_string());
         
         // Move file from upload to download
         match std::fs::rename(old_path, &destination_path) {

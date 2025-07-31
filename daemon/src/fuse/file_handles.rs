@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use crate::fuse::utils::sync_await;
 
-const VIRTUAL_FILE_HANDLE_ID: u64 = 1;
+pub const VIRTUAL_FILE_HANDLE_ID: u64 = 1;
 
 /// File handle for caching open files
 #[derive(Debug)]

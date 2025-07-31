@@ -26,14 +26,14 @@ impl DriveItemManager {
         // Update last modified time
         if let Ok(modified_time) = metadata.modified() {
             let datetime: DateTime<Utc> = modified_time.into();
-            drive_item.set_last_modified(datetime.to_rfc3339());
+            drive_item.set_last_modified(datetime.format("%Y-%m-%dT%H:%M:%SZ").to_string());
         }
         
         // Update created time if not already set
         if drive_item.created_date.is_none() {
             if let Ok(created_time) = metadata.created() {
                 let datetime: DateTime<Utc> = created_time.into();
-                drive_item.set_created_date(datetime.to_rfc3339());
+                drive_item.set_created_date(datetime.format("%Y-%m-%dT%H:%M:%SZ").to_string());
             }
         }
         

@@ -58,7 +58,7 @@ impl DatabaseManager {
             let mut updated_item = item.clone();
             
             // Update last modified timestamp
-            let now = chrono::Utc::now().to_rfc3339();
+            let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
             updated_item.drive_item_mut().set_last_modified(now);
             
             // Mark as local source
@@ -94,8 +94,8 @@ impl DatabaseManager {
             id: temporary_id.clone(),
             name: Some(name.to_string()),
             etag: None,
-            last_modified: Some(chrono::Utc::now().to_rfc3339()),
-            created_date: Some(chrono::Utc::now().to_rfc3339()),
+            last_modified: Some(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()),
+            created_date: Some(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()),
             size: Some(0),
             folder: if is_folder { 
                 Some(crate::onedrive_service::onedrive_models::FolderFacet { child_count: 0 }) 
