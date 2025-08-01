@@ -86,15 +86,19 @@ impl ConflictResolver for SmartStrategy {
                     ConflictResolution::UseRemote
                 }
             },
-            ChangeOperation::Move => {
+            ChangeOperation::Move{ ..} => {
                 // For moves, manual resolution is safest
                 debug!("SmartStrategy: Move conflict, requiring manual resolution");
                 ConflictResolution::Manual
             },
-            ChangeOperation::Rename => {
+            ChangeOperation::Rename{ ..} => {
                 // For renames, keep both with different names
                 debug!("SmartStrategy: Rename conflict, keeping both");
                 ConflictResolution::KeepBoth
+            },
+            ChangeOperation::NoChange => {
+                debug!("SmartStrategy: No change conflict, using remote");
+                ConflictResolution::UseRemote
             }
         }
     }

@@ -79,7 +79,7 @@ impl Page {
                 container(
                     text::body(format!("❌ Error: {}", error))
                         .size(14)
-                        .style(theme::Text::Destructive)
+                        
                 ).padding(8)
             );
         }
@@ -90,7 +90,7 @@ impl Page {
                 column()
                     .push(text::title3("✅ No conflicts detected").size(18))
                     .push(text::body("All files are synchronized").size(14))
-                    .align_items(Alignment::Center)
+                    
             )
             .padding(spacing * 4)
             .width(Length::Fill)
@@ -112,7 +112,7 @@ impl Page {
             .into()
     }
 
-    fn conflict_card(&self, conflict: &ConflictItem) -> cosmic::Element<Message> {
+    fn conflict_card<'a>(&self, conflict: &'a ConflictItem) -> cosmic::Element<'a, Message> {
         let spacing = theme::active().cosmic().spacing.space_s;
         let is_selected = self.selected_item == Some(conflict.id);
         
@@ -142,7 +142,7 @@ impl Page {
             )
             .push(
                 container(text::heading("⚔️").size(20))
-                    .center_x()
+                    .align_x(Alignment::Center)
                     .width(Length::Shrink)
             )
             .push(
@@ -190,8 +190,10 @@ impl Page {
         }
 
         // Wrap in a clickable card
-        let card = card(card_content)
-            .on_press(Message::SelectItem(conflict.id));
+        let card = container(card_content)
+            .class(cosmic::style::Container::Card)
+            .padding(16);
+            //.on_press(Message::SelectItem(conflict.id));
 
         container(card)
             .width(Length::Fill)
@@ -202,19 +204,21 @@ impl Page {
         match message {
             Message::FetchConflicts | Message::AutoRefresh => {
                 self.loading = true;
-                cosmic::Task::perform(
-                    async {
-                        match DbusClient::new().await {
-                            Ok(client) => {
-                                // TODO: Implement actual D-Bus method for getting conflicts
-                                // For now, return mock data
-                                Ok(vec![])
-                            }
-                            Err(e) => Err(e.to_string()),
+                let fut = async {
+                    match DbusClient::new().await {
+                        Ok(_client) => {
+                            // TODO: Implement actual D-Bus method for getting conflicts
+                            // For now, return mock data
+                            Ok(vec![])
                         }
-                    },
-                    Message::ConflictsLoaded,
-                )
+                        Err(e) => Err(e.to_string()),
+                    }
+                };
+                cosmic::task::future(fut).map(|result| {
+                    cosmic::Action::App(crate::app::Message::ConflictsPage(
+                        Message::ConflictsLoaded(result),
+                    ))
+                })
             }
             Message::ConflictsLoaded(result) => {
                 self.loading = false;
@@ -234,19 +238,19 @@ impl Page {
             }
             Message::ResolveConflict(item_id, resolution) => {
                 info!("Resolving conflict {} with strategy: {}", item_id, resolution);
-                cosmic::Task::perform(
-                    async move {
-                        match DbusClient::new().await {
-                            Ok(client) => {
-                                // TODO: Implement actual D-Bus method for resolving conflicts
-                                // client.resolve_conflict(item_id, resolution).await
-                                Ok(())
-                            }
-                            Err(e) => Err(e.to_string()),
+                let fut = async move {
+                    match DbusClient::new().await {
+                        Ok(_client) => {
+                            // TODO: Implement actual D-Bus method for resolving conflicts
+                            // client.resolve_conflict(item_id, resolution).await
+                            Ok(())
                         }
-                    },
-                    |_| Message::Refresh,
-                )
+                        Err(e) => Err(e.to_string()),
+                    }
+                };
+                cosmic::task::future(fut).map(|_: Result<(), String>| {
+                    cosmic::Action::App(crate::app::Message::ConflictsPage(Message::Refresh))
+                })
             }
             Message::SelectItem(id) => {
                 if self.selected_item == Some(id) {

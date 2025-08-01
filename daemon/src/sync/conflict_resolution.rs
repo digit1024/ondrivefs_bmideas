@@ -4,7 +4,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 /// Trait for conflict resolution strategies
-pub trait ConflictResolver {
+pub trait ConflictResolver: Send + Sync {
     fn resolve_conflict(&self, item: &ProcessingItem) -> ConflictResolution;
 }
 
@@ -54,4 +54,4 @@ impl ConflictResolution {
             _ => None,
         }
     }
-} 
+}

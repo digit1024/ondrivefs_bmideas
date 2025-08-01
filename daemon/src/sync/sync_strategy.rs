@@ -130,14 +130,13 @@ impl SyncStrategy {
     async fn needs_smart_resolution(&self, item: &ProcessingItem) -> bool {
         // Use smart resolution for complex cases
         match item.change_operation {
-            crate::persistency::processing_item_repository::ChangeOperation::Move |
-            crate::persistency::processing_item_repository::ChangeOperation::Rename => true,
+            crate::persistency::processing_item_repository::ChangeOperation::Move { .. } => true,
+            crate::persistency::processing_item_repository::ChangeOperation::Rename { .. } => true,
             crate::persistency::processing_item_repository::ChangeOperation::Update => {
                 // Check if file is downloaded
-                let is_downloaded = self.drive_item_with_fuse_repo
-                    .is_file_downloaded(&item.drive_item.id)
-                    .await
-                    .unwrap_or(false);
+                let fuse_item = self.drive_item_with_fuse_repo.get_drive_item_with_fuse(&item.drive_item.id).await.unwrap().unwrap();
+                let path = self.app_state.file_manager().get_local_path_if_file_exists(fuse_item.virtual_ino().unwrap());
+                let is_downloaded = path.is_some();
                     
                 !is_downloaded // Use smart resolution for not-downloaded files
             },

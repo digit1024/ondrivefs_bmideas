@@ -1,14 +1,14 @@
 use std::time::Duration;
 
 use cosmic::app::{Core, Task};
-use cosmic::widget::{self, button, column, container, row, svg, text };
+use cosmic::widget::{self, column, row, text };
 use cosmic::iced::window::Id;
 use cosmic::iced::{time, Alignment, Length, Rectangle, Subscription};
 use cosmic::iced_runtime::core::window;
 use cosmic::surface::action::{app_popup, destroy_popup};
-use cosmic::widget::{dropdown::popup_dropdown, list_column, settings, toggler};
+use cosmic::widget::list_column;
 use cosmic::Element;
-use onedrive_sync_lib::dbus::types::{DaemonStatus, UserProfile, SyncStatus};
+use onedrive_sync_lib::dbus::types::DaemonStatus;
 
 use crate::dbus_client::with_dbus_client;
 

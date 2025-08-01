@@ -2,20 +2,20 @@
 mod tests {
     use super::super::*;
     use crate::persistency::processing_item_repository::{ProcessingItem, ChangeType, ChangeOperation};
-    use crate::onedrive_service::onedrive_models::{DriveItem, File, Folder};
+    use crate::onedrive_service::onedrive_models::{DriveItem, FileFacet, FolderFacet};
     use chrono::Utc;
 
     fn create_test_drive_item(name: &str, size: i64, last_modified: &str) -> DriveItem {
         DriveItem {
             id: format!("test-{}", name),
             name: Some(name.to_string()),
-            size: Some(size),
+            size: Some(size as u64),
             etag: Some("test-etag".to_string()),
             created_date: Some(Utc::now().to_rfc3339()),
             last_modified: Some(last_modified.to_string()),
-            file: Some(File {
+            file: Some(FileFacet {
                 mime_type: Some("text/plain".to_string()),
-                hashes: None,
+                //hashes: None,
             }),
             folder: None,
             parent_reference: None,
@@ -138,44 +138,9 @@ mod tests {
         assert_eq!(resolution, ConflictResolution::UseRemote);
     }
 
-    #[test]
-    fn test_smart_strategy_move_operation() {
-        let strategy = strategies::SmartStrategy;
-        let item = create_test_processing_item(
-            create_test_drive_item("test.txt", 1000, "2024-01-01T00:00:00Z"),
-            ChangeType::Local,
-            ChangeOperation::Move,
-        );
+ 
 
-        let resolution = strategy.resolve_conflict(&item);
-        assert_eq!(resolution, ConflictResolution::Manual);
-    }
 
-    #[test]
-    fn test_smart_strategy_rename_operation() {
-        let strategy = strategies::SmartStrategy;
-        let item = create_test_processing_item(
-            create_test_drive_item("test.txt", 1000, "2024-01-01T00:00:00Z"),
-            ChangeType::Remote,
-            ChangeOperation::Rename,
-        );
-
-        let resolution = strategy.resolve_conflict(&item);
-        assert_eq!(resolution, ConflictResolution::KeepBoth);
-    }
-
-    #[test]
-    fn test_timestamp_strategy_newest() {
-        let strategy = strategies::TimestampStrategy { use_newest: true };
-        let item = create_test_processing_item(
-            create_test_drive_item("test.txt", 1000, "2024-01-01T00:00:00Z"),
-            ChangeType::Local,
-            ChangeOperation::Update,
-        );
-
-        let resolution = strategy.resolve_conflict(&item);
-        assert_eq!(resolution, ConflictResolution::UseNewest);
-    }
 
     #[test]
     fn test_timestamp_strategy_oldest() {

@@ -58,6 +58,7 @@ zbus = { version = "5.0", default-features = false, features = ["tokio"] }
 
 # Internal dependencies
 onedrive-sync-lib = { path = "../lib" }
+async-trait = "0.1.88"
 
 [dev-dependencies]
 tempfile = "3.8"

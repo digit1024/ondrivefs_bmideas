@@ -120,6 +120,9 @@ impl SyncProcessor {
                         // This should not happen with automatic resolution
                         warn!("⚠️ Manual resolution requested but not implemented");
                     }
+                    _ => {
+                        warn!("⚠️ Unhandled conflict resolution: {:?}", resolution);
+                    }
                 }
             }
         }
