@@ -9,13 +9,14 @@ pub trait ConflictResolver {
 }
 
 /// Resolution decision for a conflicted item
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ConflictResolution {
-    UseRemote,     // Use remote version
-    UseLocal,      // Use local version
-    Skip,          // Skip this item
-    Manual,        // Wait for user decision
-
+    UseRemote,          // Use remote version
+    UseLocal,           // Use local version
+    Skip,               // Skip this item
+    Manual,             // Wait for user decision
+    UseNewest,          // Use the newest version (by timestamp)
+    KeepBoth,           // Keep both files with different names
 }
 
 impl ConflictResolution {
@@ -23,9 +24,22 @@ impl ConflictResolution {
         match self {
             ConflictResolution::UseRemote => "use_remote",
             ConflictResolution::UseLocal => "use_local",
-            
             ConflictResolution::Skip => "skip",
             ConflictResolution::Manual => "manual",
+            ConflictResolution::UseNewest => "use_newest",
+            ConflictResolution::KeepBoth => "keep_both",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "use_remote" => Some(ConflictResolution::UseRemote),
+            "use_local" => Some(ConflictResolution::UseLocal),
+            "skip" => Some(ConflictResolution::Skip),
+            "manual" => Some(ConflictResolution::Manual),
+            "use_newest" => Some(ConflictResolution::UseNewest),
+            "keep_both" => Some(ConflictResolution::KeepBoth),
+            _ => None,
         }
     }
 } 

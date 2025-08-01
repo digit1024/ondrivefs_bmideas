@@ -55,7 +55,7 @@ impl SyncStrategy {
                     UserDecision::Skip => crate::persistency::processing_item_repository::ValidationResult::Resolved(ConflictResolution::Skip),
                     UserDecision::Rename { new_name } => {
                         // Handle rename logic
-                        crate::persistency::processing_item_repository::ValidationResult::Resolved(ConflictResolution::UseLocal)
+                        crate::persistency::processing_item_repository::ValidationResult::Resolved(ConflictResolution::KeepBoth)
                     }
                 }
             } else {
