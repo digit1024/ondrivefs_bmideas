@@ -16,11 +16,7 @@ pub enum ConflictResolution {
     Skip,               // Skip this item
     Manual,             // Wait for user decision
     UseNewest,          // Use the newest version (by timestamp)
-    UseOldest,          // Use the oldest version (by timestamp)
-    UseLargest,         // Use the largest file
-    UseSmallest,        // Use the smallest file
     KeepBoth,           // Keep both files with different names
-    Merge,              // Merge changes (for supported file types)
 }
 
 impl ConflictResolution {
@@ -31,11 +27,7 @@ impl ConflictResolution {
             ConflictResolution::Skip => "skip",
             ConflictResolution::Manual => "manual",
             ConflictResolution::UseNewest => "use_newest",
-            ConflictResolution::UseOldest => "use_oldest",
-            ConflictResolution::UseLargest => "use_largest",
-            ConflictResolution::UseSmallest => "use_smallest",
             ConflictResolution::KeepBoth => "keep_both",
-            ConflictResolution::Merge => "merge",
         }
     }
 
@@ -46,11 +38,7 @@ impl ConflictResolution {
             "skip" => Some(ConflictResolution::Skip),
             "manual" => Some(ConflictResolution::Manual),
             "use_newest" => Some(ConflictResolution::UseNewest),
-            "use_oldest" => Some(ConflictResolution::UseOldest),
-            "use_largest" => Some(ConflictResolution::UseLargest),
-            "use_smallest" => Some(ConflictResolution::UseSmallest),
             "keep_both" => Some(ConflictResolution::KeepBoth),
-            "merge" => Some(ConflictResolution::Merge),
             _ => None,
         }
     }

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use cosmic::widget::{self, button, column, container, row, text, card, icon};
+use cosmic::widget::{self, button, column, container, row, text, icon};
 use cosmic::iced::{time, Alignment, Length, Subscription};
 use cosmic::theme;
 use log::{error, info};
@@ -28,14 +28,12 @@ pub enum Message {
     Refresh,
     ResolveConflict(i64, String), // item_id, resolution_type
     AutoRefresh,
-    SelectItem(i64),
 }
 
 pub struct Page {
     pub conflicts: Vec<ConflictItem>,
     pub loading: bool,
     pub error: Option<String>,
-    pub selected_item: Option<i64>,
 }
 
 impl Page {
@@ -44,7 +42,6 @@ impl Page {
             conflicts: Vec::new(),
             loading: false,
             error: None,
-            selected_item: None,
         }
     }
 
@@ -62,61 +59,64 @@ impl Page {
         // Header
         let header = row()
             .spacing(spacing)
-            .push(text::title2("🔄 Conflict Resolution").size(24))
+            .push(text::title2("Conflict Resolution").size(24))
             .push(container(
                 button::standard("Refresh")
                     .on_press(Message::Refresh)
             ).align_x(Alignment::End).width(Length::Fill));
 
+        content = content.push(header);
+
         // Loading indicator
         if self.loading {
-            content = content.push(container(text::body("Loading conflicts...").size(16)).padding(8));
+            content = content.push(
+                container(text::body("Loading conflicts...").size(16))
+                    .padding(spacing)
+            );
         }
 
         // Error display
         if let Some(error) = &self.error {
             content = content.push(
                 container(
-                    text::body(format!("❌ Error: {}", error))
+                    text::body(format!("Error: {}", error))
                         .size(14)
                         .style(theme::Text::Destructive)
-                ).padding(8)
+                ).padding(spacing)
             );
         }
 
         // Conflicts list
-        let conflicts_content = if self.conflicts.is_empty() {
-            container(
-                column()
-                    .push(text::title3("✅ No conflicts detected").size(18))
-                    .push(text::body("All files are synchronized").size(14))
-                    .align_items(Alignment::Center)
-            )
-            .padding(spacing * 4)
-            .width(Length::Fill)
+        if self.conflicts.is_empty() && !self.loading {
+            content = content.push(
+                container(
+                    column()
+                        .push(text::title3("No conflicts detected").size(18))
+                        .push(text::body("All files are synchronized").size(14))
+                        .align_items(Alignment::Center)
+                )
+                .padding(spacing * 4)
+                .width(Length::Fill)
+            );
         } else {
             let mut conflicts_column = column().spacing(spacing);
             
             for conflict in &self.conflicts {
-                conflicts_column = conflicts_column.push(self.conflict_card(conflict));
+                conflicts_column = conflicts_column.push(self.conflict_item(conflict));
             }
             
-            container(cosmic::widget::scrollable::vertical(conflicts_column))
-                .width(Length::Fill)
-                .height(Length::Fill)
-        };
+            content = content.push(
+                cosmic::widget::scrollable::vertical(conflicts_column)
+            );
+        }
 
-        content
-            .push(header)
-            .push(conflicts_content)
-            .into()
+        content.into()
     }
 
-    fn conflict_card(&self, conflict: &ConflictItem) -> cosmic::Element<Message> {
+    fn conflict_item(&self, conflict: &ConflictItem) -> cosmic::Element<Message> {
         let spacing = theme::active().cosmic().spacing.space_s;
-        let is_selected = self.selected_item == Some(conflict.id);
         
-        let mut card_content = column().spacing(spacing);
+        let mut item_content = column().spacing(spacing).padding(spacing);
 
         // File info header
         let header = row()
@@ -127,73 +127,64 @@ impl Page {
                 .push(text::body(&conflict.path).size(12))
             );
         
-        card_content = card_content.push(header);
-        card_content = card_content.push(widget::divider::horizontal::default());
+        item_content = item_content.push(header);
+        item_content = item_content.push(widget::divider::horizontal::default());
 
         // Conflict details
         let details = row()
             .spacing(spacing * 2)
             .push(
                 column()
-                    .push(text::heading("📁 Local Version").size(14))
+                    .push(text::heading("Local Version").size(14))
                     .push(text::body(format!("Modified: {}", conflict.local_modified)).size(12))
                     .push(text::body(format!("Size: {} bytes", conflict.local_size)).size(12))
                     .width(Length::FillPortion(1))
             )
             .push(
-                container(text::heading("⚔️").size(20))
-                    .center_x()
-                    .width(Length::Shrink)
-            )
-            .push(
                 column()
-                    .push(text::heading("☁️ Remote Version").size(14))
+                    .push(text::heading("Remote Version").size(14))
                     .push(text::body(format!("Modified: {}", conflict.remote_modified)).size(12))
                     .push(text::body(format!("Size: {} bytes", conflict.remote_size)).size(12))
                     .width(Length::FillPortion(1))
             );
         
-        card_content = card_content.push(details);
+        item_content = item_content.push(details);
 
         // Status indicator
         let status_text = if conflict.is_downloaded {
-            "📥 File is downloaded locally"
+            "File is downloaded locally"
         } else {
-            "☁️ File not downloaded (placeholder only)"
+            "File not downloaded (placeholder only)"
         };
-        card_content = card_content.push(text::body(status_text).size(12));
+        item_content = item_content.push(text::body(status_text).size(12));
 
         // Resolution buttons
-        if is_selected {
-            card_content = card_content.push(widget::divider::horizontal::default());
-            
-            let resolution_buttons = row()
-                .spacing(spacing)
-                .push(
-                    button::suggested("Use Local")
-                        .on_press(Message::ResolveConflict(conflict.id, "use_local".to_string()))
-                )
-                .push(
-                    button::standard("Use Remote")
-                        .on_press(Message::ResolveConflict(conflict.id, "use_remote".to_string()))
-                )
-                .push(
-                    button::standard("Keep Both")
-                        .on_press(Message::ResolveConflict(conflict.id, "keep_both".to_string()))
-                )
-                .push(
-                    button::standard("Skip")
-                        .on_press(Message::ResolveConflict(conflict.id, "skip".to_string()))
-                );
-            
-            card_content = card_content.push(resolution_buttons);
-        }
+        item_content = item_content.push(widget::divider::horizontal::default());
+        
+        let resolution_buttons = row()
+            .spacing(spacing)
+            .push(
+                button::suggested("Use Local")
+                    .on_press(Message::ResolveConflict(conflict.id, "use_local".to_string()))
+            )
+            .push(
+                button::standard("Use Remote")
+                    .on_press(Message::ResolveConflict(conflict.id, "use_remote".to_string()))
+            )
+            .push(
+                button::standard("Keep Both")
+                    .on_press(Message::ResolveConflict(conflict.id, "keep_both".to_string()))
+            )
+            .push(
+                button::standard("Skip")
+                    .on_press(Message::ResolveConflict(conflict.id, "skip".to_string()))
+            );
+        
+        item_content = item_content.push(resolution_buttons);
 
-        // Wrap in a clickable card
-        let card = card(card_content)
-            .on_press(Message::SelectItem(conflict.id));
-
-        container(card)
+        // Wrap in a container with border
+        container(item_content)
+            .class(cosmic::theme::Container::Card)
             .width(Length::Fill)
             .into()
     }
@@ -247,14 +238,6 @@ impl Page {
                     },
                     |_| Message::Refresh,
                 )
-            }
-            Message::SelectItem(id) => {
-                if self.selected_item == Some(id) {
-                    self.selected_item = None;
-                } else {
-                    self.selected_item = Some(id);
-                }
-                cosmic::Task::none()
             }
         }
     }
