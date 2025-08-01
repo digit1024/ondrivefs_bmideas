@@ -3,6 +3,9 @@ pub mod strategies;
 pub mod sync_processor;
 pub mod sync_strategy;
 
+#[cfg(test)]
+mod conflict_resolution_tests;
+
 pub use conflict_resolution::*;
 pub use strategies::*;
 pub use sync_processor::*;

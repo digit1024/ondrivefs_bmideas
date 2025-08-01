@@ -16,7 +16,7 @@ use cosmic::widget::{self, button, icon, menu, nav_bar, row, Row};
 use cosmic::{cosmic_theme, theme};
 use log::info;
 use std::collections::HashMap;
-use crate::pages::{self, about_element, status_page, folders_page, queues_page};
+use crate::pages::{self, about_element, status_page, folders_page, queues_page, conflicts_page};
 
 
 
@@ -26,6 +26,7 @@ enum PageId {
     Status,
     Folders,
     Queues,
+    Conflicts,
     Logs,
 }
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
@@ -59,6 +60,7 @@ pub struct AppModel {
     status_page: pages::status_page::Page,
     folders_page: pages::folders_page::Page,
     queues_page: pages::queues_page::Page,
+    conflicts_page: pages::conflicts_page::Page,
     logs_page: pages::logs_page::Page,
 
     
@@ -76,6 +78,7 @@ pub enum Message {
     StatusPage(status_page::Message),
     FoldersPage(folders_page::Message),
     QueuesPage(queues_page::Message),
+    ConflictsPage(conflicts_page::Message),
     AboutElement(about_element::Message),
     LogsPage(pages::logs_page::Message),
  
@@ -164,6 +167,11 @@ impl cosmic::Application for AppModel {
             .icon(icon::from_name("view-refresh-symbolic"));
 
         nav.insert()
+            .text("Conflicts")
+            .data::<PageId>(PageId::Conflicts)
+            .icon(icon::from_name("dialog-warning-symbolic"));
+
+        nav.insert()
             .text("Logs")
             .data::<PageId>(PageId::Logs)
             .icon(icon::from_name("text-x-generic-symbolic"));
@@ -189,6 +197,7 @@ impl cosmic::Application for AppModel {
             status_page: pages::status_page::Page::new(),
             folders_page: pages::folders_page::Page::new(),
             queues_page: pages::queues_page::Page::new(),
+            conflicts_page: pages::conflicts_page::Page::new(),
             logs_page: pages::logs_page::Page::new(),
             
         };
@@ -203,11 +212,14 @@ impl cosmic::Application for AppModel {
         let fetch_queues_command = cosmic::task::future(async move {
             Message::QueuesPage(queues_page::Message::FetchQueues)
         });
+        let fetch_conflicts_command = cosmic::task::future(async move {
+            Message::ConflictsPage(conflicts_page::Message::FetchConflicts)
+        });
         let fetch_folders_command = cosmic::task::future(async move {
             Message::FoldersPage(folders_page::Message::FetchFolders)
         });
 
-        (app, Task::batch(vec![title_command, fetch_status_command, fetch_queues_command, fetch_folders_command]))
+        (app, Task::batch(vec![title_command, fetch_status_command, fetch_queues_command, fetch_conflicts_command, fetch_folders_command]))
     }
 
 
@@ -218,6 +230,9 @@ impl cosmic::Application for AppModel {
             }
             Some(PageId::Queues) => {
                 self.queues_page.subscription().map(Message::QueuesPage)
+            }
+            Some(PageId::Conflicts) => {
+                self.conflicts_page.subscription().map(Message::ConflictsPage)
             }
             _ => Subscription::none(),
         }
@@ -265,6 +280,7 @@ impl cosmic::Application for AppModel {
             PageId::Status => self.status_page.view().map(Message::StatusPage),
             PageId::Folders => self.folders_page.view().map(Message::FoldersPage),
             PageId::Queues => self.queues_page.view().map(Message::QueuesPage),
+            PageId::Conflicts => self.conflicts_page.view().map(Message::ConflictsPage),
             PageId::Logs => self.logs_page.view().map(Message::LogsPage),
         };
 
@@ -307,6 +323,9 @@ impl cosmic::Application for AppModel {
             }
             Message::QueuesPage(queues_message) => {
                 self.queues_page.update(queues_message)
+            }
+            Message::ConflictsPage(conflicts_message) => {
+                self.conflicts_page.update(conflicts_message)
             }
             Message::AboutElement(about_element::Message::OpenRepositoryUrl) => {
                 _ = open::that_detached("REPOITORY");

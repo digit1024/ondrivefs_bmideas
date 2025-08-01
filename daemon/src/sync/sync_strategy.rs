@@ -55,11 +55,18 @@ impl SyncStrategy {
                     UserDecision::Skip => crate::persistency::processing_item_repository::ValidationResult::Resolved(ConflictResolution::Skip),
                     UserDecision::Rename { new_name } => {
                         // Handle rename logic
-                        crate::persistency::processing_item_repository::ValidationResult::Resolved(ConflictResolution::UseLocal)
+                        crate::persistency::processing_item_repository::ValidationResult::Resolved(ConflictResolution::KeepBoth)
                     }
                 }
             } else {
-                let resolution = resolver.resolve_conflict(item);
+                // Check if we need special handling for downloaded vs not downloaded files
+                let resolution = if self.needs_smart_resolution(item).await {
+                    let smart_resolver = ConflictResolutionFactory::create_smart_strategy();
+                    smart_resolver.resolve_conflict(item)
+                } else {
+                    resolver.resolve_conflict(item)
+                };
+                
                 match resolution {
                     ConflictResolution::Manual => crate::persistency::processing_item_repository::ValidationResult::Invalid(errors),
                     _ => crate::persistency::processing_item_repository::ValidationResult::Resolved(resolution),
@@ -119,6 +126,25 @@ impl SyncStrategy {
         Ok(())
     }
 
+    /// Check if item needs smart resolution based on its state
+    async fn needs_smart_resolution(&self, item: &ProcessingItem) -> bool {
+        // Use smart resolution for complex cases
+        match item.change_operation {
+            crate::persistency::processing_item_repository::ChangeOperation::Move |
+            crate::persistency::processing_item_repository::ChangeOperation::Rename => true,
+            crate::persistency::processing_item_repository::ChangeOperation::Update => {
+                // Check if file is downloaded
+                let is_downloaded = self.drive_item_with_fuse_repo
+                    .is_file_downloaded(&item.drive_item.id)
+                    .await
+                    .unwrap_or(false);
+                    
+                !is_downloaded // Use smart resolution for not-downloaded files
+            },
+            _ => false
+        }
+    }
+    
     /// Check for content conflicts between local and remote versions
     async fn check_content_conflict(&self, item: &ProcessingItem) -> Result<(), String> {
         let processing_item_repository = self.app_state.persistency().processing_item_repository();
