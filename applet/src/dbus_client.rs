@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use log::info;
-use onedrive_sync_lib::dbus::types::{DaemonStatus, SyncQueueItem, UserProfile};
+use onedrive_sync_lib::dbus::types::DaemonStatus;
 use zbus::connection::Builder;
 use zbus::Proxy;
 
