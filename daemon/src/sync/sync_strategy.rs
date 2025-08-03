@@ -59,14 +59,7 @@ impl SyncStrategy {
                     }
                 }
             } else {
-                // Check if we need special handling for downloaded vs not downloaded files
-                let resolution = if self.needs_smart_resolution(item).await {
-                    let smart_resolver = ConflictResolutionFactory::create_smart_strategy();
-                    smart_resolver.resolve_conflict(item)
-                } else {
-                    resolver.resolve_conflict(item)
-                };
-                
+                let resolution = resolver.resolve_conflict(item);
                 match resolution {
                     ConflictResolution::Manual => crate::persistency::processing_item_repository::ValidationResult::Invalid(errors),
                     _ => crate::persistency::processing_item_repository::ValidationResult::Resolved(resolution),
@@ -134,16 +127,22 @@ impl SyncStrategy {
             crate::persistency::processing_item_repository::ChangeOperation::Rename { .. } => true,
             crate::persistency::processing_item_repository::ChangeOperation::Update => {
                 // Check if file is downloaded
-                let fuse_item = self.drive_item_with_fuse_repo.get_drive_item_with_fuse(&item.drive_item.id).await.unwrap().unwrap();
-                let path = self.app_state.file_manager().get_local_path_if_file_exists(fuse_item.virtual_ino().unwrap());
-                let is_downloaded = path.is_some();
-                    
-                !is_downloaded // Use smart resolution for not-downloaded files
+                if let Ok(Some(fuse_item)) = self.drive_item_with_fuse_repo.get_drive_item_with_fuse(&item.drive_item.id).await {
+                    if let Some(ino) = fuse_item.virtual_ino() {
+                        let path = self.app_state.file_manager().get_local_path_if_file_exists(ino);
+                        let is_downloaded = path.is_some();
+                        !is_downloaded // Use smart resolution for not-downloaded files
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
             },
             _ => false
         }
     }
-    
+
     /// Check for content conflicts between local and remote versions
     async fn check_content_conflict(&self, item: &ProcessingItem) -> Result<(), String> {
         let processing_item_repository = self.app_state.persistency().processing_item_repository();

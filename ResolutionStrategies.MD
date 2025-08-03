@@ -1,6 +1,6 @@
 # Conflict Resolution Strategies
 
-This document describes all conflict resolution strategies implemented in the OneDrive sync system, covering both local and remote changes for downloaded and not-downloaded files.
+This document describes the conflict resolution strategies implemented in the OneDrive sync system, covering both local and remote changes for downloaded and not-downloaded files.
 
 ## Table of Contents
 
@@ -12,12 +12,12 @@ This document describes all conflict resolution strategies implemented in the On
 
 ## Overview
 
-The sync system detects conflicts when the same file has been modified both locally and remotely. The conflict resolution system handles these scenarios intelligently based on:
+The sync system detects conflicts when the same file has been modified both locally and remotely. The conflict resolution system handles these scenarios based on:
 
 - **File download status** (downloaded vs placeholder)
 - **Operation type** (Create, Update, Delete, Move, Rename)
 - **Change source** (Local vs Remote)
-- **User preferences** (Manual, AlwaysLocal, AlwaysRemote, Smart)
+- **User preferences** (Manual, AlwaysLocal, AlwaysRemote)
 
 ## Conflict Types
 
@@ -77,57 +77,23 @@ Local change + Remote change → Use Local version
 Local change + Remote change → Show conflict in UI → Wait for user decision
 ```
 
-### 4. Smart Strategy (Adaptive)
-**Description**: Intelligently resolve conflicts based on operation type and file state.
-
-**Decision Matrix**:
-
-| Operation | Downloaded File | Not-Downloaded File |
-|-----------|----------------|---------------------|
-| Create    | Use Newest     | Use Newest          |
-| Update    | Use Newest     | Use Remote          |
-| Delete    | Use Delete     | Use Delete          |
-| Move      | Manual         | Manual              |
-| Rename    | Keep Both      | Keep Both           |
-
-### 5. Timestamp-Based Strategies
+### 4. Additional Resolution Types
 
 #### Use Newest
-**Description**: Select the most recently modified version.
+**Description**: Select the most recently modified version (requires timestamp comparison logic).
 
 **Use Cases**:
 - When latest changes are most valuable
 - For collaborative documents
 - Time-sensitive content
 
-#### Use Oldest
-**Description**: Preserve the original version.
-
-**Use Cases**:
-- When preserving history is important
-- For archive scenarios
-- When newer changes might be corrupted
-
-### 6. Size-Based Strategies
-
-#### Use Largest
-**Description**: Select the version with more content.
-
-**Use Cases**:
-- When content is additive
-- For log files
-- When data loss is critical
-
-#### Use Smallest
-**Description**: Select the more compact version.
-
-**Use Cases**:
-- When compression occurred
-- For cleaned-up versions
-- When smaller means optimized
-
-### 7. Keep Both Strategy
+#### Keep Both
 **Description**: Rename one version and keep both files.
+
+**Use Cases**:
+- When both versions might be valuable
+- To avoid data loss
+- For divergent changes
 
 **Naming Convention**:
 ```
@@ -135,7 +101,7 @@ original.txt → original.txt
 conflicted → original_conflict_2024-01-15.txt
 ```
 
-### 8. Skip Strategy
+#### Skip
 **Description**: Skip the conflicted item and continue with other syncs.
 
 **Use Cases**:
@@ -152,14 +118,14 @@ conflicted → original_conflict_2024-01-15.txt
 - Downloaded: Yes
 - Local modified: 2024-01-15 10:30
 - Remote modified: 2024-01-15 10:45
-- Conflict Strategy: Smart
+- Conflict Strategy: AlwaysRemote
 
 **Resolution Process**:
 1. Conflict detected during sync
-2. Smart strategy checks: File is downloaded + Update operation
-3. Decision: Use Newest (Remote version is newer)
+2. AlwaysRemote strategy applied
+3. Decision: Use Remote version
 4. Actions:
-   - Local version backed up to `report_local_backup_2024-01-15.docx`
+   - Local version could be backed up (if KeepBoth was chosen)
    - Remote version downloaded and replaces local
    - ProcessingItem marked as resolved
    - DriveItemWithFuse updated with new metadata
@@ -194,53 +160,26 @@ conflicted → original_conflict_2024-01-15.txt
 **Resolution Process**:
 1. Name collision detected
 2. Manual strategy triggers UI notification
-3. User presented with options:
+3. User presented with options in conflicts page:
    - Use Local (delete remote)
    - Use Remote (delete local)
    - Keep Both (rename one)
-   - Compare content (if downloaded)
+   - Skip (deal with later)
 4. User selects "Keep Both"
 5. Actions:
    - Local file kept as-is
-   - Remote file downloaded as `meeting-notes_onedrive.txt`
+   - Remote file downloaded with modified name
    - Both ProcessingItems resolved
 
-### Example 4: Folder Moved While File Inside Modified
-**Scenario**: Folder `/Documents/Projects` moved to `/Archive/Projects` remotely while `project.md` inside is edited locally.
-
-**File State**:
-- Parent folder moved remotely
-- Child file modified locally
-- Conflict Strategy: Smart
+### Example 4: User Decision Override
+**Scenario**: Conflict detected with AlwaysRemote strategy, but user wants specific resolution.
 
 **Resolution Process**:
-1. Tree conflict detected
-2. Smart strategy for Move operation → Manual resolution required
-3. User notified of structural conflict
-4. Options presented:
-   - Apply remote move (relocate local changes)
-   - Keep local structure (reject remote move)
-   - Merge (apply both changes)
-5. Actions depend on user choice
-
-### Example 5: Not-Downloaded File Conflict
-**Scenario**: Placeholder file `large-video.mp4` metadata updated locally (renamed) while content updated remotely.
-
-**File State**:
-- Downloaded: No (placeholder only, 0 bytes locally)
-- Local operation: Rename to `large-video-final.mp4`
-- Remote operation: Content update (new version)
-- Conflict Strategy: Smart
-
-**Resolution Process**:
-1. Conflict detected on placeholder file
-2. Smart strategy: Not-downloaded + Update → Use Remote
-3. Decision: Accept remote changes, defer rename
-4. Actions:
-   - Remote metadata accepted
-   - Local rename queued for after download
-   - Placeholder updated with new size/modified date
-   - If in download folder, queued for download
+1. Conflict detected, AlwaysRemote would apply
+2. User navigates to Conflicts page in UI
+3. User manually selects different resolution (e.g., "Keep Both")
+4. UserDecision stored in ProcessingItem
+5. Sync processor respects user decision over strategy
 
 ## Implementation Details
 
@@ -251,9 +190,9 @@ graph TD
     A[New ProcessingItem] --> B{Validation}
     B -->|Valid| C[Processing]
     B -->|Invalid| D{Conflict Resolution}
-    D -->|Auto-resolved| E[Resolved]
+    D -->|Strategy Resolved| E[Resolved]
     D -->|Manual needed| F[Conflicted]
-    F -->|User decision| G[UserDecision Set]
+    F -->|User decision via UI| G[UserDecision Set]
     G --> H{Re-validate}
     H -->|Resolved| E
     E --> I[Apply Changes]
@@ -266,46 +205,46 @@ graph TD
 **ProcessingItem** tracks:
 - `change_type`: Local or Remote
 - `change_operation`: Create, Update, Delete, Move, Rename
-- `conflict_resolution`: Applied resolution strategy
-- `user_decision`: Manual resolution choice
+- `conflict_resolution`: Applied resolution strategy result
+- `user_decision`: Manual resolution choice from UI
 - `validation_errors`: Conflict details
 
-**DriveItemWithFuse** maintains:
-- `file_source`: Remote, Local, or Merged
-- `sync_status`: Current sync state
-- `virtual_ino`: FUSE filesystem inode
-- Download status via `size` (0 = not downloaded)
+**ConflictResolution** enum:
+- `UseRemote`: Use remote version
+- `UseLocal`: Use local version  
+- `Skip`: Skip this item
+- `Manual`: Wait for user decision
+- `UseNewest`: Use newest version
+- `KeepBoth`: Keep both with different names
 
-### Conflict Detection Logic
+### UI Integration
 
-1. **Same ID Check**: Compare drive_item.id for both changes
-2. **Operation Compatibility**: Check if operations can coexist
-3. **Timestamp Comparison**: For content conflicts
-4. **Structural Validation**: Ensure parent paths are valid
+The Conflicts page (`conflicts_page.rs`) provides:
+- List of all current conflicts
+- File details (size, modified time, download status)
+- Resolution buttons for each conflict
+- Auto-refresh every 10 seconds
+- Clear visual separation between local and remote versions
 
-### Resolution Application
+### Separation of Concerns
 
-1. **Conflict Detected**: Create validation errors
-2. **Strategy Selection**: Based on user config or smart logic
-3. **Resolution Decision**: Apply strategy to get resolution
-4. **Action Execution**:
-   - Update metadata
-   - Queue downloads/uploads
-   - Rename files if needed
-   - Update database state
-5. **Notification**: Inform user of resolution
+- **Sync Strategy**: Only validates and detects conflicts
+- **Conflict Resolver**: Determines resolution based on strategy
+- **Sync Processor**: Applies the resolution
+- **UI**: Presents conflicts and captures user decisions
+- **Repositories**: Handle data persistence, not business logic
 
 ### Best Practices
 
-1. **Always backup before resolution** for critical files
-2. **Use Smart strategy** for balanced automation
-3. **Monitor Manual queue** regularly
-4. **Configure download folders** to optimize placeholder handling
-5. **Test resolution strategies** in non-critical folders first
+1. **Use AlwaysRemote** for shared folders where OneDrive is authoritative
+2. **Use AlwaysLocal** for personal work folders
+3. **Use Manual** for critical documents
+4. **Monitor Conflicts page** regularly when using Manual strategy
+5. **Configure download folders** appropriately for your workflow
 
 ### Error Handling
 
 - **Network failures**: Retry with exponential backoff
 - **Permissions errors**: Flag for manual review
-- **Corrupt metadata**: Rebuild from remote
 - **Storage full**: Pause and notify user
+- **Invalid resolution**: Fall back to Manual strategy

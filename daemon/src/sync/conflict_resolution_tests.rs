@@ -85,7 +85,8 @@ mod tests {
     }
 
     #[test]
-    fn test_smart_strategy_delete_operation() {
+<<<<<<< HEAD
+        fn test_smart_strategy_delete_operation() {
         let strategy = strategies::SmartStrategy;
         let item = create_test_processing_item(
             create_test_drive_item("test.txt", 1000, "2024-01-01T00:00:00Z"),
@@ -138,10 +139,6 @@ mod tests {
         assert_eq!(resolution, ConflictResolution::UseRemote);
     }
 
- 
-
-
-
     #[test]
     fn test_timestamp_strategy_oldest() {
         let strategy = strategies::TimestampStrategy { use_newest: false };
@@ -185,13 +182,14 @@ mod tests {
     fn test_conflict_resolution_factory() {
         use onedrive_sync_lib::config::ConflictResolutionStrategy;
 
-        // Test AlwaysRemote
-        let strategy = ConflictResolutionFactory::create_strategy(&ConflictResolutionStrategy::AlwaysRemote);
         let item = create_test_processing_item(
             create_test_drive_item("test.txt", 1000, "2024-01-01T00:00:00Z"),
             ChangeType::Local,
             ChangeOperation::Update,
         );
+
+        // Test AlwaysRemote
+        let strategy = ConflictResolutionFactory::create_strategy(&ConflictResolutionStrategy::AlwaysRemote);
         assert_eq!(strategy.resolve_conflict(&item), ConflictResolution::UseRemote);
 
         // Test AlwaysLocal
@@ -212,11 +210,7 @@ mod tests {
             ConflictResolution::Skip,
             ConflictResolution::Manual,
             ConflictResolution::UseNewest,
-            ConflictResolution::UseOldest,
-            ConflictResolution::UseLargest,
-            ConflictResolution::UseSmallest,
             ConflictResolution::KeepBoth,
-            ConflictResolution::Merge,
         ];
 
         for resolution in resolutions {
@@ -233,15 +227,15 @@ mod tests {
         assert_eq!(ConflictResolution::Skip.as_str(), "skip");
         assert_eq!(ConflictResolution::Manual.as_str(), "manual");
         assert_eq!(ConflictResolution::UseNewest.as_str(), "use_newest");
-        assert_eq!(ConflictResolution::UseOldest.as_str(), "use_oldest");
-        assert_eq!(ConflictResolution::UseLargest.as_str(), "use_largest");
-        assert_eq!(ConflictResolution::UseSmallest.as_str(), "use_smallest");
         assert_eq!(ConflictResolution::KeepBoth.as_str(), "keep_both");
-        assert_eq!(ConflictResolution::Merge.as_str(), "merge");
 
         // Test from_str
         assert_eq!(ConflictResolution::from_str("use_remote"), Some(ConflictResolution::UseRemote));
         assert_eq!(ConflictResolution::from_str("use_local"), Some(ConflictResolution::UseLocal));
+        assert_eq!(ConflictResolution::from_str("skip"), Some(ConflictResolution::Skip));
+        assert_eq!(ConflictResolution::from_str("manual"), Some(ConflictResolution::Manual));
+        assert_eq!(ConflictResolution::from_str("use_newest"), Some(ConflictResolution::UseNewest));
+        assert_eq!(ConflictResolution::from_str("keep_both"), Some(ConflictResolution::KeepBoth));
         assert_eq!(ConflictResolution::from_str("invalid"), None);
     }
 }

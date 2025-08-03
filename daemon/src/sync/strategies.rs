@@ -1,16 +1,12 @@
 use super::conflict_resolution::{ConflictResolver, ConflictResolution};
-use crate::persistency::processing_item_repository::{ProcessingItem, ChangeOperation};
+use crate::persistency::processing_item_repository::ProcessingItem;
 use onedrive_sync_lib::config::ConflictResolutionStrategy;
-use chrono::{DateTime, Utc};
-use log::{debug, info};
 
 /// Always apply remote changes, overwrite local if needed
 pub struct AlwaysRemoteStrategy;
 
 impl ConflictResolver for AlwaysRemoteStrategy {
-    fn resolve_conflict(&self, item: &ProcessingItem) -> ConflictResolution {
-        debug!("AlwaysRemoteStrategy: Resolving to use remote for {}", 
-               item.drive_item.name.as_deref().unwrap_or("unnamed"));
+    fn resolve_conflict(&self, _item: &ProcessingItem) -> ConflictResolution {
         ConflictResolution::UseRemote
     }
 }
@@ -19,9 +15,7 @@ impl ConflictResolver for AlwaysRemoteStrategy {
 pub struct AlwaysLocalStrategy;
 
 impl ConflictResolver for AlwaysLocalStrategy {
-    fn resolve_conflict(&self, item: &ProcessingItem) -> ConflictResolution {
-        debug!("AlwaysLocalStrategy: Resolving to use local for {}", 
-               item.drive_item.name.as_deref().unwrap_or("unnamed"));
+    fn resolve_conflict(&self, _item: &ProcessingItem) -> ConflictResolution {
         ConflictResolution::UseLocal
     }
 }
@@ -30,9 +24,7 @@ impl ConflictResolver for AlwaysLocalStrategy {
 pub struct ManualStrategy;
 
 impl ConflictResolver for ManualStrategy {
-    fn resolve_conflict(&self, item: &ProcessingItem) -> ConflictResolution {
-        debug!("ManualStrategy: Deferring to user for {}", 
-               item.drive_item.name.as_deref().unwrap_or("unnamed"));
+    fn resolve_conflict(&self, _item: &ProcessingItem) -> ConflictResolution {
         ConflictResolution::Manual
     }
 }
@@ -41,15 +33,18 @@ impl ConflictResolver for ManualStrategy {
 pub struct SmartStrategy;
 
 impl SmartStrategy {
-    fn parse_datetime(datetime_str: &str) -> Option<DateTime<Utc>> {
-        DateTime::parse_from_rfc3339(datetime_str)
+    fn parse_datetime(datetime_str: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+        chrono::DateTime::parse_from_rfc3339(datetime_str)
             .ok()
-            .map(|dt| dt.with_timezone(&Utc))
+            .map(|dt| dt.with_timezone(&chrono::Utc))
     }
 }
 
 impl ConflictResolver for SmartStrategy {
     fn resolve_conflict(&self, item: &ProcessingItem) -> ConflictResolution {
+        use crate::persistency::processing_item_repository::ChangeOperation;
+        use log::{debug, info};
+
         info!("SmartStrategy: Analyzing conflict for {} (operation: {:?})", 
               item.drive_item.name.as_deref().unwrap_or("unnamed"),
               item.change_operation);
@@ -110,7 +105,8 @@ pub struct TimestampStrategy {
 }
 
 impl ConflictResolver for TimestampStrategy {
-    fn resolve_conflict(&self, item: &ProcessingItem) -> ConflictResolution {
+    fn resolve_conflict(&self, _item: &ProcessingItem) -> ConflictResolution {
+        use log::debug;
         debug!("TimestampStrategy: Resolving based on {} timestamp", 
                if self.use_newest { "newest" } else { "oldest" });
         
@@ -128,7 +124,8 @@ pub struct SizeStrategy {
 }
 
 impl ConflictResolver for SizeStrategy {
-    fn resolve_conflict(&self, item: &ProcessingItem) -> ConflictResolution {
+    fn resolve_conflict(&self, _item: &ProcessingItem) -> ConflictResolution {
+        use log::debug;
         debug!("SizeStrategy: Resolving based on {} size", 
                if self.use_largest { "largest" } else { "smallest" });
         
@@ -150,17 +147,5 @@ impl ConflictResolutionFactory {
             ConflictResolutionStrategy::AlwaysLocal => Box::new(AlwaysLocalStrategy),
             ConflictResolutionStrategy::Manual => Box::new(ManualStrategy),
         }
-    }
-
-    pub fn create_smart_strategy() -> Box<dyn ConflictResolver> {
-        Box::new(SmartStrategy)
-    }
-
-    pub fn create_timestamp_strategy(use_newest: bool) -> Box<dyn ConflictResolver> {
-        Box::new(TimestampStrategy { use_newest })
-    }
-
-    pub fn create_size_strategy(use_largest: bool) -> Box<dyn ConflictResolver> {
-        Box::new(SizeStrategy { use_largest })
     }
 } 

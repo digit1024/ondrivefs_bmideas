@@ -20,7 +20,6 @@ pub enum ConflictResolution {
     UseLargest,         // Use the largest file
     UseSmallest,        // Use the smallest file
     KeepBoth,           // Keep both files with different names
-    Merge,              // Merge changes (for supported file types)
 }
 
 impl ConflictResolution {
@@ -35,7 +34,6 @@ impl ConflictResolution {
             ConflictResolution::UseLargest => "use_largest",
             ConflictResolution::UseSmallest => "use_smallest",
             ConflictResolution::KeepBoth => "keep_both",
-            ConflictResolution::Merge => "merge",
         }
     }
 
@@ -50,7 +48,6 @@ impl ConflictResolution {
             "use_largest" => Some(ConflictResolution::UseLargest),
             "use_smallest" => Some(ConflictResolution::UseSmallest),
             "keep_both" => Some(ConflictResolution::KeepBoth),
-            "merge" => Some(ConflictResolution::Merge),
             _ => None,
         }
     }
