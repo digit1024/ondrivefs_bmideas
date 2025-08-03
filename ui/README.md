@@ -2,7 +2,7 @@
 
 onedrive-sync UI for POP OS Cosmic
 
-![Rust](https://github.com/digit1024/ondrivefs_bmideas/workflows/Rust/badge.svg)
+
 
 ## Installation
 

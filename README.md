@@ -1,10 +1,13 @@
 # OpenOneDrive
 
+![Rust](https://github.com/digit1024/ondrivefs_bmideas/workflows/Rust/badge.svg)
+
 An experimental OneDrive sync client for Linux, featuring:
+
 - FUSE-based virtual filesystem
 - Two-way sync with conflict resolution
 - UI (libcosmic, Rust)
-- notifications and panel applet 
+- notifications and panel applet
 - Designed for POP!_OS
 
 ---
