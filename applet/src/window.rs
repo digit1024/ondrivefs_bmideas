@@ -206,7 +206,7 @@ impl cosmic::Application for Window {
                 if let Some(id) = have_popup {
                     Message::Surface(destroy_popup(id))
                 } else {
-                    let status_section = self.create_status_section();
+                    
                     Message::Surface(app_popup::<Window>(
                         move |state: &mut Window| {
                             let new_id = Id::unique();

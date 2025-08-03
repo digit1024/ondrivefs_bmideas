@@ -25,8 +25,7 @@ pub struct AppState {
     pub auth: Arc<OneDriveAuth>,
     /// File manager
     pub file_manager: Arc<DefaultFileManager>,
-    /// Message broker for internal communication
-    pub message_broker: Arc<MessageBroker>,
+    
     /// Scheduler for periodic tasks
     pub scheduler: Arc<PeriodicScheduler>,
 }
@@ -62,8 +61,7 @@ impl AppState {
         // Initialize file manager
         let file_manager = Arc::new(DefaultFileManager::new(project_config_arc.clone()).await?);
 
-        // Initialize message broker
-        let message_broker = Arc::new(MessageBroker::new(1000));
+        
 
         // Initialize scheduler
         let scheduler = Arc::new(PeriodicScheduler::new());
@@ -75,7 +73,7 @@ impl AppState {
             onedrive_client: Arc::new(onedrive_client),
             auth: auth_arc,
             file_manager,
-            message_broker,
+            
             scheduler,
         })
     }
@@ -111,10 +109,7 @@ impl AppState {
         &self.file_manager
     }
 
-    /// Get a reference to the message broker
-    pub fn message_broker(&self) -> &MessageBroker {
-        &self.message_broker
-    }
+    
 
     /// Get a reference to the scheduler
     pub fn scheduler(&self) -> &PeriodicScheduler {

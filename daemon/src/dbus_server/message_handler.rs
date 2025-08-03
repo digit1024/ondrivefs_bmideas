@@ -6,14 +6,14 @@ use log::{info, debug, error};
 
 /// DBus message handler that converts internal messages to DBus signals
 pub struct DbusMessageHandler {
-    app_state: Arc<AppState>,
+    
     connection: Option<Connection>,
 }
 
 impl DbusMessageHandler {
-    pub fn new(app_state: Arc<AppState>) -> Self {
+    pub fn new() -> Self {
         Self {
-            app_state,
+            
             connection: None,
         }
     }
