@@ -2,8 +2,6 @@
 
 onedrive-sync UI for POP OS Cosmic
 
-
-
 ## Installation
 
 A [justfile](./justfile) is included by default for the [casey/just][just] command runner.

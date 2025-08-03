@@ -223,7 +223,7 @@ impl DriveItemWithFuseRepository {
                 SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
                        mime_type, download_url, is_deleted, parent_id, parent_path, 
                        parent_ino, virtual_path,  file_source, sync_status
-                FROM drive_items_with_fuse where parent_path = '/drive/root:' ORDER BY name
+                FROM drive_items_with_fuse where parent_path = '/drive/root:' AND is_deleted = 0 ORDER BY name
                 "#,
             )
             .fetch_all(&self.pool)
@@ -234,7 +234,7 @@ impl DriveItemWithFuseRepository {
                 SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
                        mime_type, download_url, is_deleted, parent_id, parent_path, 
                        parent_ino, virtual_path,  file_source, sync_status
-                FROM drive_items_with_fuse where REPLACE(parent_path , '/drive/root:' , '') = ? ORDER BY name
+                FROM drive_items_with_fuse where REPLACE(parent_path , '/drive/root:' , '') = ? AND is_deleted = 0 ORDER BY name
                 "#,
             )
             .bind(parent_path)
@@ -261,7 +261,7 @@ impl DriveItemWithFuseRepository {
             SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path, 
                    parent_ino, virtual_path,  file_source, sync_status
-            FROM drive_items_with_fuse WHERE parent_id = ? ORDER BY name
+            FROM drive_items_with_fuse WHERE parent_id = ? AND is_deleted = 0 ORDER BY name
             "#,
         )
         .bind(parent_id)
@@ -287,7 +287,7 @@ impl DriveItemWithFuseRepository {
             SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path, 
                    parent_ino, virtual_path,  file_source, sync_status
-            FROM drive_items_with_fuse WHERE parent_ino = ? ORDER BY name
+            FROM drive_items_with_fuse WHERE parent_ino = ? AND is_deleted = 0 ORDER BY name
             "#,
         )
         .bind(parent_ino as i64)
@@ -315,7 +315,7 @@ impl DriveItemWithFuseRepository {
             SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path, 
                    parent_ino, virtual_path,  file_source, sync_status
-            FROM drive_items_with_fuse WHERE parent_ino = ? ORDER BY virtual_ino LIMIT ? OFFSET ?
+            FROM drive_items_with_fuse WHERE parent_ino = ? AND is_deleted = 0 ORDER BY virtual_ino LIMIT ? OFFSET ?
             "#,
         )
         .bind(parent_ino as i64)
@@ -404,7 +404,7 @@ impl DriveItemWithFuseRepository {
             SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path, 
                    parent_ino, virtual_path,  file_source, sync_status
-            FROM drive_items_with_fuse WHERE virtual_path = ?
+            FROM drive_items_with_fuse WHERE virtual_path = ? AND is_deleted = 0
             "#,
         )
         .bind(virtual_path)
@@ -471,13 +471,13 @@ impl DriveItemWithFuseRepository {
     }
 
     /// Delete a drive item with Fuse metadata by OneDrive ID
-    pub async fn delete_drive_item_with_fuse(&self, onedrive_id: &str) -> Result<()> {
-        sqlx::query("DELETE FROM drive_items_with_fuse WHERE onedrive_id = ?")
+    pub async fn mark_as_deleted_by_onedrive_id(&self, onedrive_id: &str) -> Result<()> {
+        sqlx::query("UPDATE drive_items_with_fuse SET is_deleted = 1 WHERE onedrive_id = ?")
             .bind(onedrive_id)
             .execute(&self.pool)
             .await?;
 
-        debug!("Deleted drive item with Fuse: {}", onedrive_id);
+        debug!("Marked drive item as deleted: {}", onedrive_id);
         Ok(())
     }
 
@@ -531,7 +531,7 @@ impl DriveItemWithFuseRepository {
             SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path, 
                    parent_ino, virtual_path,  file_source, sync_status
-            FROM drive_items_with_fuse WHERE parent_id = ?
+            FROM drive_items_with_fuse WHERE parent_id = ? AND is_deleted = 0
             "#,
         )
         .bind(parent_id)
@@ -548,13 +548,23 @@ impl DriveItemWithFuseRepository {
     }
 
     /// Delete a drive item with Fuse metadata by virtual inode
-    pub async fn delete_drive_item_with_fuse_by_ino(&self, virtual_ino: u64) -> Result<()> {
-        sqlx::query("DELETE FROM drive_items_with_fuse WHERE virtual_ino = ?")
+    pub async fn mark_as_deleted_by_ino(&self, virtual_ino: u64) -> Result<()> {
+        sqlx::query("update drive_items_with_fuse set is_deleted = 1 WHERE virtual_ino = ?")
             .bind(virtual_ino as i64)
             .execute(&self.pool)
             .await?;
 
-        debug!("Deleted drive item with Fuse by inode: {}", virtual_ino);
+        debug!("Marked drive item as deleted by inode: {}", virtual_ino);
+        Ok(())
+    }
+    #[allow(dead_code)]
+    pub async fn mark_as_not_deleted_by_ino(&self, virtual_ino: u64) -> Result<()> {
+        sqlx::query("update drive_items_with_fuse set is_deleted = 0 WHERE virtual_ino = ?")
+            .bind(virtual_ino as i64)
+            .execute(&self.pool)
+            .await?;
+
+        debug!("Marked drive item as not deleted by inode: {}", virtual_ino);
         Ok(())
     }
 
@@ -569,7 +579,7 @@ impl DriveItemWithFuseRepository {
             SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path, 
                    parent_ino, virtual_path,  file_source, sync_status
-            FROM drive_items_with_fuse WHERE parent_ino = ? AND name = ?
+            FROM drive_items_with_fuse WHERE parent_ino = ? AND name = ? AND is_deleted = 0
             "#,
         )
         .bind(parent_ino as i64)
@@ -596,7 +606,7 @@ impl DriveItemWithFuseRepository {
             SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path, 
                    parent_ino, virtual_path,  file_source, sync_status
-            FROM drive_items_with_fuse WHERE parent_ino = ? AND LOWER(name) = LOWER(?)
+            FROM drive_items_with_fuse WHERE parent_ino = ? AND LOWER(name) = LOWER(?) AND is_deleted = 0
             "#,
         )
         .bind(parent_ino as i64)
@@ -622,7 +632,7 @@ impl DriveItemWithFuseRepository {
         let rows = sqlx::query(
             r#"
             SELECT * FROM drive_items_with_fuse
-            WHERE virtual_path LIKE ? AND is_folder = 0
+            WHERE virtual_path LIKE ? AND is_folder = 0 AND is_deleted = 0
             "#,
         )
         .bind(&pattern)

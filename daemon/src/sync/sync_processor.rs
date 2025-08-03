@@ -380,7 +380,7 @@ impl SyncProcessor {
 
         // Remove item from drive_items_with_fuse table
         if let Err(e) = drive_item_with_fuse_repo
-            .delete_drive_item_with_fuse(&item.drive_item.id)
+            .mark_as_deleted_by_onedrive_id(&item.drive_item.id)
             .await
         {
             warn!("⚠️ Failed to remove item from drive_items_with_fuse: {}", e);

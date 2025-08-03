@@ -311,7 +311,7 @@ impl CachedDriveItemWithFuseRepository {
         let item = self.inner.get_drive_item_with_fuse(onedrive_id).await?;
         let inode = item.as_ref().and_then(|i| i.fuse_metadata.virtual_ino);
 
-        self.inner.delete_drive_item_with_fuse(onedrive_id).await?;
+        self.inner.mark_as_deleted_by_onedrive_id(onedrive_id).await?;
 
         // Invalidate cache for this item
         if let Some(inode) = inode {
@@ -354,7 +354,7 @@ impl CachedDriveItemWithFuseRepository {
     /// Delete a drive item with Fuse metadata by virtual inode
     pub async fn delete_drive_item_with_fuse_by_ino(&self, virtual_ino: u64) -> Result<()> {
         self.inner
-            .delete_drive_item_with_fuse_by_ino(virtual_ino)
+            .mark_as_deleted_by_ino(virtual_ino)
             .await?;
         // Invalidate cache for this inode
         self.invalidate_cache(virtual_ino).await;
