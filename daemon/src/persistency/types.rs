@@ -161,6 +161,10 @@ impl DriveItemWithFuse {
         self.drive_item_mut().parent_reference =
             Some(crate::onedrive_service::onedrive_models::ParentReference { id: id, path: None });
     }
+    #[allow(dead_code)]
+    pub fn is_synced(&self) -> bool {
+        !self.drive_item.id.starts_with("local_")
+    }
 }
 
 // Delegate common accessors to DriveItem
