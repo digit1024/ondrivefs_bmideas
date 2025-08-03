@@ -73,10 +73,9 @@ impl DriveItemWithFuseRepository {
             .bind(&item.drive_item.download_url)
             .bind(item.drive_item.deleted.is_some())
             .bind(parent_id)
-            .bind(parent_path)            
+            .bind(parent_path)
             .bind(item.fuse_metadata.parent_ino.map(|i| i as i64))
             .bind(&item.fuse_metadata.virtual_path)
-            
             .bind(item.fuse_metadata.file_source.map(|s| s.as_str()))
             .bind(&item.fuse_metadata.sync_status)
             .bind(&item.drive_item.id)

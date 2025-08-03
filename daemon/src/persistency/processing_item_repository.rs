@@ -837,7 +837,6 @@ impl ProcessingItemRepository {
         .bind(parent_id)
         .bind(parent_path)
         .bind(item.status.as_str())
-        
         .bind(&item.error_message)
         .bind(&item.last_status_update)
         .bind(item.retry_count)
