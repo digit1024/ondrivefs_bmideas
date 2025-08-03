@@ -561,7 +561,7 @@ async fn handle_virtual_file(file_path: &str, app: &AppSetup) -> Result<()> {
         let local_path = if let Some(ino) = item_with_fuse.virtual_ino() {
             file_manager.get_download_dir().join(ino.to_string())
         } else {
-            file_manager.get_download_dir().join(onedrive_id.clone())
+            file_manager.get_download_dir().join(onedrive_id)
         };
         
         // Add to download queue

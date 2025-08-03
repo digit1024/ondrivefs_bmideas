@@ -175,8 +175,8 @@ impl fuser::Filesystem for OneDriveFuse {
     ) {
         debug!("READDIR: ino={}, offset={}", ino, offset);
         let dots_added = self.add_dot_entries_if_needed(ino, &mut reply, offset);
-        let mut current_offset = offset;
-        let mut entries_added = if dots_added {2} else {0};
+        let current_offset = offset;
+        let entries_added = if dots_added {2} else {0};
         let batch_size = 100; // Fetch 100 items at a time
         // for offset 0 actual offset woudl be 0 
         // but if we have not added entries so offset was lets say 2 actual offset woudl be offset - 2
@@ -659,13 +659,13 @@ impl fuser::Filesystem for OneDriveFuse {
 
    
 
-            let mut current_offset = 1 ;
+            let current_offset = 1 ;
             // Add entries with proper offset handling
             for (i, (ino, kind, name, attr, geno)) in entries.iter().enumerate() {
                 
                 
                     debug!("Adding entry: {} at offset {}", name, i+1);
-                if(offset < i as i64 +1){
+                if offset < i as i64 +1 {
                     
                     if reply.add(*ino, i as i64+1, name, &Duration::from_secs(5), &attr, geno.clone() ) {
                         

@@ -1,13 +1,11 @@
 use std::time::Duration;
 
 use cosmic::iced::alignment::Horizontal;
-use cosmic::iced_wgpu::graphics::image::image_rs::codecs::png;
-use cosmic::widget::{self, button, column, container, row, svg, text };
+use cosmic::widget::{self, button, column, container, row, text };
 use cosmic::iced::{time, Alignment, Length, Subscription};
 use log::{error, info};
-use onedrive_sync_lib::dbus::types::{DaemonStatus, UserProfile, SyncStatus};
+use onedrive_sync_lib::dbus::types::{DaemonStatus, UserProfile};
 use crate::dbus_client::{with_dbus_client, DbusClient};
-use cosmic::{cosmic_theme, iced_core, theme};
 
 const ICON_ONLINE: &[u8] = include_bytes!("../../../resources/programfiles/icons/online.svg");
 const ICON_SYNCING: &[u8] = include_bytes!("../../../resources/programfiles/icons/syncing.svg");
@@ -51,7 +49,7 @@ impl Page {
 
     pub fn view(&self) -> cosmic::Element<Message> {
         let spacing = cosmic::theme::active().cosmic().spacing.space_l;
-        let mut content = column()
+        let content = column()
             .spacing(spacing)
             .width(Length::Fill)
             .height(Length::Fill);

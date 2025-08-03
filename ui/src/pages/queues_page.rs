@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use cosmic::widget::segmented_button::SingleSelect;
-use cosmic::widget::{self, button, column, container, row, text, segmented_control, segmented_button};
+use cosmic::widget::{button, column, container, row, text, segmented_control, segmented_button};
 use cosmic::iced::{time, Alignment, Length, Subscription};
-use log::{error, info};
+use log::info;
 use onedrive_sync_lib::dbus::types::SyncQueueItem;
 use crate::dbus_client::DbusClient;
 
@@ -54,7 +54,7 @@ impl Page {
 
     pub fn view(&self) -> cosmic::Element<Message> {
         let spacing = cosmic::theme::active().cosmic().spacing.space_m;
-        let mut content = column()
+        let content = column()
             .spacing(spacing)
             .width(Length::Fill)
             .height(Length::Fill);

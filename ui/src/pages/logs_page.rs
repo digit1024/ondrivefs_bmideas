@@ -1,6 +1,5 @@
-use cosmic::widget::{self, button, column, container, row, text, scrollable};
+use cosmic::widget::{button, column, container, row, text, scrollable};
 use cosmic::iced::{Alignment, Length, Subscription};
-use log::info;
 use crate::dbus_client::DbusClient;
 use std::time::Duration;
 use cosmic::iced::time;
@@ -34,7 +33,7 @@ impl Page {
 
     pub fn view(&self) -> cosmic::Element<Message> {
         let spacing = cosmic::theme::active().cosmic().spacing.space_m;
-        let mut content = column()
+        let content = column()
             .spacing(spacing)
             .width(Length::Fill)
             .height(Length::Fill);

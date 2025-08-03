@@ -122,7 +122,7 @@ impl SyncStrategy {
     /// Check for content conflicts between local and remote versions
     async fn check_content_conflict(&self, item: &ProcessingItem) -> Result<(), String> {
         let processing_item_repository = self.app_state.persistency().processing_item_repository();
-        let searched_change_type = if (item.change_type == crate::persistency::processing_item_repository::ChangeType::Remote) {
+        let searched_change_type = if item.change_type == crate::persistency::processing_item_repository::ChangeType::Remote {
             crate::persistency::processing_item_repository::ChangeType::Local
         } else {
             crate::persistency::processing_item_repository::ChangeType::Remote
@@ -132,7 +132,7 @@ impl SyncStrategy {
         match searched_item {
             Some(searched_item) => {
                 //If both are deleted, it's ok
-                if(item.change_operation == crate::persistency::processing_item_repository::ChangeOperation::Delete && searched_item.change_operation == crate::persistency::processing_item_repository::ChangeOperation::Delete){
+                if item.change_operation == crate::persistency::processing_item_repository::ChangeOperation::Delete && searched_item.change_operation == crate::persistency::processing_item_repository::ChangeOperation::Delete {
                     return Ok(());  
                 }else{
                     return Err(format!("File '{}' was modified both locally and remotely", 

@@ -2,18 +2,14 @@
 
 use crate::config::Config;
 use crate::fl;
-use cosmic::app::context_drawer;
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
 
-use cosmic::iced::{Alignment, Length, Subscription};
-use cosmic::widget::menu::Action;
-use crate::notifications::{NotificationSender, NotificationUrgency};
+use cosmic::iced::{Length, Subscription};
 
 use cosmic::prelude::*;
-use cosmic::widget::{self, button, icon, menu, nav_bar, row, Row};
+use cosmic::widget::{self, icon, menu, nav_bar};
 
 
-use cosmic::{cosmic_theme, theme};
 use log::info;
 use std::collections::HashMap;
 use crate::pages::{self, about_element, status_page, folders_page, queues_page};

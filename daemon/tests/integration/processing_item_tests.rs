@@ -239,7 +239,7 @@ async fn test_processing_item_modified_locally_should_fail_file_not_found() -> R
     assert_eq!(original_item.is_some(), true);
     let item = original_item.clone().unwrap();
     // AND Item is modified locally
-    let mut  di  = item.drive_item().clone();
+    let di  = item.drive_item().clone();
     let processing_item = create_test_local_processing_item(di.clone(), ChangeOperation::Update);
     let local_processing_item_id = repo.store_processing_item(&processing_item).await?;
     

@@ -1,5 +1,5 @@
-use cosmic::widget::{self, button, column, container, row, text, text_input};
-use cosmic::iced::{Alignment, Length};
+use cosmic::widget::{button, column, container, row, text, text_input};
+use cosmic::iced::Length;
 use log::info;
 use crate::dbus_client::{DbusClient, with_dbus_client};
 
@@ -34,7 +34,7 @@ impl Page {
 
     pub fn view(&self) -> cosmic::Element<Message> {
         let spacing = cosmic::theme::active().cosmic().spacing.space_l;
-        let mut content = column()
+        let content = column()
             .spacing(spacing)
             .width(Length::Fill)
             .height(Length::Fill);
