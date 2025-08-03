@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 use zbus::zvariant::Type;
 
-
 #[derive(Debug, Clone, Deserialize, Serialize, Type)]
-pub enum SyncStatus{
-    Running, Paused, Error
+pub enum SyncStatus {
+    Running,
+    Paused,
+    Error,
 }
 #[derive(Debug, Clone, Deserialize, Serialize, Type)]
 pub struct DaemonStatus {
@@ -16,7 +17,7 @@ pub struct DaemonStatus {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Type)]
-pub struct SyncQueueItem    {
+pub struct SyncQueueItem {
     pub onedrive_id: String,
     pub ino: u64,
     pub name: String,
@@ -24,10 +25,8 @@ pub struct SyncQueueItem    {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Type)]
-pub struct UserProfile    {
+pub struct UserProfile {
     pub display_name: String,
     pub given_name: String,
     pub mail: String,
 }
-
-

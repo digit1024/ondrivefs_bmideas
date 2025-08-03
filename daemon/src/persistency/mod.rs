@@ -3,15 +3,13 @@
 //! This module provides database functionality for storing OneDrive metadata,
 //! sync state, and other persistent data using SQLx with SQLite.
 
-
-pub mod drive_item_with_fuse_repository;
 pub mod cached_drive_item_with_fuse_repository;
-pub mod sync_state_repository;
 pub mod download_queue_repository;
+pub mod drive_item_with_fuse_repository;
+pub mod sync_state_repository;
 
-pub mod profile_repository;
 pub mod processing_item_repository;
-
+pub mod profile_repository;
 
 pub mod types;
 
@@ -70,19 +68,16 @@ impl PersistencyManager {
         info!("Initializing database schema...");
 
         // Create tables for OneDrive models
-        
+
         self.create_drive_items_with_fuse_table().await?;
         self.create_sync_state_table().await?;
         self.create_download_queue_table().await?;
         self.create_user_profiles_table().await?;
         self.create_processing_items_table().await?;
-        
 
         info!("Database schema initialized successfully");
         Ok(())
     }
-
-    
 
     /// Create the drive_items_with_fuse table for storing OneDrive file/folder metadata with Fuse data
     async fn create_drive_items_with_fuse_table(&self) -> Result<()> {
@@ -186,8 +181,6 @@ impl PersistencyManager {
         Ok(())
     }
 
- 
-
     /// Create the user_profiles table for storing user profile information
     async fn create_user_profiles_table(&self) -> Result<()> {
         sqlx::query(
@@ -252,9 +245,11 @@ impl PersistencyManager {
         .execute(&self.pool)
         .await?;
 
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_processing_items_status ON processing_items(status)")
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_processing_items_status ON processing_items(status)",
+        )
+        .execute(&self.pool)
+        .await?;
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_processing_items_change_type ON processing_items(change_type)")
         .execute(&self.pool)
@@ -275,9 +270,10 @@ impl PersistencyManager {
         Ok(())
     }
 
-
     /// Get the processing item repository
-    pub fn processing_item_repository(&self) -> processing_item_repository::ProcessingItemRepository {
+    pub fn processing_item_repository(
+        &self,
+    ) -> processing_item_repository::ProcessingItemRepository {
         processing_item_repository::ProcessingItemRepository::new(self.pool.clone())
     }
     pub fn sync_state_repository(&self) -> sync_state_repository::SyncStateRepository {
@@ -285,7 +281,9 @@ impl PersistencyManager {
     }
 
     /// Get the drive item with fuse repository
-    pub fn drive_item_with_fuse_repository(&self) -> drive_item_with_fuse_repository::DriveItemWithFuseRepository {
+    pub fn drive_item_with_fuse_repository(
+        &self,
+    ) -> drive_item_with_fuse_repository::DriveItemWithFuseRepository {
         drive_item_with_fuse_repository::DriveItemWithFuseRepository::new(self.pool.clone())
     }
 
@@ -293,8 +291,6 @@ impl PersistencyManager {
     pub fn download_queue_repository(&self) -> download_queue_repository::DownloadQueueRepository {
         download_queue_repository::DownloadQueueRepository::new(self.pool.clone())
     }
-
-
 
     /// Get the user profile repository
     pub fn user_profile_repository(&self) -> profile_repository::ProfileRepository {

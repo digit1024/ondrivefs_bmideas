@@ -1,8 +1,9 @@
-use cosmic::widget::{button, column, container, row, text, scrollable};
-use cosmic::iced::{Alignment, Length, Subscription};
+#![allow(dead_code)]
 use crate::dbus_client::DbusClient;
-use std::time::Duration;
 use cosmic::iced::time;
+use cosmic::iced::{Alignment, Length, Subscription};
+use cosmic::widget::{button, column, container, row, scrollable, text};
+use std::time::Duration;
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -39,23 +40,24 @@ impl Page {
             .height(Length::Fill);
 
         let header = text::title2("Daemon Logs").size(24);
-        let refresh_row = row()
-            .width(Length::Fill)
-            .push(
-                container(button::standard("Refresh")
-                    .on_press(Message::Refresh))
-                    .align_x(Alignment::End)
-                    .width(Length::Fill)
-            );
+        let refresh_row = row().width(Length::Fill).push(
+            container(button::standard("Refresh").on_press(Message::Refresh))
+                .align_x(Alignment::End)
+                .width(Length::Fill),
+        );
 
         let loading_indicator = if self.loading {
-            container(text::body("Loading logs...").size(16)).padding(8).width(Length::Fill)
+            container(text::body("Loading logs...").size(16))
+                .padding(8)
+                .width(Length::Fill)
         } else {
             container(column()).width(Length::Fill)
         };
 
         let error_display = if let Some(error) = &self.error {
-            container(text::body(format!("Error: {}", error)).size(14)).padding(8).width(Length::Fill)
+            container(text::body(format!("Error: {}", error)).size(14))
+                .padding(8)
+                .width(Length::Fill)
         } else {
             container(column()).width(Length::Fill)
         };
@@ -70,7 +72,9 @@ impl Page {
             col
         };
 
-        let log_scroll = scrollable(log_lines).height(Length::Fill).width(Length::Fill);
+        let log_scroll = scrollable(log_lines)
+            .height(Length::Fill)
+            .width(Length::Fill);
 
         content
             .push(header)
@@ -81,19 +85,20 @@ impl Page {
             .into()
     }
 
-    pub fn update(&mut self, message: Message) -> cosmic::Task<cosmic::Action<crate::app::Message>> {
+    pub fn update(
+        &mut self,
+        message: Message,
+    ) -> cosmic::Task<cosmic::Action<crate::app::Message>> {
         match message {
             Message::AutoRefresh | Message::FetchLogs | Message::Refresh => {
                 self.loading = true;
                 self.error = None;
                 let fetch_logs = async move {
                     match DbusClient::new().await {
-                        Ok(client) => {
-                            match client.get_recent_logs().await {
-                                Ok(logs) => Ok(logs),
-                                Err(e) => Err(format!("Failed to get logs: {}", e)),
-                            }
-                        }
+                        Ok(client) => match client.get_recent_logs().await {
+                            Ok(logs) => Ok(logs),
+                            Err(e) => Err(format!("Failed to get logs: {}", e)),
+                        },
                         Err(e) => Err(format!("Failed to connect to daemon: {}", e)),
                     }
                 };
@@ -117,4 +122,4 @@ impl Page {
             }
         }
     }
-} 
+}

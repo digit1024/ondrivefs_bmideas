@@ -1,4 +1,4 @@
-//! ProfileRepository: Handles user_profiles table operations 
+//! ProfileRepository: Handles user_profiles table operations
 use crate::onedrive_service::onedrive_models::UserProfile;
 use anyhow::{Context, Result};
 use log::info;
@@ -119,4 +119,4 @@ impl ProfileRepository {
         info!("Cleared stored user profile");
         Ok(())
     }
-} 
+}

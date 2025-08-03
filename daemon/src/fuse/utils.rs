@@ -12,4 +12,4 @@ where
 }
 
 /// FUSE capability for readdirplus
-pub const FUSE_CAP_READDIRPLUS: u32 = 0x00000010; 
+pub const FUSE_CAP_READDIRPLUS: u32 = 0x00000010;

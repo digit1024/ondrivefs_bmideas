@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use cosmic::{cosmic_theme, iced::Alignment, theme, widget, Element};
 
 use crate::fl;

@@ -1,12 +1,12 @@
 use std::time::Duration;
 
 use cosmic::app::{Core, Task};
-use cosmic::widget::{self, column, row, text };
 use cosmic::iced::window::Id;
 use cosmic::iced::{time, Alignment, Length, Rectangle, Subscription};
 use cosmic::iced_runtime::core::window;
 use cosmic::surface::action::{app_popup, destroy_popup};
 use cosmic::widget::list_column;
+use cosmic::widget::{self, column, row, text};
 use cosmic::Element;
 use onedrive_sync_lib::dbus::types::DaemonStatus;
 
@@ -19,8 +19,7 @@ const ICON_FALSE: &[u8] = include_bytes!("../../resources/programfiles/icons/err
 pub struct Window {
     core: Core,
     popup: Option<Id>,
-    example_row: bool,
-    selected: Option<usize>,
+
     daemon_status: Option<DaemonStatus>,
 }
 
@@ -29,8 +28,7 @@ impl Default for Window {
         Self {
             core: Core::default(),
             popup: None,
-            example_row: false,
-            selected: None,
+
             daemon_status: None,
         }
     }
@@ -39,8 +37,7 @@ impl Default for Window {
 #[derive(Clone, Debug)]
 pub enum Message {
     PopupClosed(Id),
-    ToggleExampleRow(bool),
-    Selected(usize),
+
     Surface(cosmic::surface::Action),
     FetchStatus,
     StatusLoaded(Result<DaemonStatus, String>),
@@ -49,9 +46,8 @@ pub enum Message {
 impl Window {
     fn create_status_section(&self) -> cosmic::Element<Message> {
         let spacing = cosmic::theme::active().cosmic().spacing.space_m;
-        
-        let title = text::title3("Daemon Status")
-            .size(18);
+
+        let title = text::title3("Daemon Status").size(18);
 
         let status_content = if let Some(status) = &self.daemon_status.clone() {
             column()
@@ -63,10 +59,7 @@ impl Window {
         } else {
             column()
                 .spacing(spacing)
-                .push(
-                    text::body("No status data available")
-                        .size(14)
-                )
+                .push(text::body("No status data available").size(14))
         };
 
         column()
@@ -77,33 +70,22 @@ impl Window {
     }
     fn create_status_row(&self, label: &str, value: bool) -> cosmic::Element<Message> {
         let icon_data = if value { ICON_TRUE } else { ICON_FALSE };
-        
-        
+
         let icon = widget::icon::from_raster_bytes(icon_data).icon();
-        
-            
-        
-        
 
         row()
             .spacing(cosmic::theme::active().cosmic().spacing.space_s)
             .align_y(Alignment::Center)
             .height(Length::Fixed(32.0))
-            
             .push(
                 text::body(label.to_string())
                     .size(14)
-                    .width(Length::Fixed(120.0))
+                    .width(Length::Fixed(120.0)),
             )
-            .push(
-                icon.height(Length::Fixed(32.0)).width(Length::Fixed(32.0))
-            )
+            .push(icon.height(Length::Fixed(32.0)).width(Length::Fixed(32.0)))
             .into()
     }
-
-   
 }
-
 
 impl cosmic::Application for Window {
     type Executor = cosmic::SingleThreadExecutor;
@@ -134,12 +116,11 @@ impl cosmic::Application for Window {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::FetchStatus => {
-                let fetch_status = with_dbus_client(|client| async move { client.get_daemon_status().await });
-                Task::perform(fetch_status, |result| {
-                    match result {
-                        Ok(status) => cosmic::Action::App(Message::StatusLoaded(Ok(status))),
-                        Err(e) => cosmic::Action::App(Message::StatusLoaded(Err(e.to_string())))
-                    }
+                let fetch_status =
+                    with_dbus_client(|client| async move { client.get_daemon_status().await });
+                Task::perform(fetch_status, |result| match result {
+                    Ok(status) => cosmic::Action::App(Message::StatusLoaded(Ok(status))),
+                    Err(e) => cosmic::Action::App(Message::StatusLoaded(Err(e.to_string()))),
                 })
             }
             Message::PopupClosed(id) => {
@@ -148,19 +129,11 @@ impl cosmic::Application for Window {
                 }
                 Task::none()
             }
-            Message::ToggleExampleRow(toggled) => {
-                self.example_row = toggled;
-                Task::none()
-            }
+
             Message::Surface(a) => {
-                cosmic::task::message(cosmic::Action::Cosmic(
-                    cosmic::app::Action::Surface(a),
-                ))
+                cosmic::task::message(cosmic::Action::Cosmic(cosmic::app::Action::Surface(a)))
             }
-            Message::Selected(i) => {
-                self.selected = Some(i);
-                Task::none()
-            }
+
             Message::StatusLoaded(result) => {
                 match result {
                     Ok(status) => {
@@ -177,68 +150,64 @@ impl cosmic::Application for Window {
     fn subscription(&self) -> Subscription<Message> {
         time::every(Duration::from_secs(5)).map(|_| Message::FetchStatus)
     }
-    
 
     fn view(&self) -> Element<Message> {
-
-        
-
-
-
         let have_popup = self.popup.clone();
         let icon = if let Some(status) = &self.daemon_status.clone() {
-            if status.is_authenticated  && status.is_connected  && !status.has_conflicts && status.is_mounted  {
+            if status.is_authenticated
+                && status.is_connected
+                && !status.has_conflicts
+                && status.is_mounted
+            {
                 "open-onedrive-ok"
             } else if !status.is_connected {
                 "open-onedrive-offline"
-            }else{
+            } else {
                 "open-onedrive-error"
             }
         } else {
             "open-onedrive-offline"
         };
 
-        let btn = self
-            .core
-            .applet
-            .icon_button(icon)
-            .on_press_with_rectangle(move |offset, bounds| {
-                if let Some(id) = have_popup {
-                    Message::Surface(destroy_popup(id))
-                } else {
-                    
-                    Message::Surface(app_popup::<Window>(
-                        move |state: &mut Window| {
-                            let new_id = Id::unique();
-                            state.popup = Some(new_id);
-                            let mut popup_settings = state.core.applet.get_popup_settings(
-                                state.core.main_window_id().unwrap(),
-                                new_id,
-                                None,
-                                None,
-                                None,
-                            );
+        let btn =
+            self.core
+                .applet
+                .icon_button(icon)
+                .on_press_with_rectangle(move |offset, bounds| {
+                    if let Some(id) = have_popup {
+                        Message::Surface(destroy_popup(id))
+                    } else {
+                        Message::Surface(app_popup::<Window>(
+                            move |state: &mut Window| {
+                                let new_id = Id::unique();
+                                state.popup = Some(new_id);
+                                let mut popup_settings = state.core.applet.get_popup_settings(
+                                    state.core.main_window_id().unwrap(),
+                                    new_id,
+                                    None,
+                                    None,
+                                    None,
+                                );
 
-                            popup_settings.positioner.anchor_rect = Rectangle {
-                                x: (bounds.x - offset.x) as i32,
-                                y: (bounds.y - offset.y) as i32,
-                                width: bounds.width as i32,
-                                height: bounds.height as i32,
-                            };
+                                popup_settings.positioner.anchor_rect = Rectangle {
+                                    x: (bounds.x - offset.x) as i32,
+                                    y: (bounds.y - offset.y) as i32,
+                                    width: bounds.width as i32,
+                                    height: bounds.height as i32,
+                                };
 
-                            popup_settings
-                        },
-                        Some(Box::new(|state: &Window| {
-                            let status_section = state.create_status_section();
-                            let content_list = list_column()
-                                .padding(5)
-                                .spacing(0)
-                                .add(status_section);
-                            Element::from(state.core.applet.popup_container(content_list)).map(cosmic::Action::App)
-                        })),
-                    ))
-                }
-            });
+                                popup_settings
+                            },
+                            Some(Box::new(|state: &Window| {
+                                let status_section = state.create_status_section();
+                                let content_list =
+                                    list_column().padding(5).spacing(0).add(status_section);
+                                Element::from(state.core.applet.popup_container(content_list))
+                                    .map(cosmic::Action::App)
+                            })),
+                        ))
+                    }
+                });
 
         Element::from(self.core.applet.applet_tooltip::<Message>(
             btn,

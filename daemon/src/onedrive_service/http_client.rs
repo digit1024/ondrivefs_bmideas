@@ -186,7 +186,7 @@ impl HttpClient {
 
         Ok(response)
     }
-
+    #[allow(dead_code)]
     /// Create an upload session for large files
     pub async fn create_upload_session(
         &self,
@@ -212,7 +212,7 @@ impl HttpClient {
 
         Ok(response)
     }
-
+    #[allow(dead_code)]
     /// Upload a file chunk to an upload session
     pub async fn upload_file_chunk(
         &self,
@@ -232,7 +232,7 @@ impl HttpClient {
 
         Ok(response)
     }
-
+    #[allow(dead_code)]
     /// Get upload session status
     pub async fn get_upload_session_status(
         &self,
@@ -252,7 +252,7 @@ impl HttpClient {
 
         Ok(response)
     }
-
+    #[allow(dead_code)]
     /// Cancel an upload session
     pub async fn cancel_upload_session(&self, upload_url: &str) -> Result<()> {
         self.client

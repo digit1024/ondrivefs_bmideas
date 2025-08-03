@@ -1,19 +1,14 @@
 use std::time::Duration;
 
+use crate::dbus_client::{with_dbus_client, DbusClient};
 use cosmic::iced::alignment::Horizontal;
-use cosmic::widget::{self, button, column, container, row, text };
 use cosmic::iced::{time, Alignment, Length, Subscription};
+use cosmic::widget::{self, button, column, container, row, text};
 use log::{error, info};
 use onedrive_sync_lib::dbus::types::{DaemonStatus, UserProfile};
-use crate::dbus_client::{with_dbus_client, DbusClient};
 
-const ICON_ONLINE: &[u8] = include_bytes!("../../../resources/programfiles/icons/online.svg");
-const ICON_SYNCING: &[u8] = include_bytes!("../../../resources/programfiles/icons/syncing.svg");
-const ICON_ERROR: &[u8] = include_bytes!("../../../resources/programfiles/icons/error.png");
-const ICON_CONFLICT: &[u8] = include_bytes!("../../../resources/programfiles/icons/conflict.png");
 const ICON_TRUE: &[u8] = include_bytes!("../../../resources/programfiles/icons/ok.png");
 const ICON_FALSE: &[u8] = include_bytes!("../../../resources/programfiles/icons/error.png");
-
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -46,7 +41,6 @@ impl Page {
         time::every(Duration::from_secs(5)).map(|_| Message::AutoRefresh)
     }
 
-
     pub fn view(&self) -> cosmic::Element<Message> {
         let spacing = cosmic::theme::active().cosmic().spacing.space_l;
         let content = column()
@@ -61,74 +55,58 @@ impl Page {
             text::title2("OneDrive Sync Status").size(24)
         };
 
-
         // Refresh button aligned right
-        let refresh_row = row()
-            .width(Length::Fill)
-            .push(
-                column().push(header).push(
-                    row().push(
-                        button::standard("Refresh")
-                        .on_press(Message::Refresh))
-                    .push(button::destructive("Full Reset")
-                    .on_press(Message::FullReset))
-                    .width(Length::Fill)
-                )
-            );
-            
+        let refresh_row = row().width(Length::Fill).push(
+            column().push(header).push(
+                row()
+                    .push(button::standard("Refresh").on_press(Message::Refresh))
+                    .push(button::destructive("Full Reset").on_press(Message::FullReset))
+                    .width(Length::Fill),
+            ),
+        );
 
-            
-        
         // Status and profile as cards
         let status_card = container(self.create_status_section())
             .class(cosmic::style::Container::Card)
             .padding(16)
-            
             .width(Length::Fill);
 
-        
-
         let profile_card = container(self.create_profile_section())
-            
             .class(cosmic::style::Container::Card)
-            
             .padding(16)
             .width(Length::Fill);
 
         // Loading indicator
         let loading_indicator = if self.loading {
-            container(
-                text::body("Loading status...").size(16)
-            ).padding(8).width(Length::Fill)
+            container(text::body("Loading status...").size(16))
+                .padding(8)
+                .width(Length::Fill)
         } else {
             container(column()).width(Length::Fill)
         };
 
         // Error display
         let error_display = if let Some(error) = &self.error {
-            container(
-                text::body(format!("Error: {}", error)).size(14)
-            ).padding(8).width(Length::Fill)
+            container(text::body(format!("Error: {}", error)).size(14))
+                .padding(8)
+                .width(Length::Fill)
         } else {
             container(column()).width(Length::Fill)
         };
 
         content
-            
             .push(refresh_row)
             .push(loading_indicator)
             .push(error_display)
             .push(profile_card)
             .push(status_card)
-            
             .into()
     }
 
     fn create_status_section(&self) -> cosmic::Element<Message> {
         let spacing = cosmic::theme::active().cosmic().spacing.space_m;
-        
-        let title = text::title3("Daemon Status")
-            .size(18);
+
+        let title = text::title3("Daemon Status").size(18);
 
         let status_content = if let Some(status) = &self.daemon_status {
             column()
@@ -140,10 +118,7 @@ impl Page {
         } else {
             column()
                 .spacing(spacing)
-                .push(
-                    text::body("No status data available")
-                        .size(14)
-                )
+                .push(text::body("No status data available").size(14))
         };
 
         column()
@@ -155,24 +130,19 @@ impl Page {
 
     fn create_profile_section(&self) -> cosmic::Element<Message> {
         let spacing = cosmic::theme::active().cosmic().spacing.space_m;
-        
-        let title = text::title3("User Profile")
-            .size(18);
+
+        let title = text::title3("User Profile").size(18);
 
         let profile_content = if let Some(profile) = &self.user_profile {
             column()
                 .spacing(spacing)
                 .align_x(Horizontal::Left)
-                
                 .push(self.create_profile_row("Name", &profile.display_name))
                 .push(self.create_profile_row("Email", &profile.mail))
         } else {
             column()
                 .spacing(spacing)
-                .push(
-                    text::body("No profile data available")
-                        .size(14)
-                )
+                .push(text::body("No profile data available").size(14))
         };
 
         column()
@@ -184,31 +154,21 @@ impl Page {
 
     fn create_status_row(&self, label: &str, value: bool) -> cosmic::Element<Message> {
         let icon_data = if value { ICON_TRUE } else { ICON_FALSE };
-        
-        
+
         let icon = widget::icon::from_raster_bytes(icon_data).icon();
-        
-            
-        
-        
 
         row()
             .spacing(cosmic::theme::active().cosmic().spacing.space_s)
             .align_y(Alignment::Center)
             .height(Length::Fixed(32.0))
-            
             .push(
                 text::body(label.to_string())
                     .size(14)
-                    .width(Length::Fixed(120.0))
+                    .width(Length::Fixed(120.0)),
             )
-            .push(
-                icon.height(Length::Fixed(32.0)).width(Length::Fixed(32.0))
-            )
+            .push(icon.height(Length::Fixed(32.0)).width(Length::Fixed(32.0)))
             .into()
     }
-
-   
 
     fn create_profile_row(&self, label: &str, value: &str) -> cosmic::Element<Message> {
         row()
@@ -217,32 +177,32 @@ impl Page {
             .push(
                 text::body(label.to_string())
                     .size(14)
-                    .width(Length::Fixed(120.0))
+                    .width(Length::Fixed(120.0)),
             )
-            .push(
-                text::body(value.to_string())
-                    .size(14)
-            )
+            .push(text::body(value.to_string()).size(14))
             .into()
     }
-    
-    pub fn update(&mut self, message: Message) -> cosmic::Task<cosmic::Action<crate::app::Message>> {
+
+    pub fn update(
+        &mut self,
+        message: Message,
+    ) -> cosmic::Task<cosmic::Action<crate::app::Message>> {
         match message {
             Message::AutoRefresh => {
-             
-                let fetch_status = with_dbus_client(|client| 
-                    async move {client.get_daemon_status().await}
-                );
-                let fetch_profile = with_dbus_client(|client| 
-                    async move {client.get_user_profile().await}
-                );
-      
+                let fetch_status =
+                    with_dbus_client(|client| async move { client.get_daemon_status().await });
+                let fetch_profile =
+                    with_dbus_client(|client| async move { client.get_user_profile().await });
 
                 let a = cosmic::task::future(fetch_status).map(|result| {
-                    cosmic::Action::App(crate::app::Message::StatusPage(Message::StatusLoaded(result)))
+                    cosmic::Action::App(crate::app::Message::StatusPage(Message::StatusLoaded(
+                        result,
+                    )))
                 });
                 let b = cosmic::task::future(fetch_profile).map(|result| {
-                    cosmic::Action::App(crate::app::Message::StatusPage(Message::ProfileLoaded(result)))
+                    cosmic::Action::App(crate::app::Message::StatusPage(Message::ProfileLoaded(
+                        result,
+                    )))
                 });
                 cosmic::task::batch(vec![a, b])
             }
@@ -266,10 +226,10 @@ impl Page {
                     }
                 };
                 cosmic::task::future(reset).map(|result| {
-                    cosmic::Action::App(crate::app::Message::StatusPage(Message::StatusLoaded(result)))
+                    cosmic::Action::App(crate::app::Message::StatusPage(Message::StatusLoaded(
+                        result,
+                    )))
                 })
-            
-                
             }
             Message::FetchStatus => {
                 info!("StatusPage: Fetching status from daemon");
@@ -308,10 +268,14 @@ impl Page {
                 };
 
                 let a = cosmic::task::future(fetch_status).map(|result| {
-                    cosmic::Action::App(crate::app::Message::StatusPage(Message::StatusLoaded(result)))
+                    cosmic::Action::App(crate::app::Message::StatusPage(Message::StatusLoaded(
+                        result,
+                    )))
                 });
                 let b = cosmic::task::future(fetch_profile).map(|result| {
-                    cosmic::Action::App(crate::app::Message::StatusPage(Message::ProfileLoaded(result)))
+                    cosmic::Action::App(crate::app::Message::StatusPage(Message::ProfileLoaded(
+                        result,
+                    )))
                 });
                 cosmic::task::batch(vec![a, b])
             }
@@ -355,18 +319,18 @@ impl Page {
 
                 let fetch_status = async move {
                     match DbusClient::new().await {
-                        Ok(client) => {
-                            match client.get_daemon_status().await {
-                                Ok(status) => Ok(status),
-                                Err(e) => Err(format!("Failed to get daemon status: {}", e)),
-                            }
-                        }
+                        Ok(client) => match client.get_daemon_status().await {
+                            Ok(status) => Ok(status),
+                            Err(e) => Err(format!("Failed to get daemon status: {}", e)),
+                        },
                         Err(e) => Err(format!("Failed to connect to daemon: {}", e)),
                     }
                 };
 
                 cosmic::task::future(fetch_status).map(|result| {
-                    cosmic::Action::App(crate::app::Message::StatusPage(Message::StatusLoaded(result)))
+                    cosmic::Action::App(crate::app::Message::StatusPage(Message::StatusLoaded(
+                        result,
+                    )))
                 })
             }
         }

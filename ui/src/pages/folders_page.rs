@@ -1,8 +1,7 @@
-use cosmic::widget::{button, column, container, row, text, text_input};
+use crate::dbus_client::{with_dbus_client, DbusClient};
 use cosmic::iced::Length;
+use cosmic::widget::{button, column, container, row, text, text_input};
 use log::info;
-use crate::dbus_client::{DbusClient, with_dbus_client};
-
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -40,20 +39,19 @@ impl Page {
             .height(Length::Fill);
 
         let header = text::title2("Folders Management").size(24);
-        let info = text::body("Manage which OneDrive folders are synchronized. Add or remove folders below.")
-            .size(16);
+        let info = text::body(
+            "Manage which OneDrive folders are synchronized. Add or remove folders below.",
+        )
+        .size(16);
 
         let add_row = row()
             .spacing(spacing)
             .push(
                 text_input::inline_input("Folder name", &self.new_folder)
                     .on_input(Message::FolderNameChanged)
-                    .width(Length::Fixed(200.0))
+                    .width(Length::Fixed(200.0)),
             )
-            .push(
-                button::standard("Add")
-                    .on_press(Message::AddFolder)
-            );
+            .push(button::standard("Add").on_press(Message::AddFolder));
 
         let folder_list = column()
             .spacing(spacing)
@@ -64,19 +62,23 @@ impl Page {
                     .push(text::body(folder).size(14).width(Length::Fixed(200.0)))
                     .push(
                         button::destructive("Delete")
-                            .on_press(Message::DeleteFolder(folder.clone()))
+                            .on_press(Message::DeleteFolder(folder.clone())),
                     )
                     .into()
             }));
 
         let loading_indicator = if self.loading {
-            container(text::body("Loading folders...").size(16)).padding(8).width(Length::Fill)
+            container(text::body("Loading folders...").size(16))
+                .padding(8)
+                .width(Length::Fill)
         } else {
             container(column()).width(Length::Fill)
         };
 
         let error_display = if let Some(error) = &self.error {
-            container(text::body(format!("Error: {}", error)).size(14)).padding(8).width(Length::Fill)
+            container(text::body(format!("Error: {}", error)).size(14))
+                .padding(8)
+                .width(Length::Fill)
         } else {
             container(column()).width(Length::Fill)
         };
@@ -93,18 +95,22 @@ impl Page {
             .into()
     }
 
-    pub fn update(&mut self, message: Message) -> cosmic::Task<cosmic::Action<crate::app::Message>> {
+    pub fn update(
+        &mut self,
+        message: Message,
+    ) -> cosmic::Task<cosmic::Action<crate::app::Message>> {
         match message {
             Message::FetchFolders => {
                 self.loading = true;
                 self.error = None;
-                let fetch_folders= with_dbus_client(|client| 
-                    async move {client.list_sync_folders().await}
-                );
+                let fetch_folders =
+                    with_dbus_client(|client| async move { client.list_sync_folders().await });
                 info!("Fetching folders");
 
                 cosmic::task::future(fetch_folders).map(|result| {
-                    cosmic::Action::App(crate::app::Message::FoldersPage(Message::FoldersLoaded(result)))
+                    cosmic::Action::App(crate::app::Message::FoldersPage(Message::FoldersLoaded(
+                        result,
+                    )))
                 })
             }
             Message::FoldersLoaded(result) => {
@@ -132,17 +138,17 @@ impl Page {
                 }
                 let add_folder = async move {
                     match DbusClient::new().await {
-                        Ok(client) => {
-                            match client.add_sync_folder(folder).await {
-                                Ok(result) => Ok(result),
-                                Err(e) => Err(format!("Failed to add sync folder: {}", e)),
-                            }
-                        }
+                        Ok(client) => match client.add_sync_folder(folder).await {
+                            Ok(result) => Ok(result),
+                            Err(e) => Err(format!("Failed to add sync folder: {}", e)),
+                        },
                         Err(e) => Err(format!("Failed to connect to daemon: {}", e)),
                     }
                 };
                 cosmic::task::future(add_folder).map(|result| {
-                    cosmic::Action::App(crate::app::Message::FoldersPage(Message::FolderAdded(result)))
+                    cosmic::Action::App(crate::app::Message::FoldersPage(Message::FolderAdded(
+                        result,
+                    )))
                 })
             }
             Message::FolderAdded(result) => {
@@ -167,17 +173,17 @@ impl Page {
                 self.error = None;
                 let delete_folder = async move {
                     match DbusClient::new().await {
-                        Ok(client) => {
-                            match client.remove_sync_folder(folder).await {
-                                Ok(result) => Ok(result),
-                                Err(e) => Err(format!("Failed to remove sync folder: {}", e)),
-                            }
-                        }
+                        Ok(client) => match client.remove_sync_folder(folder).await {
+                            Ok(result) => Ok(result),
+                            Err(e) => Err(format!("Failed to remove sync folder: {}", e)),
+                        },
                         Err(e) => Err(format!("Failed to connect to daemon: {}", e)),
                     }
                 };
                 cosmic::task::future(delete_folder).map(|result| {
-                    cosmic::Action::App(crate::app::Message::FoldersPage(Message::FolderDeleted(result)))
+                    cosmic::Action::App(crate::app::Message::FoldersPage(Message::FolderDeleted(
+                        result,
+                    )))
                 })
             }
             Message::FolderDeleted(result) => {
@@ -202,4 +208,4 @@ impl Page {
             }
         }
     }
-} 
+}

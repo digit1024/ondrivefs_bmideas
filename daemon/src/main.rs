@@ -7,6 +7,7 @@
 mod app_state;
 mod auth;
 mod connectivity;
+mod dbus_server;
 mod file_manager;
 mod fuse;
 mod log_appender;
@@ -16,29 +17,28 @@ mod persistency;
 mod scheduler;
 mod sync;
 mod tasks;
-mod dbus_server;
 
-use std::sync::Arc;
-use std::path::PathBuf;
-use std::thread;
-use std::process;
-use std::fs;
-use anyhow::{Context, Result};
-use clap::Arg;
-use clap::Command;
-use log::{info, error, warn};
-use tokio::signal;
-use tokio::sync::broadcast;
-use tokio::time::{sleep, Duration};
-use fuser::MountOption;
-use crate::app_state::{AppState, app_state_factory};
+use crate::app_state::{app_state_factory, AppState};
+use crate::file_manager::{DefaultFileManager, FileManager};
 use crate::fuse::OneDriveFuse;
 use crate::log_appender::setup_logging;
 use crate::persistency::download_queue_repository::DownloadQueueRepository;
 use crate::persistency::profile_repository::ProfileRepository;
 use crate::tasks::delta_update::SyncCycle;
-use crate::file_manager::{DefaultFileManager, FileManager};
+use anyhow::{Context, Result};
+use clap::Arg;
+use clap::Command;
+use fuser::MountOption;
+use log::{error, info, warn};
 use onedrive_sync_lib::notifications::{NotificationSender, NotificationUrgency};
+use std::fs;
+use std::path::PathBuf;
+use std::process;
+use std::sync::Arc;
+use std::thread;
+use tokio::signal;
+use tokio::sync::broadcast;
+use tokio::time::{sleep, Duration};
 
 // Add shutdown signal handling
 use tokio::sync::oneshot;
@@ -192,6 +192,7 @@ impl AppSetup {
     }
 
     /// Start the main sync cycle
+    #[allow(dead_code)]
     async fn start_sync_cycle(&self) -> Result<()> {
         info!("🔄 Starting sync cycle...");
 
@@ -240,12 +241,18 @@ async fn main() -> Result<()> {
         return handle_file_path(file_path).await;
     }
 
-    let _ = std::process::Command::new("fusermount").arg("-u").arg("~/OneDrive").status();
-    
+    let _ = std::process::Command::new("fusermount")
+        .arg("-u")
+        .arg("~/OneDrive")
+        .status();
+
     // Set panic hook for user notification
     std::panic::set_hook(Box::new(|panic_info| {
-        let _ = std::process::Command::new("fusermount").arg("-u").arg("~/OneDrive").status();
-        
+        let _ = std::process::Command::new("fusermount")
+            .arg("-u")
+            .arg("~/OneDrive")
+            .status();
+
         let msg = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
             s.to_string()
         } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
@@ -296,7 +303,10 @@ async fn main() -> Result<()> {
     // Check if directory is empty
     if fs::read_dir(&mount_point)?.next().is_some() {
         error!("Mount directory {} is not empty", mount_point.display());
-        return Err(anyhow::anyhow!("Mount directory {} is not empty", mount_point.display()));
+        return Err(anyhow::anyhow!(
+            "Mount directory {} is not empty",
+            mount_point.display()
+        ));
     }
 
     // Prepare FUSE filesystem
@@ -307,7 +317,8 @@ async fn main() -> Result<()> {
         download_queue_repo,
         app.app_state.file_manager.clone(),
         app.app_state.clone(),
-    ).await?;
+    )
+    .await?;
     fuse_fs.initialize().await.ok();
     info!("✅ FUSE filesystem initialized successfully");
 
@@ -324,14 +335,15 @@ async fn main() -> Result<()> {
                 let result = fuser::mount2(
                     fuse_fs,
                     &mount_point_for_mount,
-                    &[MountOption::FSName("onedrive".to_string()),
-                     MountOption::NoExec,
-                      MountOption::NoSuid,
-                       MountOption::NoDev,
+                    &[
+                        MountOption::FSName("onedrive".to_string()),
+                        MountOption::NoExec,
+                        MountOption::NoSuid,
+                        MountOption::NoDev,
                         MountOption::DefaultPermissions,
-                         MountOption::NoAtime,
-                         MountOption::CUSTOM("case_insensitive".to_string()),
-                         ],
+                        MountOption::NoAtime,
+                        MountOption::CUSTOM("case_insensitive".to_string()),
+                    ],
                 );
                 if let Err(e) = result {
                     error!("FUSE mount error: {}", e);
@@ -340,23 +352,27 @@ async fn main() -> Result<()> {
 
             // Wait for shutdown signal
             let _ = fuse_shutdown_rx.recv().await;
-            
+
             // Gracefully unmount FUSE
             #[cfg(target_os = "linux")]
             {
-                let _ = std::process::Command::new("fusermount").arg("-u").arg(&mount_point_for_unmount).status();
+                let _ = std::process::Command::new("fusermount")
+                    .arg("-u")
+                    .arg(&mount_point_for_unmount)
+                    .status();
             }
             #[cfg(target_os = "macos")]
             {
-                let _ = std::process::Command::new("umount").arg(&mount_point_for_unmount).status();
+                let _ = std::process::Command::new("umount")
+                    .arg(&mount_point_for_unmount)
+                    .status();
             }
-            
+
             // Cancel mount task
             mount_task.abort();
             let _ = fuse_tx.send(());
         });
     });
-    
 
     // Start DBus server
     let mut dbus_server = crate::dbus_server::DbusServerManager::new(app.app_state.clone());
@@ -372,21 +388,21 @@ async fn main() -> Result<()> {
     let mut scheduler = crate::scheduler::periodic_scheduler::PeriodicScheduler::new();
     let sync_task = sync_cycle.get_task().await?;
     scheduler.add_task(sync_task);
-    
+
     let scheduler_shutdown_rx = shutdown_manager.subscribe();
     let scheduler_handle = tokio::spawn(async move {
         let mut shutdown_rx = scheduler_shutdown_rx;
-        
+
         // Start the scheduler
         if let Err(e) = scheduler.start().await {
             error!("Failed to start scheduler: {}", e);
             return;
         }
-        
+
         // Wait for shutdown signal
         let _ = shutdown_rx.recv().await;
         info!("🛑 Scheduler received shutdown signal");
-        
+
         // Stop the scheduler
         scheduler.stop().await;
         info!("✅ Scheduler shutdown complete");
@@ -434,7 +450,8 @@ async fn main() -> Result<()> {
     let _ = tokio::time::timeout(Duration::from_secs(30), async {
         let _ = scheduler_handle.await;
         let _ = signal_handle.await;
-    }).await;
+    })
+    .await;
 
     // Wait for FUSE thread to finish
     let _ = fuse_rx.recv();
@@ -452,47 +469,57 @@ async fn main() -> Result<()> {
 /// Handle a file path when launched as a MIME type handler using DriveItemWithFuse
 async fn handle_file_path(file_path: &str) -> Result<()> {
     info!("🚀 OneDrive file handler launched for: {}", file_path);
-    
+
     // Initialize minimal app state for database access
     let app = AppSetup::initialize().await?;
-    
+
     // Check if this is a .onedrivedownload file (new virtual file system)
     if file_path.ends_with(".onedrivedownload") {
         return handle_virtual_file(file_path, &app).await;
     }
-    
+
     // Legacy JSON placeholder handling
     match parse_onedrive_file(file_path) {
         Ok((onedrive_id, virtual_path)) => {
             info!("📥 Queuing download for OneDrive ID: {}", onedrive_id);
-            
+
             // Get DriveItemWithFuse from database using virtual path
             let pool = app.app_state.persistency().pool().clone();
             let drive_item_with_fuse_repo = crate::persistency::drive_item_with_fuse_repository::DriveItemWithFuseRepository::new(pool.clone());
             let download_queue_repo = DownloadQueueRepository::new(pool);
-            
+
             // Try to find the item by virtual path first, then by OneDrive ID
-            let item = if let Ok(Some(item)) = drive_item_with_fuse_repo.get_drive_item_with_fuse_by_virtual_path(&virtual_path).await {
+            let item = if let Ok(Some(item)) = drive_item_with_fuse_repo
+                .get_drive_item_with_fuse_by_virtual_path(&virtual_path)
+                .await
+            {
                 Some(item)
             } else {
-                drive_item_with_fuse_repo.get_drive_item_with_fuse(&onedrive_id).await.ok().flatten()
+                drive_item_with_fuse_repo
+                    .get_drive_item_with_fuse(&onedrive_id)
+                    .await
+                    .ok()
+                    .flatten()
             };
-            
+
             if let Some(item_with_fuse) = item {
-                info!("📁 Found item: {} (OneDrive ID: {})", 
-                      item_with_fuse.name().unwrap_or("unnamed"), 
-                      item_with_fuse.id());
-                
+                info!(
+                    "📁 Found item: {} (OneDrive ID: {})",
+                    item_with_fuse.name().unwrap_or("unnamed"),
+                    item_with_fuse.id()
+                );
+
                 // Use file manager from app state
                 let file_manager = app.app_state.file_manager();
-                
+
                 // Use the local path from the item if available, otherwise construct it
-                let local_path =  file_manager.get_download_dir().join(onedrive_id.clone());
-                
-                
+                let local_path = file_manager.get_download_dir().join(onedrive_id.clone());
+
                 // Add to download queue
-                download_queue_repo.add_to_download_queue(&onedrive_id, &local_path).await?;
-                
+                download_queue_repo
+                    .add_to_download_queue(&onedrive_id, &local_path)
+                    .await?;
+
                 info!("✅ Download queued successfully for: {}", virtual_path);
                 info!("💾 Local path: {}", local_path.display());
 
@@ -500,26 +527,36 @@ async fn handle_file_path(file_path: &str) -> Result<()> {
                 let notification_sender = NotificationSender::new().await;
                 if let Ok(sender) = notification_sender {
                     let filename = item_with_fuse.name().unwrap_or("file");
-                    let _ = sender.send_notification(
-                        "Open OneDrive",
-                        0,
-                        "cloud-upload",
-                        "Open OneDrive",
-                        &format!("File {} added to download queue", filename),
-                        vec![],
-                        vec![("urgency", &NotificationUrgency::Normal.to_u8().to_string())],
-                        5000,
-                    ).await;
+                    let _ = sender
+                        .send_notification(
+                            "Open OneDrive",
+                            0,
+                            "cloud-upload",
+                            "Open OneDrive",
+                            &format!("File {} added to download queue", filename),
+                            vec![],
+                            vec![("urgency", &NotificationUrgency::Normal.to_u8().to_string())],
+                            5000,
+                        )
+                        .await;
                 }
             } else {
-                warn!("⚠️ Item not found in database for OneDrive ID: {} or virtual path: {}", onedrive_id, virtual_path);
-                
+                warn!(
+                    "⚠️ Item not found in database for OneDrive ID: {} or virtual path: {}",
+                    onedrive_id, virtual_path
+                );
+
                 // Fallback: use the old approach
                 let file_manager = app.app_state.file_manager();
                 let local_path = file_manager.get_download_dir().join(onedrive_id.clone());
-                download_queue_repo.add_to_download_queue(&onedrive_id, &local_path).await?;
-                
-                info!("✅ Download queued using fallback method for: {}", virtual_path);
+                download_queue_repo
+                    .add_to_download_queue(&onedrive_id, &local_path)
+                    .await?;
+
+                info!(
+                    "✅ Download queued using fallback method for: {}",
+                    virtual_path
+                );
             }
         }
         Err(e) => {
@@ -527,117 +564,138 @@ async fn handle_file_path(file_path: &str) -> Result<()> {
             return Err(e);
         }
     }
-    
+
     Ok(())
 }
 
 /// Handle .onedrivedownload virtual files from the new FUSE system
 async fn handle_virtual_file(file_path: &str, app: &AppSetup) -> Result<()> {
     info!("📁 Handling virtual file: {}", file_path);
-    
+
     // Extract the virtual path from the file path
     // Example: /home/digit1024/OneDrive/Apps/Designer/file.txt.onedrivedownload
     // Should become: /Apps/Designer/file.txt
     let virtual_path = extract_virtual_path_from_file_path(file_path)?;
     info!("🔍 Looking for virtual path: {}", virtual_path);
-    
+
     // Get database repositories
     let pool = app.app_state.persistency().pool().clone();
-    let drive_item_with_fuse_repo = crate::persistency::drive_item_with_fuse_repository::DriveItemWithFuseRepository::new(pool.clone());
+    let drive_item_with_fuse_repo =
+        crate::persistency::drive_item_with_fuse_repository::DriveItemWithFuseRepository::new(
+            pool.clone(),
+        );
     let download_queue_repo = DownloadQueueRepository::new(pool);
-    
+
     // Try to find the item by virtual path (much more efficient than loading all items)
-    let item = drive_item_with_fuse_repo.get_drive_item_with_fuse_by_virtual_path(&virtual_path).await?;
-    
+    let item = drive_item_with_fuse_repo
+        .get_drive_item_with_fuse_by_virtual_path(&virtual_path)
+        .await?;
+
     if let Some(item_with_fuse) = item {
         let onedrive_id = item_with_fuse.id();
         let filename = item_with_fuse.name().unwrap_or("unknown");
         info!("📁 Found item: {} (OneDrive ID: {})", filename, onedrive_id);
-        
+
         // Use file manager from app state
         let file_manager = app.app_state.file_manager();
-        
+
         // Get the inode for this file to determine local path
         let local_path = if let Some(ino) = item_with_fuse.virtual_ino() {
             file_manager.get_download_dir().join(ino.to_string())
         } else {
             file_manager.get_download_dir().join(onedrive_id)
         };
-        
+
         // Add to download queue
-        download_queue_repo.add_to_download_queue(&onedrive_id, &local_path).await?;
-        
+        download_queue_repo
+            .add_to_download_queue(&onedrive_id, &local_path)
+            .await?;
+
         info!("✅ Download queued successfully for: {}", filename);
         info!("💾 Local path: {}", local_path.display());
 
         // Send desktop notification
         let notification_sender = NotificationSender::new().await;
         if let Ok(sender) = notification_sender {
-            let _ = sender.send_notification(
-                "Open OneDrive",
-                0,
-                "cloud-upload",
-                "Open OneDrive",
-                &format!("File {} added to download queue", filename),
-                vec![],
-                vec![("urgency", &NotificationUrgency::Normal.to_u8().to_string())],
-                5000,
-            ).await;
+            let _ = sender
+                .send_notification(
+                    "Open OneDrive",
+                    0,
+                    "cloud-upload",
+                    "Open OneDrive",
+                    &format!("File {} added to download queue", filename),
+                    vec![],
+                    vec![("urgency", &NotificationUrgency::Normal.to_u8().to_string())],
+                    5000,
+                )
+                .await;
         }
     } else {
-        warn!("⚠️ Item not found in database for virtual path: {}", virtual_path);
-        
+        warn!(
+            "⚠️ Item not found in database for virtual path: {}",
+            virtual_path
+        );
+
         // Send error notification
         let notification_sender = NotificationSender::new().await;
         if let Ok(sender) = notification_sender {
-            let _ = sender.send_notification(
-                "Open OneDrive",
-                0,
-                "dialog-error",
-                "Open OneDrive",
-                &format!("File not found in OneDrive: {}", virtual_path),
-                vec![],
-                vec![("urgency", &NotificationUrgency::Critical.to_u8().to_string())],
-                5000,
-            ).await;
+            let _ = sender
+                .send_notification(
+                    "Open OneDrive",
+                    0,
+                    "dialog-error",
+                    "Open OneDrive",
+                    &format!("File not found in OneDrive: {}", virtual_path),
+                    vec![],
+                    vec![(
+                        "urgency",
+                        &NotificationUrgency::Critical.to_u8().to_string(),
+                    )],
+                    5000,
+                )
+                .await;
         }
-        
-        return Err(anyhow::anyhow!("File not found in OneDrive: {}", virtual_path));
+
+        return Err(anyhow::anyhow!(
+            "File not found in OneDrive: {}",
+            virtual_path
+        ));
     }
-    
+
     Ok(())
 }
 
 /// Extract virtual path from file path
-/// 
-/// Example: 
+///
+/// Example:
 /// Input: "/home/digit1024/OneDrive/Apps/Designer/file.txt.onedrivedownload"
 /// Output: "/Apps/Designer/file.txt"
 fn extract_virtual_path_from_file_path(file_path: &str) -> Result<String> {
     let path = std::path::Path::new(file_path);
-    
+
     // Convert to string and find "OneDrive" in the path
     let path_str = path.to_string_lossy();
-    let onedrive_index = path_str.find("OneDrive")
+    let onedrive_index = path_str
+        .find("OneDrive")
         .ok_or_else(|| anyhow::anyhow!("OneDrive directory not found in path: {}", file_path))?;
-    
+
     // Extract everything after "OneDrive/"
     let after_onedrive = &path_str[onedrive_index + "OneDrive".len()..];
-    
+
     // Remove .onedrivedownload suffix if present
     let virtual_path = if after_onedrive.ends_with(".onedrivedownload") {
         &after_onedrive[..after_onedrive.len() - ".onedrivedownload".len()]
     } else {
         after_onedrive
     };
-    
+
     // Ensure it starts with "/"
     let virtual_path = if virtual_path.starts_with('/') {
         virtual_path.to_string()
     } else {
         format!("/{}", virtual_path)
     };
-    
+
     Ok(virtual_path)
 }
 
@@ -646,23 +704,26 @@ fn parse_onedrive_file(file_path: &str) -> Result<(String, String)> {
     // Read the JSON placeholder file
     let content = std::fs::read_to_string(file_path)?;
     let json: serde_json::Value = serde_json::from_str(&content)?;
-    
+
     // Extract OneDrive ID
     let onedrive_id = json["onedrive_id"]
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("Missing onedrive_id in file"))?
         .to_string();
-    
+
     // Extract virtual path from JSON if available, otherwise reconstruct from file path
     let virtual_path = if let Some(path) = json["virtual_path"].as_str() {
         path.to_string()
     } else {
         // Fallback: reconstruct from file path
-        format!("/{}", std::path::Path::new(file_path)
-            .file_name()
-            .ok_or_else(|| anyhow::anyhow!("Invalid file path"))?
-            .to_string_lossy())
+        format!(
+            "/{}",
+            std::path::Path::new(file_path)
+                .file_name()
+                .ok_or_else(|| anyhow::anyhow!("Invalid file path"))?
+                .to_string_lossy()
+        )
     };
-    
+
     Ok((onedrive_id, virtual_path))
 }

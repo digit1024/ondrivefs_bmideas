@@ -6,7 +6,7 @@ use onedrive_sync_lib::dbus::types::{DaemonStatus, SyncQueueItem, UserProfile};
 use zbus::connection::Builder;
 use zbus::Proxy;
 
-const DBUS_SERVICE: &str = "org.freedesktop.OneDriveSync"; 
+const DBUS_SERVICE: &str = "org.freedesktop.OneDriveSync";
 const DBUS_PATH: &str = "/org/freedesktop/OneDriveSync";
 const DBUS_INTERFACE: &str = "org.freedesktop.OneDriveSync";
 
@@ -19,19 +19,16 @@ where
     CallError: std::fmt::Display,
 {
     match DbusClient::new().await {
-        
         Ok(client) => {
             info!("Dbus client created successfully");
             match call(client).await {
-                
-            Ok(val) => Ok(val),
-            Err(e) => Err(format!("{}", e)),
+                Ok(val) => Ok(val),
+                Err(e) => Err(format!("{}", e)),
+            }
         }
-        },
         Err(e) => Err(format!("Failed to connect to daemon: {}", e)),
     }
 }
-
 
 /// DBus client for communicating with the OneDrive sync daemon
 pub struct DbusClient {
@@ -42,10 +39,8 @@ impl DbusClient {
     /// Create a new DBus client instance
     pub async fn new() -> Result<Self> {
         info!("Creating new DBus client instance");
-        let connection = Builder::session()?
-            .build()
-            .await?;
-        
+        let connection = Builder::session()?.build().await?;
+
         info!("DBus client created successfully");
         Ok(Self { connection })
     }
@@ -61,7 +56,10 @@ impl DbusClient {
             .body()
             .deserialize::<UserProfile>()?;
 
-        info!("Successfully fetched user profile: {}", user_profile.display_name);
+        info!(
+            "Successfully fetched user profile: {}",
+            user_profile.display_name
+        );
         Ok(user_profile)
     }
 
@@ -76,8 +74,10 @@ impl DbusClient {
             .body()
             .deserialize::<DaemonStatus>()?;
 
-        info!("Successfully fetched daemon status: authenticated={}, connected={}, sync_status={:?}", 
-              status.is_authenticated, status.is_connected, status.sync_status);
+        info!(
+            "Successfully fetched daemon status: authenticated={}, connected={}, sync_status={:?}",
+            status.is_authenticated, status.is_connected, status.sync_status
+        );
         Ok(status)
     }
 
@@ -92,7 +92,10 @@ impl DbusClient {
             .body()
             .deserialize::<Vec<SyncQueueItem>>()?;
 
-        info!("Successfully fetched download queue with {} items", items.len());
+        info!(
+            "Successfully fetched download queue with {} items",
+            items.len()
+        );
         Ok(items)
     }
 
@@ -107,34 +110,29 @@ impl DbusClient {
             .body()
             .deserialize::<Vec<SyncQueueItem>>()?;
 
-        info!("Successfully fetched upload queue with {} items", items.len());
+        info!(
+            "Successfully fetched upload queue with {} items",
+            items.len()
+        );
         Ok(items)
     }
 
+    #[allow(dead_code)]
     /// Perform a full reset of the daemon
     pub async fn full_reset(&self) -> Result<()> {
         info!("Performing full reset of daemon");
         let proxy = self.get_proxy().await?;
 
-        proxy
-            .call_method("FullReset", &())
-            .await?;
+        proxy.call_method("FullReset", &()).await?;
 
         info!("Successfully performed full reset of daemon");
         Ok(())
     }
-
+    #[allow(dead_code)]
     /// Check if the daemon is available (service exists on the bus)
     pub async fn is_available(&self) -> bool {
         info!("Checking if daemon is available");
-        match Proxy::new(
-            &self.connection,
-            DBUS_SERVICE,
-            DBUS_PATH,
-            DBUS_INTERFACE,
-        )
-        .await
-        {
+        match Proxy::new(&self.connection, DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE).await {
             Ok(_) => {
                 info!("Daemon is available");
                 true
@@ -172,16 +170,10 @@ impl DbusClient {
     }
 
     async fn get_proxy(&self) -> Result<Proxy<'_>, anyhow::Error> {
-        let proxy = Proxy::new(
-            &self.connection,
-            DBUS_SERVICE,
-            DBUS_PATH,
-            DBUS_INTERFACE,
-        )
-        .await?;
+        let proxy = Proxy::new(&self.connection, DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE).await?;
         Ok(proxy)
     }
-    
+
     /// Add a sync folder
     pub async fn add_sync_folder(&self, folder_path: String) -> Result<bool> {
         let proxy = self.get_proxy().await?;
@@ -226,4 +218,4 @@ mod tests {
             assert!(available || !available); // Always true
         }
     }
-} 
+}

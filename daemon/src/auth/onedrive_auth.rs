@@ -1,5 +1,5 @@
-use anyhow::{Context, Result, anyhow};
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use anyhow::{anyhow, Context, Result};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use log::{info, warn};
 use rand::Rng;
 use reqwest::Client;

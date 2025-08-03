@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
-
 mod config;
-mod i18n;
 mod dbus_client;
-
+mod i18n;
 
 use crate::window::Window;
 

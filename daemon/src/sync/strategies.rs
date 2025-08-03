@@ -1,4 +1,4 @@
-use super::conflict_resolution::{ConflictResolver, ConflictResolution};
+use super::conflict_resolution::{ConflictResolution, ConflictResolver};
 use crate::persistency::processing_item_repository::ProcessingItem;
 use onedrive_sync_lib::config::ConflictResolutionStrategy;
 
@@ -40,4 +40,4 @@ impl ConflictResolutionFactory {
             ConflictResolutionStrategy::Manual => Box::new(ManualStrategy),
         }
     }
-} 
+}

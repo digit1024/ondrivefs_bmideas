@@ -1,4 +1,4 @@
-//! DownloadQueueRepository: Handles download_queue table operations 
+//! DownloadQueueRepository: Handles download_queue table operations
 use anyhow::{Context, Result};
 use log::{debug, warn};
 use sqlx::{Pool, Row, Sqlite};
@@ -117,7 +117,7 @@ impl DownloadQueueRepository {
         debug!("Removed item from download queue: {}", drive_item_id);
         Ok(())
     }
-
+    #[allow(dead_code)]
     /// Get all items in download queue
     pub async fn get_all_items(&self) -> Result<Vec<crate::persistency::types::DownloadQueueItem>> {
         let rows = sqlx::query(
@@ -150,9 +150,9 @@ impl DownloadQueueRepository {
                 retry_count,
                 created_at,
                 updated_at,
-                ino: 0, // Not used in download queue
+                ino: 0,              // Not used in download queue
                 name: String::new(), // Not used in download queue
-                virtual_path: None, // Not used in download queue
+                virtual_path: None,  // Not used in download queue
             });
         }
 
@@ -168,4 +168,4 @@ impl DownloadQueueRepository {
         debug!("Cleared all download queue items");
         Ok(())
     }
-} 
+}

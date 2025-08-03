@@ -48,7 +48,7 @@ pub struct DriveItem {
     #[serde(rename = "parentReference")]
     pub parent_reference: Option<ParentReference>,
 }
-
+#[allow(dead_code)]
 impl DriveItem {
     /// Set the size of the drive item
     pub fn set_size(&mut self, size: u64) {
@@ -248,6 +248,7 @@ pub struct FileChunk {
 }
 
 /// Upload progress information
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct UploadProgress {
     pub bytes_uploaded: u64,

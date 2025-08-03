@@ -1,10 +1,11 @@
-//! Shared types and enums for persistency module 
+#![allow(dead_code)]
 
 use crate::onedrive_service::onedrive_models::DriveItem;
 use std::path::PathBuf;
 
 /// Download queue item for tracking pending downloads
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct DownloadQueueItem {
     pub id: i64,
     pub onedrive_id: String,
@@ -18,8 +19,6 @@ pub struct DownloadQueueItem {
     pub name: String,
     pub virtual_path: Option<String>,
 }
-
-
 
 #[derive(Debug, Clone, PartialEq, Copy)]
 pub enum FileSource {
@@ -44,7 +43,7 @@ pub struct FuseMetadata {
     pub virtual_ino: Option<u64>,
     pub parent_ino: Option<u64>,
     pub virtual_path: Option<String>,
-    
+
     pub file_source: Option<FileSource>,
     pub sync_status: Option<String>,
 }
@@ -65,7 +64,7 @@ impl DriveItemWithFuse {
                 virtual_ino: None,
                 parent_ino: None,
                 virtual_path: None,
-                
+
                 file_source: Some(FileSource::Remote),
                 sync_status: None,
             },
@@ -118,9 +117,6 @@ impl DriveItemWithFuse {
         self.fuse_metadata.virtual_path = Some(path);
     }
 
-    
-    
-
     /// Set sync status
     pub fn set_sync_status(&mut self, status: String) {
         self.fuse_metadata.sync_status = Some(status);
@@ -141,8 +137,6 @@ impl DriveItemWithFuse {
         self.fuse_metadata.virtual_path.as_deref()
     }
 
-    
-
     /// Get file source
     pub fn file_source(&self) -> Option<FileSource> {
         self.fuse_metadata.file_source
@@ -162,16 +156,15 @@ impl DriveItemWithFuse {
     pub fn fuse_metadata_mut(&mut self) -> &mut FuseMetadata {
         &mut self.fuse_metadata
     }
-    
+    #[allow(dead_code)]
     pub(crate) fn set_parent_id(&mut self, id: String) {
-        self.drive_item_mut().parent_reference = Some(crate::onedrive_service::onedrive_models::ParentReference {
-            id: id,
-            path: None,
-        });
+        self.drive_item_mut().parent_reference =
+            Some(crate::onedrive_service::onedrive_models::ParentReference { id: id, path: None });
     }
 }
 
 // Delegate common accessors to DriveItem
+#[allow(dead_code)]
 impl DriveItemWithFuse {
     pub fn id(&self) -> &str {
         &self.drive_item.id
@@ -206,10 +199,15 @@ impl DriveItemWithFuse {
     }
 
     pub fn mime_type(&self) -> Option<&str> {
-        self.drive_item.file.as_ref().and_then(|f| f.mime_type.as_deref())
+        self.drive_item
+            .file
+            .as_ref()
+            .and_then(|f| f.mime_type.as_deref())
     }
 
-    pub fn parent_reference(&self) -> Option<&crate::onedrive_service::onedrive_models::ParentReference> {
+    pub fn parent_reference(
+        &self,
+    ) -> Option<&crate::onedrive_service::onedrive_models::ParentReference> {
         self.drive_item.parent_reference.as_ref()
     }
 
@@ -226,4 +224,4 @@ impl DriveItemWithFuse {
     pub fn drive_item_mut(&mut self) -> &mut DriveItem {
         &mut self.drive_item
     }
-} 
+}

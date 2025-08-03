@@ -1,4 +1,4 @@
-//! Periodic task scheduler for managing long-running background tasks
+#![allow(dead_code)]
 
 use anyhow::Result;
 use log::{debug, error, warn};

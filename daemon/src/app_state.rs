@@ -5,8 +5,8 @@ use onedrive_sync_lib::config::ProjectConfig;
 
 use crate::{
     auth::onedrive_auth::OneDriveAuth, connectivity::ConnectivityChecker,
-    onedrive_service::onedrive_client::OneDriveClient, persistency::PersistencyManager,
     file_manager::DefaultFileManager, message_broker::MessageBroker,
+    onedrive_service::onedrive_client::OneDriveClient, persistency::PersistencyManager,
     scheduler::periodic_scheduler::PeriodicScheduler,
 };
 
@@ -25,7 +25,7 @@ pub struct AppState {
     pub auth: Arc<OneDriveAuth>,
     /// File manager
     pub file_manager: Arc<DefaultFileManager>,
-    
+
     /// Scheduler for periodic tasks
     pub scheduler: Arc<PeriodicScheduler>,
 }
@@ -61,8 +61,6 @@ impl AppState {
         // Initialize file manager
         let file_manager = Arc::new(DefaultFileManager::new(project_config_arc.clone()).await?);
 
-        
-
         // Initialize scheduler
         let scheduler = Arc::new(PeriodicScheduler::new());
 
@@ -73,11 +71,10 @@ impl AppState {
             onedrive_client: Arc::new(onedrive_client),
             auth: auth_arc,
             file_manager,
-            
+
             scheduler,
         })
     }
-    
 
     /// Get a reference to the project configuration
     pub fn config(&self) -> &ProjectConfig {
@@ -108,8 +105,6 @@ impl AppState {
     pub fn file_manager(&self) -> &DefaultFileManager {
         &self.file_manager
     }
-
-    
 
     /// Get a reference to the scheduler
     pub fn scheduler(&self) -> &PeriodicScheduler {

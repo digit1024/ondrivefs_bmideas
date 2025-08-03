@@ -1,5 +1,5 @@
 use crate::onedrive_service::onedrive_models::{DriveItem, ParentReference};
-use crate::persistency::types::{DriveItemWithFuse, FuseMetadata, FileSource};
+use crate::persistency::types::{DriveItemWithFuse, FileSource, FuseMetadata};
 use anyhow::{Context, Result};
 use log::debug;
 use sqlx::{Pool, Row, Sqlite};
@@ -19,13 +19,11 @@ impl DriveItemWithFuseRepository {
     /// Create a DriveItemWithFuse from a DriveItem and automatically compute virtual path
     pub fn create_from_drive_item(&self, drive_item: DriveItem) -> DriveItemWithFuse {
         let mut item_with_fuse = DriveItemWithFuse::from_drive_item(drive_item);
-        
+
         // Automatically compute and set the virtual path
         let virtual_path = item_with_fuse.compute_virtual_path();
         item_with_fuse.set_virtual_path(virtual_path);
-      
-        
-        
+
         item_with_fuse
     }
 
@@ -36,22 +34,25 @@ impl DriveItemWithFuseRepository {
     }
 
     /// Store a drive item with Fuse metadata in the database (virtual_ino auto-generated)
-    pub async fn store_drive_item_with_fuse(
-        &self,
-        item: &DriveItemWithFuse
-        
-    ) -> Result<u64> {
-        let parent_id = item.drive_item.parent_reference.as_ref().map(|p| p.id.clone());
-        let parent_path = item.drive_item.parent_reference.as_ref().and_then(|p| p.path.clone());
-    
+    pub async fn store_drive_item_with_fuse(&self, item: &DriveItemWithFuse) -> Result<u64> {
+        let parent_id = item
+            .drive_item
+            .parent_reference
+            .as_ref()
+            .map(|p| p.id.clone());
+        let parent_path = item
+            .drive_item
+            .parent_reference
+            .as_ref()
+            .and_then(|p| p.path.clone());
 
         // Check if item already exists to preserve inode
         let existing_item = self.get_drive_item_with_fuse(&item.drive_item.id).await?;
-        
+
         if let Some(existing) = existing_item {
             // Item exists - UPDATE to preserve inode
             let existing_ino = existing.virtual_ino().unwrap_or(0);
-            
+
             sqlx::query(
                 r#"
                 UPDATE drive_items_with_fuse SET
@@ -72,8 +73,7 @@ impl DriveItemWithFuseRepository {
             .bind(&item.drive_item.download_url)
             .bind(item.drive_item.deleted.is_some())
             .bind(parent_id)
-            .bind(parent_path)
-            
+            .bind(parent_path)            
             .bind(item.fuse_metadata.parent_ino.map(|i| i as i64))
             .bind(&item.fuse_metadata.virtual_path)
             
@@ -108,15 +108,18 @@ impl DriveItemWithFuseRepository {
             .bind(&item.drive_item.created_date)
             .bind(item.drive_item.size.map(|s| s as i64))
             .bind(item.drive_item.folder.is_some())
-            .bind(item.drive_item.file.as_ref().and_then(|f| f.mime_type.clone()))
+            .bind(
+                item.drive_item
+                    .file
+                    .as_ref()
+                    .and_then(|f| f.mime_type.clone()),
+            )
             .bind(&item.drive_item.download_url)
             .bind(item.drive_item.deleted.is_some())
             .bind(parent_id)
             .bind(parent_path)
-            
             .bind(item.fuse_metadata.parent_ino.map(|i| i as i64))
             .bind(&item.fuse_metadata.virtual_path)
-            
             .bind(item.fuse_metadata.file_source.map(|s| s.as_str()))
             .bind(&item.fuse_metadata.sync_status)
             .execute(&self.pool)
@@ -135,7 +138,10 @@ impl DriveItemWithFuseRepository {
     }
 
     /// Get a drive item with Fuse metadata by OneDrive ID
-    pub async fn get_drive_item_with_fuse(&self, onedrive_id: &str) -> Result<Option<DriveItemWithFuse>> {
+    pub async fn get_drive_item_with_fuse(
+        &self,
+        onedrive_id: &str,
+    ) -> Result<Option<DriveItemWithFuse>> {
         let row = sqlx::query(
             r#"
             SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
@@ -156,11 +162,12 @@ impl DriveItemWithFuseRepository {
         }
     }
 
-
-   /// Get all drive items in upload que
-   pub async fn get_drive_items_with_fuse_in_download_queue(&self) -> Result<Vec<DriveItemWithFuse>> {
-    let rows = sqlx::query(
-        r#"
+    /// Get all drive items in upload que
+    pub async fn get_drive_items_with_fuse_in_download_queue(
+        &self,
+    ) -> Result<Vec<DriveItemWithFuse>> {
+        let rows = sqlx::query(
+            r#"
         SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
                mime_type, download_url, is_deleted, parent_id, parent_path, 
                parent_ino, virtual_path,  file_source, sync_status
@@ -171,19 +178,18 @@ impl DriveItemWithFuseRepository {
         )      
          ORDER BY name
         "#,
-    )
-    .fetch_all(&self.pool)
-    .await?;
+        )
+        .fetch_all(&self.pool)
+        .await?;
 
-    let mut items = Vec::new();
-    for row in rows {
-        let item = self.row_to_drive_item_with_fuse(row).await?;
-        items.push(item);
+        let mut items = Vec::new();
+        for row in rows {
+            let item = self.row_to_drive_item_with_fuse(row).await?;
+            items.push(item);
+        }
+
+        Ok(items)
     }
-
-    Ok(items)
-}
-
 
     /// Get all drive items with Fuse metadata
     pub async fn get_all_drive_items_with_fuse(&self) -> Result<Vec<DriveItemWithFuse>> {
@@ -247,7 +253,10 @@ impl DriveItemWithFuseRepository {
     }
 
     /// Get drive items with Fuse metadata by parent ID
-    pub async fn get_drive_items_with_fuse_by_parent(&self, parent_id: &str) -> Result<Vec<DriveItemWithFuse>> {
+    pub async fn get_drive_items_with_fuse_by_parent(
+        &self,
+        parent_id: &str,
+    ) -> Result<Vec<DriveItemWithFuse>> {
         let rows = sqlx::query(
             r#"
             SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
@@ -269,9 +278,11 @@ impl DriveItemWithFuseRepository {
         Ok(items)
     }
 
-
     /// Get children of a directory by parent inode
-    pub async fn get_children_by_parent_ino(&self, parent_ino: u64) -> Result<Vec<DriveItemWithFuse>> {
+    pub async fn get_children_by_parent_ino(
+        &self,
+        parent_ino: u64,
+    ) -> Result<Vec<DriveItemWithFuse>> {
         let rows = sqlx::query(
             r#"
             SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
@@ -294,7 +305,12 @@ impl DriveItemWithFuseRepository {
     }
 
     /// Get children of a directory by parent inode, paginated
-    pub async fn get_children_by_parent_ino_paginated(&self, parent_ino: u64, offset: usize, limit: usize) -> Result<Vec<DriveItemWithFuse>> {
+    pub async fn get_children_by_parent_ino_paginated(
+        &self,
+        parent_ino: u64,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<DriveItemWithFuse>> {
         let rows = sqlx::query(
             r#"
             SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
@@ -336,24 +352,22 @@ impl DriveItemWithFuseRepository {
 
     /// Check if an inode exists
     pub async fn inode_exists(&self, virtual_ino: u64) -> Result<bool> {
-        let count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM drive_items_with_fuse WHERE virtual_ino = ?"
-        )
-        .bind(virtual_ino as i64)
-        .fetch_one(&self.pool)
-        .await?;
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM drive_items_with_fuse WHERE virtual_ino = ?")
+                .bind(virtual_ino as i64)
+                .fetch_one(&self.pool)
+                .await?;
 
         Ok(count > 0)
     }
 
     /// Get count of items by file source
     pub async fn get_count_by_source(&self, source: FileSource) -> Result<u64> {
-        let count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM drive_items_with_fuse WHERE file_source = ?"
-        )
-        .bind(source.as_str())
-        .fetch_one(&self.pool)
-        .await?;
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM drive_items_with_fuse WHERE file_source = ?")
+                .bind(source.as_str())
+                .fetch_one(&self.pool)
+                .await?;
 
         Ok(count as u64)
     }
@@ -382,7 +396,10 @@ impl DriveItemWithFuseRepository {
     }
 
     /// Get drive item with Fuse metadata by virtual path
-    pub async fn get_drive_item_with_fuse_by_virtual_path(&self, virtual_path: &str) -> Result<Option<DriveItemWithFuse>> {
+    pub async fn get_drive_item_with_fuse_by_virtual_path(
+        &self,
+        virtual_path: &str,
+    ) -> Result<Option<DriveItemWithFuse>> {
         let row = sqlx::query(
             r#"
             SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
@@ -404,7 +421,10 @@ impl DriveItemWithFuseRepository {
     }
 
     /// Get drive item with Fuse metadata by virtual inode
-    pub async fn get_drive_item_with_fuse_by_virtual_ino(&self, virtual_ino: u64) -> Result<Option<DriveItemWithFuse>> {
+    pub async fn get_drive_item_with_fuse_by_virtual_ino(
+        &self,
+        virtual_ino: u64,
+    ) -> Result<Option<DriveItemWithFuse>> {
         let row = sqlx::query(
             r#"
             SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
@@ -426,7 +446,11 @@ impl DriveItemWithFuseRepository {
     }
 
     /// Update Fuse metadata for a drive item
-    pub async fn update_fuse_metadata(&self, onedrive_id: &str, metadata: &FuseMetadata) -> Result<()> {
+    pub async fn update_fuse_metadata(
+        &self,
+        onedrive_id: &str,
+        metadata: &FuseMetadata,
+    ) -> Result<()> {
         sqlx::query(
             r#"
             UPDATE drive_items_with_fuse 
@@ -437,7 +461,6 @@ impl DriveItemWithFuseRepository {
         )
         .bind(metadata.parent_ino.map(|i| i as i64))
         .bind(&metadata.virtual_path)
-        
         .bind(metadata.file_source.map(|s| s.as_str()))
         .bind(&metadata.sync_status)
         .bind(onedrive_id)
@@ -478,7 +501,11 @@ impl DriveItemWithFuseRepository {
     }
 
     /// Update parent ID for all children of a specific parent (used when parent ID changes)
-    pub async fn update_parent_id_for_children(&self, old_parent_id: &str, new_parent_id: &str) -> Result<()> {
+    pub async fn update_parent_id_for_children(
+        &self,
+        old_parent_id: &str,
+        new_parent_id: &str,
+    ) -> Result<()> {
         sqlx::query(
             r#"
             UPDATE drive_items_with_fuse 
@@ -491,7 +518,10 @@ impl DriveItemWithFuseRepository {
         .execute(&self.pool)
         .await?;
 
-        debug!("Updated parent ID for children: {} -> {}", old_parent_id, new_parent_id);
+        debug!(
+            "Updated parent ID for children: {} -> {}",
+            old_parent_id, new_parent_id
+        );
         Ok(())
     }
 
@@ -530,7 +560,11 @@ impl DriveItemWithFuseRepository {
     }
 
     /// Get a drive item with Fuse metadata by parent inode and name
-    pub async fn get_drive_item_with_fuse_by_parent_ino_and_name(&self, parent_ino: u64, name: &str) -> Result<Option<DriveItemWithFuse>> {
+    pub async fn get_drive_item_with_fuse_by_parent_ino_and_name(
+        &self,
+        parent_ino: u64,
+        name: &str,
+    ) -> Result<Option<DriveItemWithFuse>> {
         let row = sqlx::query(
             r#"
             SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
@@ -553,7 +587,11 @@ impl DriveItemWithFuseRepository {
     }
 
     /// Get a drive item with Fuse metadata by parent inode and name (case-insensitive)
-    pub async fn get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(&self, parent_ino: u64, name: &str) -> Result<Option<DriveItemWithFuse>> {
+    pub async fn get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(
+        &self,
+        parent_ino: u64,
+        name: &str,
+    ) -> Result<Option<DriveItemWithFuse>> {
         let row = sqlx::query(
             r#"
             SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
@@ -576,7 +614,10 @@ impl DriveItemWithFuseRepository {
     }
 
     /// Get all files (not folders) by virtual_path prefix (for sync folder logic)
-    pub async fn get_files_by_virtual_path_prefix(&self, folder_path: &str) -> Result<Vec<DriveItemWithFuse>> {
+    pub async fn get_files_by_virtual_path_prefix(
+        &self,
+        folder_path: &str,
+    ) -> Result<Vec<DriveItemWithFuse>> {
         // Always query with a leading slash in the LIKE pattern
         let pattern = format!("/{}/%", folder_path.trim_start_matches('/'));
         let rows = sqlx::query(
@@ -597,7 +638,10 @@ impl DriveItemWithFuseRepository {
     }
 
     /// Convert database row to DriveItemWithFuse
-    async fn row_to_drive_item_with_fuse(&self, row: sqlx::sqlite::SqliteRow) -> Result<DriveItemWithFuse> {
+    async fn row_to_drive_item_with_fuse(
+        &self,
+        row: sqlx::sqlite::SqliteRow,
+    ) -> Result<DriveItemWithFuse> {
         // Extract DriveItem fields
         let virtual_ino: i64 = row.try_get("virtual_ino")?;
         let onedrive_id: String = row.try_get("onedrive_id")?;
@@ -612,7 +656,6 @@ impl DriveItemWithFuseRepository {
         let is_deleted: bool = row.try_get("is_deleted")?;
         let parent_id: Option<String> = row.try_get("parent_id")?;
         let parent_path: Option<String> = row.try_get("parent_path")?;
-        
 
         // Build parent reference if available
         let parent_reference = if let Some(id) = parent_id {
@@ -679,8 +722,7 @@ impl DriveItemWithFuseRepository {
             virtual_ino: Some(virtual_ino as u64),
             parent_ino: parent_ino.map(|i| i as u64),
             virtual_path,
-            
-            
+
             file_source,
             sync_status,
         };
@@ -691,5 +733,3 @@ impl DriveItemWithFuseRepository {
         })
     }
 }
-
-

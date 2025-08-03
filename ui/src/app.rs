@@ -9,12 +9,9 @@ use cosmic::iced::{Length, Subscription};
 use cosmic::prelude::*;
 use cosmic::widget::{self, icon, menu, nav_bar};
 
-
+use crate::pages::{self, about_element, folders_page, queues_page, status_page};
 use log::info;
 use std::collections::HashMap;
-use crate::pages::{self, about_element, status_page, folders_page, queues_page};
-
-
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
 enum PageId {
@@ -48,19 +45,15 @@ pub struct AppModel {
     /// Key bindings for the application's menu bar.
     key_binds: HashMap<menu::KeyBind, MenuAction>,
     /// Configuration data that persists between application runs.
+    #[allow(dead_code)]
     config: Config,
-    
 
+    #[allow(dead_code)]
     active_page: PageId,
     status_page: pages::status_page::Page,
     folders_page: pages::folders_page::Page,
     queues_page: pages::queues_page::Page,
     logs_page: pages::logs_page::Page,
-
-    
-
-
-
 }
 
 /// Messages emitted by the application and its widgets.
@@ -74,7 +67,6 @@ pub enum Message {
     QueuesPage(queues_page::Message),
     AboutElement(about_element::Message),
     LogsPage(pages::logs_page::Message),
- 
 }
 // impl From<status_page::Message> for Message {
 //     fn from(message: status_page::Message) -> Self {
@@ -111,7 +103,6 @@ impl From<pages::logs_page::Message> for Message {
     }
 }
 
-
 /// Create a COSMIC application from the app model
 impl cosmic::Application for AppModel {
     /// The async executor that will be used to run your application's commands.
@@ -141,7 +132,6 @@ impl cosmic::Application for AppModel {
     ) -> (Self, Task<cosmic::Action<Self::Message>>) {
         // Create a nav bar with three page items.
         let mut nav = nav_bar::Model::default();
-        
 
         nav.insert()
             .text("Status")
@@ -178,7 +168,7 @@ impl cosmic::Application for AppModel {
             config: cosmic_config::Config::new(Self::APP_ID, Config::VERSION)
                 .map(|context| match Config::get_entry(&context) {
                     Ok(config) => config,
-                    Err((_errors, config)) => config
+                    Err((_errors, config)) => config,
                 })
                 .unwrap_or_default(),
             active_page: PageId::Status,
@@ -186,7 +176,6 @@ impl cosmic::Application for AppModel {
             folders_page: pages::folders_page::Page::new(),
             queues_page: pages::queues_page::Page::new(),
             logs_page: pages::logs_page::Page::new(),
-            
         };
 
         // Create startup commands: set window title and fetch initial status/queues
@@ -194,30 +183,32 @@ impl cosmic::Application for AppModel {
         let fetch_status_command = cosmic::task::future(async move {
             info!("App: Initializing StatusPage with fetch command");
             Message::StatusPage(status_page::Message::FetchStatus)
-            
         });
-        let fetch_queues_command = cosmic::task::future(async move {
-            Message::QueuesPage(queues_page::Message::FetchQueues)
-        });
+        let fetch_queues_command =
+            cosmic::task::future(
+                async move { Message::QueuesPage(queues_page::Message::FetchQueues) },
+            );
         let fetch_folders_command = cosmic::task::future(async move {
             Message::FoldersPage(folders_page::Message::FetchFolders)
         });
 
-        (app, Task::batch(vec![title_command, fetch_status_command, fetch_queues_command, fetch_folders_command]))
+        (
+            app,
+            Task::batch(vec![
+                title_command,
+                fetch_status_command,
+                fetch_queues_command,
+                fetch_folders_command,
+            ]),
+        )
     }
-
 
     fn subscription(&self) -> Subscription<Message> {
         match self.nav.active_data::<PageId>() {
-            Some(PageId::Status) => {
-                self.status_page.subscription().map(Message::StatusPage)
-            }
-            Some(PageId::Queues) => {
-                self.queues_page.subscription().map(Message::QueuesPage)
-            }
+            Some(PageId::Status) => self.status_page.subscription().map(Message::StatusPage),
+            Some(PageId::Queues) => self.queues_page.subscription().map(Message::QueuesPage),
             _ => Subscription::none(),
         }
-        
     }
 
     /// Elements to pack at the start of the header bar.
@@ -256,7 +247,7 @@ impl cosmic::Application for AppModel {
     /// Describes the interface based on the current state of the application model.
     fn view(&self) -> Element<Self::Message> {
         let page = self.nav.active_data::<PageId>().unwrap_or(&PageId::Status);
-        
+
         let content = match page {
             PageId::Status => self.status_page.view().map(Message::StatusPage),
             PageId::Folders => self.folders_page.view().map(Message::FoldersPage),
@@ -271,15 +262,12 @@ impl cosmic::Application for AppModel {
             .into()
     }
 
-    
-
     /// Handles messages emitted by the application and its widgets.
     fn update(&mut self, message: Self::Message) -> cosmic::Task<cosmic::Action<Message>> {
         match message {
             // Message::OpenRepositoryUrl => {
             //     _ = open::that_detached(REPOSITORY);
             // }
-
             Message::ToggleContextPage(context_page) => {
                 if self.context_page == context_page {
                     self.core.window.show_context = !self.core.window.show_context;
@@ -293,17 +281,9 @@ impl cosmic::Application for AppModel {
             Message::StatusPage(status_message) => {
                 info!("App: Processing StatusPage message: {:?}", status_message);
                 self.status_page.update(status_message)
-                
-                
-                
             }
-            Message::FoldersPage(folders_message) => {
-                self.folders_page.update(folders_message)
-                
-            }
-            Message::QueuesPage(queues_message) => {
-                self.queues_page.update(queues_message)
-            }
+            Message::FoldersPage(folders_message) => self.folders_page.update(folders_message),
+            Message::QueuesPage(queues_message) => self.queues_page.update(queues_message),
             Message::AboutElement(about_element::Message::OpenRepositoryUrl) => {
                 _ = open::that_detached("REPOITORY");
                 Task::none()
@@ -312,9 +292,7 @@ impl cosmic::Application for AppModel {
                 _ = open::that_detached(url);
                 Task::none()
             }
-            Message::LogsPage(logs_message) => {
-                self.logs_page.update(logs_message)
-            }
+            Message::LogsPage(logs_message) => self.logs_page.update(logs_message),
         }
     }
 
@@ -333,10 +311,8 @@ impl cosmic::Application for AppModel {
 
 impl AppModel {
     /// Status page showing sync information
- 
 
     /// The about page for this app.
- 
 
     /// Updates the header and window titles.
     pub fn update_title(&mut self) -> Task<cosmic::Action<Message>> {
@@ -354,9 +330,6 @@ impl AppModel {
         }
     }
 }
-
-
-
 
 impl menu::action::MenuAction for MenuAction {
     type Message = Message;

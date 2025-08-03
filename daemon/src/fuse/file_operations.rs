@@ -20,38 +20,19 @@ impl FileOperationsManager {
         self.file_manager.get_local_path_if_file_exists(ino)
     }
 
-    /// Read data from a local staging folder
-    pub fn read_local_file(&self, item: &DriveItemWithFuse, offset: u64, size: u32) -> Result<Vec<u8>> {
-        let ino = item.virtual_ino().unwrap_or(0);
-        
-        if let Some(local_path) = self.file_exists_locally(ino) {
-            let mut file = std::fs::File::open(&local_path)?;
-            file.seek(std::io::SeekFrom::Start(offset))?;
-            
-            let mut buffer = vec![0u8; size as usize];
-            let bytes_read = file.read(&mut buffer)?;
-            buffer.truncate(bytes_read);
-            
-            Ok(buffer)
-        } else {
-            // Return placeholder content if file doesn't exist locally
-            Ok(self.generate_placeholder_content(item))
-        }
-    }
-
     /// Generate placeholder content for files that don't exist locally
     pub fn generate_placeholder_content(&self, item: &DriveItemWithFuse) -> Vec<u8> {
         let name = item.name().unwrap_or("unknown");
         let size = item.size();
-        
+
         let placeholder = format!(
             "This is a placeholder for file: {}\nSize: {} bytes\nThis file is not yet downloaded locally.",
             name, size
         );
-        
+
         placeholder.into_bytes()
     }
 }
 
 use std::io::{Read, Seek};
-use std::sync::Arc; 
+use std::sync::Arc;

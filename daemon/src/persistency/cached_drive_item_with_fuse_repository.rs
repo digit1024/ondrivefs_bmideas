@@ -1,13 +1,13 @@
 use crate::onedrive_service::onedrive_models::{DriveItem, ParentReference};
-use crate::persistency::types::{DriveItemWithFuse, FuseMetadata, FileSource};
 use crate::persistency::drive_item_with_fuse_repository::DriveItemWithFuseRepository;
+use crate::persistency::types::{DriveItemWithFuse, FileSource, FuseMetadata};
 use anyhow::{Context, Result};
+use chrono::{DateTime, Duration, Utc};
 use log::{debug, info};
 use sqlx::{Pool, Row, Sqlite};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use chrono::{DateTime, Utc, Duration};
 use tokio::sync::RwLock;
 
 /// Cached wrapper around DriveItemWithFuseRepository with inode-based caching
@@ -16,7 +16,7 @@ pub struct CachedDriveItemWithFuseRepository {
     cache: Arc<RwLock<HashMap<u64, (DriveItemWithFuse, DateTime<Utc>)>>>,
     cache_ttl: Duration,
 }
-
+#[allow(dead_code)]
 impl CachedDriveItemWithFuseRepository {
     /// Create a new cached drive item with Fuse repository
     pub fn new(repo: Arc<DriveItemWithFuseRepository>, cache_ttl: Duration) -> Self {
@@ -49,32 +49,35 @@ impl CachedDriveItemWithFuseRepository {
         // cache.insert(inode, (item, Utc::now()));
         // drop(cache);
         // debug!("Cached item for inode: {}", inode);
-        
+
         // self.clean_old_if_cache_gt_2k().await;
     }
- /// Cleans old entries if Cache reached 2000 entries
-     async fn clean_old_if_cache_gt_2k(&self) {
-         let stat = self.cache_stats().await;
-         if stat.0 > 2000 {
-             //remove only where timestamp is older than ttl
-             let mut cache = self.cache.write().await;
-             cache.retain(|_, (_, timestamp)| Utc::now().signed_duration_since(*timestamp) < self.cache_ttl);
-         }
-     }
+    /// Cleans old entries if Cache reached 2000 entries
+    #[allow(dead_code)]
+    async fn clean_old_if_cache_gt_2k(&self) {
+        let stat = self.cache_stats().await;
+        if stat.0 > 2000 {
+            //remove only where timestamp is older than ttl
+            let mut cache = self.cache.write().await;
+            cache.retain(|_, (_, timestamp)| {
+                Utc::now().signed_duration_since(*timestamp) < self.cache_ttl
+            });
+        }
+    }
 
-         async fn invalidate_cache(&self, inode: u64) {
-         let mut cache = self.cache.write().await;
-         if cache.remove(&inode).is_some() {
-             debug!("Invalidated cache for inode: {}", inode);
-         }
-     }
-
-     async fn invalidate_all_cache(&self) {
-         let mut cache = self.cache.write().await;
-         let count = cache.len();
-         cache.clear();
-         debug!("Invalidated all cache entries: {}", count);
-     }
+    async fn invalidate_cache(&self, inode: u64) {
+        let mut cache = self.cache.write().await;
+        if cache.remove(&inode).is_some() {
+            debug!("Invalidated cache for inode: {}", inode);
+        }
+    }
+    #[allow(dead_code)]
+    async fn invalidate_all_cache(&self) {
+        let mut cache = self.cache.write().await;
+        let count = cache.len();
+        cache.clear();
+        debug!("Invalidated all cache entries: {}", count);
+    }
 
     /// Get cache statistics
     pub async fn cache_stats(&self) -> (usize, Duration) {
@@ -89,6 +92,7 @@ impl CachedDriveItemWithFuseRepository {
 }
 
 // Implement all the same methods as DriveItemWithFuseRepository
+#[allow(dead_code)]
 impl CachedDriveItemWithFuseRepository {
     /// Create a DriveItemWithFuse from a DriveItem and automatically compute virtual path
     pub fn create_from_drive_item(&self, drive_item: DriveItem) -> DriveItemWithFuse {
@@ -111,23 +115,30 @@ impl CachedDriveItemWithFuseRepository {
     }
 
     /// Get a drive item with Fuse metadata by OneDrive ID
-    pub async fn get_drive_item_with_fuse(&self, onedrive_id: &str) -> Result<Option<DriveItemWithFuse>> {
+    pub async fn get_drive_item_with_fuse(
+        &self,
+        onedrive_id: &str,
+    ) -> Result<Option<DriveItemWithFuse>> {
         // First try to get from database
         let item = self.inner.get_drive_item_with_fuse(onedrive_id).await?;
-        
+
         // If found, cache it by inode
         if let Some(ref item) = item {
             if let Some(inode) = item.fuse_metadata.virtual_ino {
                 self.set_in_cache(inode, item.clone()).await;
             }
         }
-        
+
         Ok(item)
     }
 
     /// Get all drive items in upload queue
-    pub async fn get_drive_items_with_fuse_in_download_queue(&self) -> Result<Vec<DriveItemWithFuse>> {
-        self.inner.get_drive_items_with_fuse_in_download_queue().await
+    pub async fn get_drive_items_with_fuse_in_download_queue(
+        &self,
+    ) -> Result<Vec<DriveItemWithFuse>> {
+        self.inner
+            .get_drive_items_with_fuse_in_download_queue()
+            .await
     }
 
     /// Get all drive items with Fuse metadata
@@ -136,58 +147,81 @@ impl CachedDriveItemWithFuseRepository {
     }
 
     /// Get drive items with Fuse metadata by parent path
-    pub async fn get_drive_items_with_fuse_by_parent_path(&self, parent_path: &str) -> Result<Vec<DriveItemWithFuse>> {
-        let items = self.inner.get_drive_items_with_fuse_by_parent_path(parent_path).await?;
-        
+    pub async fn get_drive_items_with_fuse_by_parent_path(
+        &self,
+        parent_path: &str,
+    ) -> Result<Vec<DriveItemWithFuse>> {
+        let items = self
+            .inner
+            .get_drive_items_with_fuse_by_parent_path(parent_path)
+            .await?;
+
         // Cache all items by their inodes
         for item in &items {
             if let Some(inode) = item.fuse_metadata.virtual_ino {
                 self.set_in_cache(inode, item.clone()).await;
             }
         }
-        
+
         Ok(items)
     }
 
     /// Get drive items with Fuse metadata by parent ID
-    pub async fn get_drive_items_with_fuse_by_parent(&self, parent_id: &str) -> Result<Vec<DriveItemWithFuse>> {
-        let items = self.inner.get_drive_items_with_fuse_by_parent(parent_id).await?;
-        
+    pub async fn get_drive_items_with_fuse_by_parent(
+        &self,
+        parent_id: &str,
+    ) -> Result<Vec<DriveItemWithFuse>> {
+        let items = self
+            .inner
+            .get_drive_items_with_fuse_by_parent(parent_id)
+            .await?;
+
         // Cache all items by their inodes
         for item in &items {
             if let Some(inode) = item.fuse_metadata.virtual_ino {
                 self.set_in_cache(inode, item.clone()).await;
             }
         }
-        
+
         Ok(items)
     }
 
     /// Get children of a directory by parent inode
-    pub async fn get_children_by_parent_ino(&self, parent_ino: u64) -> Result<Vec<DriveItemWithFuse>> {
+    pub async fn get_children_by_parent_ino(
+        &self,
+        parent_ino: u64,
+    ) -> Result<Vec<DriveItemWithFuse>> {
         let items = self.inner.get_children_by_parent_ino(parent_ino).await?;
-        
+
         // Cache all items by their inodes
         for item in &items {
             if let Some(inode) = item.fuse_metadata.virtual_ino {
                 self.set_in_cache(inode, item.clone()).await;
             }
         }
-        
+
         Ok(items)
     }
 
     /// Get children of a directory by parent inode, paginated
-    pub async fn get_children_by_parent_ino_paginated(&self, parent_ino: u64, offset: usize, limit: usize) -> Result<Vec<DriveItemWithFuse>> {
-        let items = self.inner.get_children_by_parent_ino_paginated(parent_ino, offset, limit).await?;
-        
+    pub async fn get_children_by_parent_ino_paginated(
+        &self,
+        parent_ino: u64,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<DriveItemWithFuse>> {
+        let items = self
+            .inner
+            .get_children_by_parent_ino_paginated(parent_ino, offset, limit)
+            .await?;
+
         // Cache all items by their inodes
         for item in &items {
             if let Some(inode) = item.fuse_metadata.virtual_ino {
                 self.set_in_cache(inode, item.clone()).await;
             }
         }
-        
+
         Ok(items)
     }
 
@@ -208,46 +242,62 @@ impl CachedDriveItemWithFuseRepository {
 
     /// Get all items by file source
     pub async fn get_items_by_source(&self, source: FileSource) -> Result<Vec<DriveItemWithFuse>> {
-  self.inner.get_items_by_source(source).await
-        
-  
+        self.inner.get_items_by_source(source).await
     }
 
     /// Get drive item with Fuse metadata by virtual path
-    pub async fn get_drive_item_with_fuse_by_virtual_path(&self, virtual_path: &str) -> Result<Option<DriveItemWithFuse>> {
-        let item = self.inner.get_drive_item_with_fuse_by_virtual_path(virtual_path).await?;
-        
+    pub async fn get_drive_item_with_fuse_by_virtual_path(
+        &self,
+        virtual_path: &str,
+    ) -> Result<Option<DriveItemWithFuse>> {
+        let item = self
+            .inner
+            .get_drive_item_with_fuse_by_virtual_path(virtual_path)
+            .await?;
+
         // If found, cache it by inode
         if let Some(ref item) = item {
             if let Some(inode) = item.fuse_metadata.virtual_ino {
                 self.set_in_cache(inode, item.clone()).await;
             }
         }
-        
+
         Ok(item)
     }
 
     /// Get drive item with Fuse metadata by virtual inode - PRIMARY CACHE TARGET
-    pub async fn get_drive_item_with_fuse_by_virtual_ino(&self, virtual_ino: u64) -> Result<Option<DriveItemWithFuse>> {
+    pub async fn get_drive_item_with_fuse_by_virtual_ino(
+        &self,
+        virtual_ino: u64,
+    ) -> Result<Option<DriveItemWithFuse>> {
         // First try cache
         if let Some(cached_item) = self.get_from_cache(virtual_ino).await {
             return Ok(Some(cached_item));
         }
-        
+
         // Cache miss - get from database
-        let item = self.inner.get_drive_item_with_fuse_by_virtual_ino(virtual_ino).await?;
-        
+        let item = self
+            .inner
+            .get_drive_item_with_fuse_by_virtual_ino(virtual_ino)
+            .await?;
+
         // If found, cache it
         if let Some(ref item) = item {
             self.set_in_cache(virtual_ino, item.clone()).await;
         }
-        
+
         Ok(item)
     }
 
     /// Update Fuse metadata for a drive item
-    pub async fn update_fuse_metadata(&self, onedrive_id: &str, metadata: &FuseMetadata) -> Result<()> {
-        self.inner.update_fuse_metadata(onedrive_id, metadata).await?;
+    pub async fn update_fuse_metadata(
+        &self,
+        onedrive_id: &str,
+        metadata: &FuseMetadata,
+    ) -> Result<()> {
+        self.inner
+            .update_fuse_metadata(onedrive_id, metadata)
+            .await?;
         // Invalidate cache for the affected inode
         if let Some(inode) = metadata.virtual_ino {
             self.invalidate_cache(inode).await;
@@ -260,14 +310,14 @@ impl CachedDriveItemWithFuseRepository {
         // Get the item first to know its inode for cache invalidation
         let item = self.inner.get_drive_item_with_fuse(onedrive_id).await?;
         let inode = item.as_ref().and_then(|i| i.fuse_metadata.virtual_ino);
-        
+
         self.inner.delete_drive_item_with_fuse(onedrive_id).await?;
-        
+
         // Invalidate cache for this item
         if let Some(inode) = inode {
             self.invalidate_cache(inode).await;
         }
-        
+
         Ok(())
     }
 
@@ -277,63 +327,89 @@ impl CachedDriveItemWithFuseRepository {
     }
 
     /// Update parent ID for all children of a specific parent (used when parent ID changes)
-    pub async fn update_parent_id_for_children(&self, old_parent_id: &str, new_parent_id: &str) -> Result<()> {
-        self.inner.update_parent_id_for_children(old_parent_id, new_parent_id).await
-        
+    pub async fn update_parent_id_for_children(
+        &self,
+        old_parent_id: &str,
+        new_parent_id: &str,
+    ) -> Result<()> {
+        self.inner
+            .update_parent_id_for_children(old_parent_id, new_parent_id)
+            .await
     }
 
     /// Get all items that have a specific parent ID
     pub async fn get_items_by_parent_id(&self, parent_id: &str) -> Result<Vec<DriveItemWithFuse>> {
         let items = self.inner.get_items_by_parent_id(parent_id).await?;
-        
+
         // Cache all items by their inodes
         for item in &items {
             if let Some(inode) = item.fuse_metadata.virtual_ino {
                 self.set_in_cache(inode, item.clone()).await;
             }
         }
-        
+
         Ok(items)
     }
 
     /// Delete a drive item with Fuse metadata by virtual inode
     pub async fn delete_drive_item_with_fuse_by_ino(&self, virtual_ino: u64) -> Result<()> {
-        self.inner.delete_drive_item_with_fuse_by_ino(virtual_ino).await?;
+        self.inner
+            .delete_drive_item_with_fuse_by_ino(virtual_ino)
+            .await?;
         // Invalidate cache for this inode
         self.invalidate_cache(virtual_ino).await;
         Ok(())
     }
 
     /// Get a drive item with Fuse metadata by parent inode and name
-    pub async fn get_drive_item_with_fuse_by_parent_ino_and_name(&self, parent_ino: u64, name: &str) -> Result<Option<DriveItemWithFuse>> {
-        let item = self.inner.get_drive_item_with_fuse_by_parent_ino_and_name(parent_ino, name).await?;
-        
+    pub async fn get_drive_item_with_fuse_by_parent_ino_and_name(
+        &self,
+        parent_ino: u64,
+        name: &str,
+    ) -> Result<Option<DriveItemWithFuse>> {
+        let item = self
+            .inner
+            .get_drive_item_with_fuse_by_parent_ino_and_name(parent_ino, name)
+            .await?;
+
         // If found, cache it by inode
         if let Some(ref item) = item {
             if let Some(inode) = item.fuse_metadata.virtual_ino {
                 self.set_in_cache(inode, item.clone()).await;
             }
         }
-        
+
         Ok(item)
     }
 
     /// Get a drive item with Fuse metadata by parent inode and name (case-insensitive)
-    pub async fn get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(&self, parent_ino: u64, name: &str) -> Result<Option<DriveItemWithFuse>> {
-        let item = self.inner.get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(parent_ino, name).await?;
-        
+    pub async fn get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(
+        &self,
+        parent_ino: u64,
+        name: &str,
+    ) -> Result<Option<DriveItemWithFuse>> {
+        let item = self
+            .inner
+            .get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(parent_ino, name)
+            .await?;
+
         // If found, cache it by inode
         if let Some(ref item) = item {
             if let Some(inode) = item.fuse_metadata.virtual_ino {
                 self.set_in_cache(inode, item.clone()).await;
             }
         }
-        
+
         Ok(item)
     }
 
     /// Get all files (not folders) by virtual_path prefix (for sync folder logic)
-    pub async fn get_files_by_virtual_path_prefix(&self, folder_path: &str) -> Result<Vec<DriveItemWithFuse>> {
-         self.inner.get_files_by_virtual_path_prefix(folder_path).await
+    pub async fn get_files_by_virtual_path_prefix(
+        &self,
+        folder_path: &str,
+    ) -> Result<Vec<DriveItemWithFuse>> {
+        self.inner
+            .get_files_by_virtual_path_prefix(folder_path)
+            .await
     }
-} 
+}

@@ -1,11 +1,11 @@
 use crate::onedrive_service::onedrive_models::DownloadResult;
 use anyhow::{Context, Result};
 use libc::LOCK_NB;
-use log::{info, warn, error, debug};
-use std::path::{Path, PathBuf};
-use tokio::fs;
+use log::{debug, error, info, warn};
 use onedrive_sync_lib::config::ProjectConfig;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tokio::fs;
 
 /// Trait for handling file system operations
 pub trait FileManager {
@@ -40,14 +40,10 @@ pub trait FileManager {
     /// Get the downloads directory
     fn get_download_dir(&self) -> PathBuf;
     /// Get the uploads directory
-    fn get_upload_dir(&self) -> PathBuf;
+
     /// Get the uploads directory
     fn get_local_dir(&self) -> PathBuf;
-    
-    
 }
-
-
 
 /// Default implementation of FileManager
 #[derive(Clone)]
@@ -64,7 +60,6 @@ impl DefaultFileManager {
         Ok(Self { config })
     }
 
-
     /// Ensure a directory exists, creating it if necessary
     async fn ensure_directory_exists(path: &Path) -> Result<()> {
         if !path.exists() {
@@ -76,18 +71,6 @@ impl DefaultFileManager {
         Ok(())
     }
 
-    /// Safely strip prefix from path
-    fn strip_path_prefix<'a>(path: &'a Path, prefix: &Path) -> &'a Path {
-        path.strip_prefix(prefix).unwrap_or(path)
-    }
-    pub fn file_exists_in_download(&self, onderive_id: &str) -> bool {
-        let download_path = self.config.download_dir().join(onderive_id);
-        download_path.exists() && download_path.is_file()
-    }
-    pub fn file_exists_in_upload(&self, onedrive_id: &str) -> bool {
-        let upload_path = self.config.upload_dir().join(onedrive_id);
-        upload_path.exists() && upload_path.is_file()
-    }
     pub fn get_local_path_if_file_exists(&self, ino: u64) -> Option<PathBuf> {
         let local_path = self.config.local_dir().join(ino.to_string());
         if local_path.exists() && local_path.is_file() {
@@ -101,34 +84,28 @@ impl DefaultFileManager {
         fs::rename(download, local).await?;
         Ok(())
     }
-    pub async fn create_a_snapshot_for_upload(&self, onedrive_id: &str) -> Result<()> {
-        
-        let local = self.get_local_dir().join(onedrive_id);
-        let upload = self.get_upload_dir().join(onedrive_id);
-        let local_snapshot = local.clone().with_extension("upload");
-        fs::copy(local, local_snapshot.clone()).await?;
-        // rename the local file to the upload file
-        fs::rename(local_snapshot, upload).await?;
-        Ok(())
-    }
 
     /// Create an empty file in the local directory for a given inode
     pub async fn create_empty_file(&self, ino: u64) -> Result<()> {
         let local_path = self.get_local_dir().join(ino.to_string());
-        
+
         // Ensure parent directory exists
         if let Some(parent) = local_path.parent() {
             Self::ensure_directory_exists(parent).await?;
         }
-        
+
         // Create empty file
-        fs::write(&local_path, &[]).await
+        fs::write(&local_path, &[])
+            .await
             .with_context(|| format!("Failed to create empty file: {}", local_path.display()))?;
-        
-        debug!("📄 Created empty file: {} (ino: {})", local_path.display(), ino);
+
+        debug!(
+            "📄 Created empty file: {} (ino: {})",
+            local_path.display(),
+            ino
+        );
         Ok(())
     }
-    
 }
 
 impl FileManager for DefaultFileManager {
@@ -170,7 +147,10 @@ impl FileManager for DefaultFileManager {
                 .with_context(|| format!("Failed to delete file: {}", path.display()))?;
             info!("🗑️ Deleted file: {}", path.display());
         } else {
-            warn!("⚠️ Attempted to delete non-existent file: {}", path.display());
+            warn!(
+                "⚠️ Attempted to delete non-existent file: {}",
+                path.display()
+            );
         }
         Ok(())
     }
@@ -182,7 +162,10 @@ impl FileManager for DefaultFileManager {
                 .with_context(|| format!("Failed to delete directory: {}", path.display()))?;
             info!("🗑️ Deleted directory: {}", path.display());
         } else {
-            warn!("⚠️ Attempted to delete non-existent directory: {}", path.display());
+            warn!(
+                "⚠️ Attempted to delete non-existent directory: {}",
+                path.display()
+            );
         }
         Ok(())
     }
@@ -198,12 +181,8 @@ impl FileManager for DefaultFileManager {
     fn get_download_dir(&self) -> PathBuf {
         self.config.download_dir()
     }
-    fn get_upload_dir(&self) -> PathBuf {
-        self.config.upload_dir()
-    }
-    fn get_local_dir(&self) -> PathBuf {    
+
+    fn get_local_dir(&self) -> PathBuf {
         self.config.local_dir()
     }
 }
-
-

@@ -1,12 +1,12 @@
 use crate::auth::onedrive_auth::OneDriveAuth;
 use crate::onedrive_service::http_client::HttpClient;
 use crate::onedrive_service::onedrive_models::{
-    CreateFolderResult, DeleteResult, DownloadResult, DriveItem, DriveItemCollection, UploadResult,
-    UserProfile, UploadSessionResponse, UploadSessionRequest, UploadSessionItem, 
-    UploadSessionStatus, FileChunk, UploadProgress, UploadSessionConfig,
+    CreateFolderResult, DeleteResult, DownloadResult, DriveItem, DriveItemCollection, FileChunk,
+    UploadProgress, UploadResult, UploadSessionConfig, UploadSessionItem, UploadSessionRequest,
+    UploadSessionResponse, UploadSessionStatus, UserProfile,
 };
-use anyhow::{Context, Result, anyhow};
-use log::{debug, info, warn, error};
+use anyhow::{anyhow, Context, Result};
+use log::{debug, error, info, warn};
 use serde_json;
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,7 +19,7 @@ pub struct OneDriveClient {
     http_client: HttpClient,
     auth: Arc<OneDriveAuth>,
 }
-
+#[allow(dead_code)]
 impl OneDriveClient {
     pub fn new(auth: Arc<OneDriveAuth>) -> Result<Self> {
         Ok(Self {
@@ -47,8 +47,11 @@ impl OneDriveClient {
         file_name: &str,
     ) -> Result<UploadSessionResponse> {
         let auth_header = self.auth_header().await?;
-        let url = format!("/me/drive/items/{}:/{}:/createUploadSession", parent_id, file_name);
-        
+        let url = format!(
+            "/me/drive/items/{}:/{}:/createUploadSession",
+            parent_id, file_name
+        );
+
         let request_body = UploadSessionRequest {
             item: UploadSessionItem {
                 conflict_behavior: "rename".to_string(),
@@ -56,8 +59,11 @@ impl OneDriveClient {
             },
         };
 
-        info!("Creating upload session for file: {} in parent: {}", file_name, parent_id);
-        
+        info!(
+            "Creating upload session for file: {} in parent: {}",
+            file_name, parent_id
+        );
+
         let session = self
             .http_client
             .create_upload_session(&url, &request_body, &auth_header)
@@ -68,13 +74,10 @@ impl OneDriveClient {
     }
 
     /// Create an upload session for updating existing files
-    async fn create_update_upload_session(
-        &self,
-        item_id: &str,
-    ) -> Result<UploadSessionResponse> {
+    async fn create_update_upload_session(&self, item_id: &str) -> Result<UploadSessionResponse> {
         let auth_header = self.auth_header().await?;
         let url = format!("/me/drive/items/{}/createUploadSession", item_id);
-        
+
         let request_body = UploadSessionRequest {
             item: UploadSessionItem {
                 conflict_behavior: "replace".to_string(),
@@ -83,7 +86,7 @@ impl OneDriveClient {
         };
 
         info!("Creating update upload session for item: {}", item_id);
-        
+
         let session = self
             .http_client
             .create_upload_session(&url, &request_body, &auth_header)
@@ -94,28 +97,24 @@ impl OneDriveClient {
     }
 
     /// Split file data into chunks
-    fn split_file_into_chunks(
-        &self,
-        file_data: &[u8],
-        chunk_size: u64,
-    ) -> Vec<FileChunk> {
+    fn split_file_into_chunks(&self, file_data: &[u8], chunk_size: u64) -> Vec<FileChunk> {
         let mut chunks = Vec::new();
         let total_size = file_data.len() as u64;
-        
+
         let mut start = 0;
         while start < total_size {
             let end = std::cmp::min(start + chunk_size - 1, total_size - 1);
             let chunk_data = file_data[start as usize..=end as usize].to_vec();
-            
+
             chunks.push(FileChunk {
                 start,
                 end,
                 data: chunk_data,
             });
-            
+
             start = end + 1;
         }
-        
+
         chunks
     }
 
@@ -128,7 +127,7 @@ impl OneDriveClient {
         config: &UploadSessionConfig,
     ) -> Result<reqwest::Response> {
         let content_range = format!("bytes {}-{}/{}", chunk.start, chunk.end, total_size);
-        
+
         for attempt in 0..=config.max_retries {
             match self
                 .http_client
@@ -148,14 +147,17 @@ impl OneDriveClient {
                     warn!("Upload chunk attempt {} failed: {}", attempt + 1, e);
                 }
             }
-            
+
             if attempt < config.max_retries {
                 let delay = config.retry_delay_ms * (1 << attempt) as u64;
                 sleep(Duration::from_millis(delay)).await;
             }
         }
-        
-        Err(anyhow!("Failed to upload chunk after {} attempts", config.max_retries + 1))
+
+        Err(anyhow!(
+            "Failed to upload chunk after {} attempts",
+            config.max_retries + 1
+        ))
     }
 
     /// Upload large file using resumable upload session
@@ -167,47 +169,65 @@ impl OneDriveClient {
     ) -> Result<DriveItem> {
         let config = config.unwrap_or_default();
         let total_size = file_data.len() as u64;
-        
+
         // Ensure chunk size is a multiple of 320KB as required by Microsoft
         let adjusted_chunk_size = (config.chunk_size / 327680) * 327680;
         if adjusted_chunk_size != config.chunk_size {
-            warn!("Adjusted chunk size from {} to {} to meet 320KB requirement", 
-                  config.chunk_size, adjusted_chunk_size);
+            warn!(
+                "Adjusted chunk size from {} to {} to meet 320KB requirement",
+                config.chunk_size, adjusted_chunk_size
+            );
         }
-        
+
         let chunks = self.split_file_into_chunks(file_data, adjusted_chunk_size);
-        info!("Split file into {} chunks of {} bytes each", chunks.len(), adjusted_chunk_size);
-        
+        info!(
+            "Split file into {} chunks of {} bytes each",
+            chunks.len(),
+            adjusted_chunk_size
+        );
+
         let mut completed_chunks = 0;
         let mut final_response: Option<reqwest::Response> = None;
-        
+
         for (index, chunk) in chunks.iter().enumerate() {
-            let response = self.upload_chunk_with_retry(upload_url, chunk, total_size, &config).await?;
+            let response = self
+                .upload_chunk_with_retry(upload_url, chunk, total_size, &config)
+                .await?;
             completed_chunks += 1;
-            
+
             let progress = (completed_chunks as f64 / chunks.len() as f64) * 100.0;
-            info!("Upload progress: {:.1}% ({}/{})", progress, completed_chunks, chunks.len());
-            
+            info!(
+                "Upload progress: {:.1}% ({}/{})",
+                progress,
+                completed_chunks,
+                chunks.len()
+            );
+
             // Store the final response (last chunk)
             if index == chunks.len() - 1 {
                 final_response = Some(response);
             }
         }
-        
+
         // Parse the final response to get the DriveItem
         if let Some(response) = final_response {
             let status = response.status();
             if status.is_success() || status.as_u16() == 201 {
-                let drive_item: DriveItem = response.json().await
+                let drive_item: DriveItem = response
+                    .json()
+                    .await
                     .context("Failed to parse final upload response")?;
                 return Ok(drive_item);
             } else {
                 let error_text = response.text().await.unwrap_or_default();
-                return Err(anyhow!("Final upload failed with status {}: {}", 
-                                 status, error_text));
+                return Err(anyhow!(
+                    "Final upload failed with status {}: {}",
+                    status,
+                    error_text
+                ));
             }
         }
-        
+
         // Fallback: create a basic DriveItem if we can't parse the response
         warn!("Could not parse final upload response, creating basic DriveItem");
         Ok(DriveItem {
@@ -233,20 +253,28 @@ impl OneDriveClient {
         parent_id: &str,
         config: Option<UploadSessionConfig>,
     ) -> Result<UploadResult> {
-        info!("Starting large file upload: {} to parent {}", file_name, parent_id);
-        
+        info!(
+            "Starting large file upload: {} to parent {}",
+            file_name, parent_id
+        );
+
         let session = self.create_upload_session(parent_id, file_name).await?;
-        
-        let drive_item = self.upload_large_file(&session.upload_url, file_data, config).await?;
-        
+
+        let drive_item = self
+            .upload_large_file(&session.upload_url, file_data, config)
+            .await?;
+
         let result = UploadResult {
             onedrive_id: drive_item.id.clone(),
             etag: drive_item.etag,
             web_url: None,
             size: drive_item.size,
         };
-        
-        info!("Completed large file upload: {} -> {}", file_name, drive_item.id);
+
+        info!(
+            "Completed large file upload: {} -> {}",
+            file_name, drive_item.id
+        );
         Ok(result)
     }
 
@@ -258,19 +286,24 @@ impl OneDriveClient {
         config: Option<UploadSessionConfig>,
     ) -> Result<UploadResult> {
         info!("Starting large file update: {}", item_id);
-        
+
         let session = self.create_update_upload_session(item_id).await?;
-        
-        let drive_item = self.upload_large_file(&session.upload_url, file_data, config).await?;
-        
+
+        let drive_item = self
+            .upload_large_file(&session.upload_url, file_data, config)
+            .await?;
+
         let result = UploadResult {
             onedrive_id: drive_item.id.clone(),
             etag: drive_item.etag,
             web_url: None,
             size: drive_item.size,
         };
-        
-        info!("Completed large file update: {} -> {}", item_id, drive_item.id);
+
+        info!(
+            "Completed large file update: {} -> {}",
+            item_id, drive_item.id
+        );
         Ok(result)
     }
 
@@ -282,33 +315,43 @@ impl OneDriveClient {
         parent_id: &str,
     ) -> Result<UploadResult> {
         const LARGE_FILE_THRESHOLD: usize = 4 * 1024 * 1024; // 4MB
-        
+
         if file_data.len() > LARGE_FILE_THRESHOLD {
-            info!("File size {} bytes exceeds {} bytes, using resumable upload", 
-                  file_data.len(), LARGE_FILE_THRESHOLD);
-            self.upload_large_file_to_parent(file_data, file_name, parent_id, None).await
+            info!(
+                "File size {} bytes exceeds {} bytes, using resumable upload",
+                file_data.len(),
+                LARGE_FILE_THRESHOLD
+            );
+            self.upload_large_file_to_parent(file_data, file_name, parent_id, None)
+                .await
         } else {
-            info!("File size {} bytes is under {} bytes, using simple upload", 
-                  file_data.len(), LARGE_FILE_THRESHOLD);
-            self.upload_new_file_to_parent(file_data, file_name, parent_id).await
+            info!(
+                "File size {} bytes is under {} bytes, using simple upload",
+                file_data.len(),
+                LARGE_FILE_THRESHOLD
+            );
+            self.upload_new_file_to_parent(file_data, file_name, parent_id)
+                .await
         }
     }
 
     /// Smart update that automatically chooses between simple and resumable upload
-    pub async fn update_file_smart(
-        &self,
-        file_data: &[u8],
-        item_id: &str,
-    ) -> Result<UploadResult> {
+    pub async fn update_file_smart(&self, file_data: &[u8], item_id: &str) -> Result<UploadResult> {
         const LARGE_FILE_THRESHOLD: usize = 4 * 1024 * 1024; // 4MB
-        
+
         if file_data.len() > LARGE_FILE_THRESHOLD {
-            info!("File size {} bytes exceeds {} bytes, using resumable update", 
-                  file_data.len(), LARGE_FILE_THRESHOLD);
+            info!(
+                "File size {} bytes exceeds {} bytes, using resumable update",
+                file_data.len(),
+                LARGE_FILE_THRESHOLD
+            );
             self.update_large_file(file_data, item_id, None).await
         } else {
-            info!("File size {} bytes is under {} bytes, using simple update", 
-                  file_data.len(), LARGE_FILE_THRESHOLD);
+            info!(
+                "File size {} bytes is under {} bytes, using simple update",
+                file_data.len(),
+                LARGE_FILE_THRESHOLD
+            );
             self.upload_updated_file(file_data, item_id).await
         }
     }
@@ -321,18 +364,18 @@ impl OneDriveClient {
         config: Option<UploadSessionConfig>,
     ) -> Result<DriveItem> {
         info!("Attempting to resume upload at: {}", upload_url);
-        
+
         // Get current session status
         let status = self
             .http_client
             .get_upload_session_status(upload_url)
             .await?;
-            
+
         info!("Upload session status: {:?}", status);
-        
+
         let config = config.unwrap_or_default();
         let total_size = file_data.len() as u64;
-        
+
         // Parse next expected ranges to determine what's missing
         let mut missing_ranges = Vec::new();
         for range_str in &status.next_expected_ranges {
@@ -340,24 +383,29 @@ impl OneDriveClient {
                 missing_ranges.push((start, end));
             }
         }
-        
+
         if missing_ranges.is_empty() {
             info!("No missing ranges found, upload appears to be complete");
             // Try to get the final result
             return self.get_final_upload_result(upload_url).await;
         }
-        
+
         info!("Found {} missing ranges to upload", missing_ranges.len());
-        
+
         // Upload missing chunks
         for (start, end) in missing_ranges {
             let chunk_data = file_data[start as usize..=end as usize].to_vec();
-            let chunk = FileChunk { start, end, data: chunk_data };
-            
-            self.upload_chunk_with_retry(upload_url, &chunk, total_size, &config).await?;
+            let chunk = FileChunk {
+                start,
+                end,
+                data: chunk_data,
+            };
+
+            self.upload_chunk_with_retry(upload_url, &chunk, total_size, &config)
+                .await?;
             info!("Uploaded missing chunk: bytes {}-{}", start, end);
         }
-        
+
         // Get final result
         self.get_final_upload_result(upload_url).await
     }
@@ -368,7 +416,7 @@ impl OneDriveClient {
         if parts.len() != 2 {
             return None;
         }
-        
+
         let start = parts[0].parse::<u64>().ok()?;
         let end = if parts[1].is_empty() {
             // Open range like "12345-", use a reasonable default
@@ -376,7 +424,7 @@ impl OneDriveClient {
         } else {
             parts[1].parse::<u64>().ok()?
         };
-        
+
         Some((start, end))
     }
 
@@ -388,13 +436,13 @@ impl OneDriveClient {
             .http_client
             .get_upload_session_status(upload_url)
             .await?;
-            
+
         if status.next_expected_ranges.is_empty() {
             // Upload is complete, but we need to get the DriveItem
             // This is a limitation - we need to store the DriveItem from the final chunk response
             warn!("Upload appears complete but DriveItem not available from status");
         }
-        
+
         // For now, return a placeholder - in a real implementation,
         // we would store the DriveItem from the final chunk response
         Ok(DriveItem {
@@ -419,19 +467,17 @@ impl OneDriveClient {
         let test_data = vec![0u8; 5 * 1024 * 1024]; // 5MB file
         let test_filename = "test_large_file.bin";
         let test_parent_id = "root"; // Use root as parent
-        
+
         info!("Testing resumable upload with {} bytes", test_data.len());
-        
+
         // Test smart upload (should automatically choose resumable)
-        let result = self.upload_file_smart(&test_data, test_filename, test_parent_id).await?;
-        
+        let result = self
+            .upload_file_smart(&test_data, test_filename, test_parent_id)
+            .await?;
+
         info!("Smart upload test completed: {:?}", result);
         Ok(())
     }
-
- 
-
-   
 
     /// Upload a file to a specific parent folder by parent ID (correct Microsoft Graph API format)
     pub async fn upload_new_file_to_parent(
@@ -442,7 +488,10 @@ impl OneDriveClient {
     ) -> Result<UploadResult> {
         let auth_header = self.auth_header().await?;
         let upload_url = format!("/me/drive/items/{}:/{}:/content", parent_id, file_name);
-        info!("Uploading file: {} to parent {} using URL: {}", file_name, parent_id, upload_url);
+        info!(
+            "Uploading file: {} to parent {} using URL: {}",
+            file_name, parent_id, upload_url
+        );
 
         let response = self
             .http_client
@@ -463,12 +512,15 @@ impl OneDriveClient {
             size: item.size,
         };
 
-        info!("Uploaded file: {} to parent {} -> {}", file_name, parent_id, item.id);
+        info!(
+            "Uploaded file: {} to parent {} -> {}",
+            file_name, parent_id, item.id
+        );
         Ok(result)
     }
 
     /// Update an existing file on OneDrive and return the update result
-    
+
     pub async fn upload_updated_file(
         &self,
         file_data: &[u8],
@@ -500,10 +552,6 @@ impl OneDriveClient {
         Ok(result)
     }
 
-  
-
-   
-
     /// Get item by OneDrive ID
     pub async fn get_item_by_id(&self, item_id: &str) -> Result<DriveItem> {
         let auth_header = self.auth_header().await?;
@@ -519,17 +567,17 @@ impl OneDriveClient {
     }
 
     /// Delete an item by path and return the delete result
-    
+
     pub async fn delete_item(&self, path: &str) -> Result<DeleteResult> {
         let auth_header = self.auth_header().await?;
-        
+
         // Strip /drive/root: prefix if present and encode the relative path
         let relative_path = if path.starts_with("/drive/root:") {
             &path[12..] // Remove "/drive/root:" prefix
         } else {
             path
         };
-        
+
         let encoded_path = urlencoding::encode(relative_path);
         let url = format!("/me/drive/root:{}", encoded_path);
 
@@ -549,7 +597,7 @@ impl OneDriveClient {
     }
 
     /// Create a folder and return the creation result
-    
+
     pub async fn create_folder(
         &self,
         parent_path: &str,
@@ -576,12 +624,8 @@ impl OneDriveClient {
     }
 
     /// Move an item to a new parent folder
-    
-    pub async fn move_item(
-        &self,
-        item_id: &str,
-        new_parent_id: &str,
-    ) -> Result<DriveItem> {
+
+    pub async fn move_item(&self, item_id: &str, new_parent_id: &str) -> Result<DriveItem> {
         let auth_header = self.auth_header().await?;
         let url = format!("/me/drive/items/{}/move", item_id);
         let body = self.build_move_item_body(new_parent_id);
@@ -597,7 +641,7 @@ impl OneDriveClient {
     }
 
     /// Build create folder URL
-    
+
     fn build_create_folder_url(&self, parent_path: &str) -> Result<String> {
         let url = if parent_path == "/" || parent_path == "/drive/root:" {
             "/me/drive/root/children".to_string()
@@ -608,7 +652,7 @@ impl OneDriveClient {
             } else {
                 parent_path
             };
-            
+
             let encoded_path = urlencoding::encode(relative_path);
             format!("/me/drive/root:{}:/children", encoded_path)
         };
@@ -617,7 +661,7 @@ impl OneDriveClient {
     }
 
     /// Build create folder request body
-    
+
     fn build_create_folder_body(&self, folder_name: &str) -> serde_json::Value {
         serde_json::json!({
             "name": folder_name,
@@ -627,7 +671,7 @@ impl OneDriveClient {
     }
 
     /// Build move item request body
-    
+
     fn build_move_item_body(&self, new_parent_id: &str) -> serde_json::Value {
         serde_json::json!({
             "parentReference": {
@@ -637,12 +681,8 @@ impl OneDriveClient {
     }
 
     /// Rename an item (change its name)
-    
-    pub async fn rename_item(
-        &self,
-        item_id: &str,
-        new_name: &str,
-    ) -> Result<DriveItem> {
+
+    pub async fn rename_item(&self, item_id: &str, new_name: &str) -> Result<DriveItem> {
         let auth_header = self.auth_header().await?;
         let url = format!("/me/drive/items/{}", item_id);
         let body = self.build_rename_item_body(new_name);
@@ -661,7 +701,7 @@ impl OneDriveClient {
     }
 
     /// Build rename item request body
-    
+
     fn build_rename_item_body(&self, new_name: &str) -> serde_json::Value {
         serde_json::json!({
             "name": new_name
@@ -669,7 +709,7 @@ impl OneDriveClient {
     }
 
     /// Get delta changes for a folder using delta token
-    
+
     pub async fn get_delta_changes(
         &self,
 
@@ -702,7 +742,6 @@ impl OneDriveClient {
             format!("/me/drive/root/delta")
         }
     }
-
 
     /// Download file with optional range and thumbnail support
     pub async fn download_file_with_options(

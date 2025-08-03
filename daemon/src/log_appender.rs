@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
 use log::LevelFilter;
 use log4rs::append::console::ConsoleAppender;
-use log4rs::append::rolling_file::RollingFileAppender;
 use log4rs::append::rolling_file::policy::compound::{
-    CompoundPolicy, roll::fixed_window::FixedWindowRoller, trigger::size::SizeTrigger,
+    roll::fixed_window::FixedWindowRoller, trigger::size::SizeTrigger, CompoundPolicy,
 };
+use log4rs::append::rolling_file::RollingFileAppender;
 use log4rs::config::{Appender, Config, Root};
 use log4rs::encode::pattern::PatternEncoder;
 use std::fs;
@@ -110,8 +110,7 @@ fn build_log_config(stdout: ConsoleAppender, file: RollingFileAppender) -> Resul
                 .appender("stdout")
                 .appender("file")
                 .additive(false)
-                .build("sqlx_core::logger", LevelFilter::Off)
-                
+                .build("sqlx_core::logger", LevelFilter::Off),
         )
         // Reduce FUSE library noise
         .logger(
@@ -119,7 +118,7 @@ fn build_log_config(stdout: ConsoleAppender, file: RollingFileAppender) -> Resul
                 .appender("stdout")
                 .appender("file")
                 .additive(false)
-                .build("fuser", LevelFilter::Warn) // Only show warnings and errors from FUSE
+                .build("fuser", LevelFilter::Warn), // Only show warnings and errors from FUSE
         )
         // Reduce HTTP client noise
         .logger(
@@ -127,7 +126,7 @@ fn build_log_config(stdout: ConsoleAppender, file: RollingFileAppender) -> Resul
                 .appender("stdout")
                 .appender("file")
                 .additive(false)
-                .build("reqwest", LevelFilter::Warn) // Only show warnings and errors from HTTP client
+                .build("reqwest", LevelFilter::Warn), // Only show warnings and errors from HTTP client
         )
         // Reduce tokio noise
         .logger(
@@ -135,14 +134,14 @@ fn build_log_config(stdout: ConsoleAppender, file: RollingFileAppender) -> Resul
                 .appender("stdout")
                 .appender("file")
                 .additive(false)
-                .build("tokio", LevelFilter::Warn) // Only show warnings and errors from tokio
+                .build("tokio", LevelFilter::Warn), // Only show warnings and errors from tokio
         )
         .logger(
             log4rs::config::Logger::builder()
                 .appender("stdout")
                 .appender("file")
                 .additive(false)
-                .build("zbus", LevelFilter::Warn) // Only show warnings and errors from zbus
+                .build("zbus", LevelFilter::Warn), // Only show warnings and errors from zbus
         )
         .build(
             Root::builder()

@@ -2,9 +2,9 @@ use crate::onedrive_service::onedrive_models::{DriveItem, ParentReference};
 use anyhow::{Context, Result};
 use chrono::{Duration, Utc};
 use log::{debug, warn};
+use serde::{Deserialize, Serialize};
 use sqlx::{Pool, Row, Sqlite};
 use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProcessingStatus {
@@ -49,8 +49,8 @@ impl ProcessingStatus {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChangeType {
-    Local,   // Local file system change
-    Remote,  // OneDrive API change
+    Local,  // Local file system change
+    Remote, // OneDrive API change
 }
 
 impl ChangeType {
@@ -97,13 +97,13 @@ impl ChangeOperation {
             "create" => Some(ChangeOperation::Create),
             "update" => Some(ChangeOperation::Update),
             "delete" => Some(ChangeOperation::Delete),
-            "move" => Some(ChangeOperation::Move { 
-                old_path: String::new(), 
-                new_path: String::new() 
+            "move" => Some(ChangeOperation::Move {
+                old_path: String::new(),
+                new_path: String::new(),
             }),
-            "rename" => Some(ChangeOperation::Rename { 
-                old_name: String::new(), 
-                new_name: String::new() 
+            "rename" => Some(ChangeOperation::Rename {
+                old_name: String::new(),
+                new_name: String::new(),
             }),
             "no_change" => Some(ChangeOperation::NoChange),
             _ => None,
@@ -115,17 +115,17 @@ impl ChangeOperation {
 pub enum UserDecision {
     UseRemote,
     UseLocal,
-    
+
     Skip,
     Rename { new_name: String },
 }
-
+#[allow(dead_code)]
 impl UserDecision {
     pub fn as_str(&self) -> &'static str {
         match self {
             UserDecision::UseRemote => "use_remote",
             UserDecision::UseLocal => "use_local",
-            
+
             UserDecision::Skip => "skip",
             UserDecision::Rename { .. } => "rename",
         }
@@ -135,10 +135,10 @@ impl UserDecision {
         match s {
             "use_remote" => Some(UserDecision::UseRemote),
             "use_local" => Some(UserDecision::UseLocal),
-            
+
             "skip" => Some(UserDecision::Skip),
-            "rename" => Some(UserDecision::Rename { 
-                new_name: String::new() 
+            "rename" => Some(UserDecision::Rename {
+                new_name: String::new(),
             }),
             _ => None,
         }
@@ -147,9 +147,9 @@ impl UserDecision {
 
 #[derive(Debug, Clone)]
 pub enum ValidationError {
-    TreeInvalid(String),      // Parent folder doesn't exist
-    NameCollision(String),    // File with same name exists
-    ContentConflict(String),  // File modified in both places
+    TreeInvalid(String),     // Parent folder doesn't exist
+    NameCollision(String),   // File with same name exists
+    ContentConflict(String), // File modified in both places
 }
 
 impl ValidationError {
@@ -177,10 +177,10 @@ pub enum ValidationResult {
 
 #[derive(Debug, Clone)]
 pub struct ProcessingItem {
-    pub id: Option<i64>,  // Auto-incremented database ID
+    pub id: Option<i64>, // Auto-incremented database ID
     pub drive_item: DriveItem,
     pub status: ProcessingStatus,
-    
+
     pub error_message: Option<String>,
     pub last_status_update: Option<String>,
     pub retry_count: i32,
@@ -192,14 +192,14 @@ pub struct ProcessingItem {
     pub validation_errors: Vec<String>,
     pub user_decision: Option<UserDecision>,
 }
-
+#[allow(dead_code)]
 impl ProcessingItem {
     pub fn new(drive_item: DriveItem) -> Self {
         Self {
             id: None,
             drive_item,
             status: ProcessingStatus::New,
-            
+
             error_message: None,
             last_status_update: None,
             retry_count: 0,
@@ -217,7 +217,7 @@ impl ProcessingItem {
             id: None,
             drive_item,
             status: ProcessingStatus::New,
-            
+
             error_message: None,
             last_status_update: None,
             retry_count: 0,
@@ -235,9 +235,13 @@ impl ProcessingItem {
             id: None,
             drive_item,
             status: ProcessingStatus::New,
-            
+
             error_message: None,
-            last_status_update: Some(( Utc::now() - Duration::seconds(6)).format("%Y-%m-%d %H:%M:%S").to_string()),// shoudl be now - 6 seconds to make it valid 
+            last_status_update: Some(
+                (Utc::now() - Duration::seconds(6))
+                    .format("%Y-%m-%d %H:%M:%S")
+                    .to_string(),
+            ), // shoudl be now - 6 seconds to make it valid
             retry_count: 0,
             priority: 0,
             change_type: ChangeType::Local,
@@ -264,7 +268,7 @@ impl ProcessingItem {
 pub struct ProcessingItemRepository {
     pool: Pool<Sqlite>,
 }
-
+#[allow(dead_code)]
 impl ProcessingItemRepository {
     pub fn new(pool: Pool<Sqlite>) -> Self {
         Self { pool }
@@ -272,11 +276,23 @@ impl ProcessingItemRepository {
 
     /// Store a processing item in the database
     pub async fn store_processing_item(&self, item: &ProcessingItem) -> Result<i64> {
-        let parent_id = item.drive_item.parent_reference.as_ref().map(|p| p.id.clone());
-        let parent_path = item.drive_item.parent_reference.as_ref().and_then(|p| p.path.clone());
-        
+        let parent_id = item
+            .drive_item
+            .parent_reference
+            .as_ref()
+            .map(|p| p.id.clone());
+        let parent_path = item
+            .drive_item
+            .parent_reference
+            .as_ref()
+            .and_then(|p| p.path.clone());
+
         let validation_errors_json = serde_json::to_string(&item.validation_errors)?;
-        let user_decision_json = item.user_decision.as_ref().map(|d| serde_json::to_string(d)).transpose()?;
+        let user_decision_json = item
+            .user_decision
+            .as_ref()
+            .map(|d| serde_json::to_string(d))
+            .transpose()?;
 
         let result = sqlx::query(
             r#"
@@ -295,13 +311,17 @@ impl ProcessingItemRepository {
         .bind(&item.drive_item.created_date)
         .bind(item.drive_item.size.map(|s| s as i64))
         .bind(item.drive_item.folder.is_some())
-        .bind(item.drive_item.file.as_ref().and_then(|f| f.mime_type.clone()))
+        .bind(
+            item.drive_item
+                .file
+                .as_ref()
+                .and_then(|f| f.mime_type.clone()),
+        )
         .bind(&item.drive_item.download_url)
         .bind(item.drive_item.deleted.is_some())
         .bind(parent_id)
         .bind(parent_path)
         .bind(item.status.as_str())
-        
         .bind(&item.error_message)
         .bind(&item.last_status_update)
         .bind(item.retry_count)
@@ -396,7 +416,10 @@ impl ProcessingItemRepository {
     }
 
     /// Get processing items by status
-    pub async fn get_processing_items_by_status(&self, status: &ProcessingStatus) -> Result<Vec<ProcessingItem>> {
+    pub async fn get_processing_items_by_status(
+        &self,
+        status: &ProcessingStatus,
+    ) -> Result<Vec<ProcessingItem>> {
         let rows = sqlx::query(
             r#"
             SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
@@ -451,7 +474,10 @@ impl ProcessingItemRepository {
         .execute(&self.pool)
         .await?;
 
-        debug!("Updated processing item {} error message: {}", id, error_message);
+        debug!(
+            "Updated processing item {} error message: {}",
+            id, error_message
+        );
         Ok(())
     }
 
@@ -473,7 +499,6 @@ impl ProcessingItemRepository {
     }
 
     /// Update local path for a processing item
-   
 
     /// Delete a processing item by ID
     pub async fn delete_processing_item(&self, id: &str) -> Result<()> {
@@ -506,7 +531,10 @@ impl ProcessingItemRepository {
         debug!("Cleared all processing items");
         Ok(())
     }
-    pub async fn get_next_unprocessed_item_by_change_type(&self, change_type: &ChangeType) -> Result<Option<ProcessingItem>> {
+    pub async fn get_next_unprocessed_item_by_change_type(
+        &self,
+        change_type: &ChangeType,
+    ) -> Result<Option<ProcessingItem>> {
         let row = sqlx::query(
             r#"
             SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
@@ -533,7 +561,10 @@ impl ProcessingItemRepository {
     }
 
     /// Get unprocessed items by change type (Remote first, then Local)
-    pub async fn get_unprocessed_items_by_change_type(&self, change_type: &ChangeType) -> Result<Vec<ProcessingItem>> {
+    pub async fn get_unprocessed_items_by_change_type(
+        &self,
+        change_type: &ChangeType,
+    ) -> Result<Vec<ProcessingItem>> {
         let rows = sqlx::query(
             r#"
             SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
@@ -678,7 +709,10 @@ impl ProcessingItemRepository {
         .execute(&self.pool)
         .await?;
 
-        debug!("Updated processing item {} error message: {}", id, error_message);
+        debug!(
+            "Updated processing item {} error message: {}",
+            id, error_message
+        );
         Ok(())
     }
 
@@ -724,12 +758,19 @@ impl ProcessingItemRepository {
         .execute(&self.pool)
         .await?;
 
-        debug!("Updated OneDrive ID in processing item: {} -> {}", old_id, new_id);
+        debug!(
+            "Updated OneDrive ID in processing item: {} -> {}",
+            old_id, new_id
+        );
         Ok(())
     }
 
     /// Update parent ID for all processing items that have a specific parent ID
-    pub async fn update_parent_id_for_children(&self, old_parent_id: &str, new_parent_id: &str) -> Result<()> {
+    pub async fn update_parent_id_for_children(
+        &self,
+        old_parent_id: &str,
+        new_parent_id: &str,
+    ) -> Result<()> {
         sqlx::query(
             r#"
             UPDATE processing_items 
@@ -742,18 +783,35 @@ impl ProcessingItemRepository {
         .execute(&self.pool)
         .await?;
 
-        debug!("Updated parent ID for processing items: {} -> {}", old_parent_id, new_parent_id);
+        debug!(
+            "Updated parent ID for processing items: {} -> {}",
+            old_parent_id, new_parent_id
+        );
         Ok(())
     }
 
     /// Update a processing item with new drive item data (used after OneDrive operations)
     pub async fn update_processing_item(&self, item: &ProcessingItem) -> Result<()> {
-        let db_id = item.id.ok_or_else(|| anyhow::anyhow!("ProcessingItem has no database ID"))?;
-        let parent_id = item.drive_item.parent_reference.as_ref().map(|p| p.id.clone());
-        let parent_path = item.drive_item.parent_reference.as_ref().and_then(|p| p.path.clone());
-        
+        let db_id = item
+            .id
+            .ok_or_else(|| anyhow::anyhow!("ProcessingItem has no database ID"))?;
+        let parent_id = item
+            .drive_item
+            .parent_reference
+            .as_ref()
+            .map(|p| p.id.clone());
+        let parent_path = item
+            .drive_item
+            .parent_reference
+            .as_ref()
+            .and_then(|p| p.path.clone());
+
         let validation_errors_json = serde_json::to_string(&item.validation_errors)?;
-        let user_decision_json = item.user_decision.as_ref().map(|d| serde_json::to_string(d)).transpose()?;
+        let user_decision_json = item
+            .user_decision
+            .as_ref()
+            .map(|d| serde_json::to_string(d))
+            .transpose()?;
 
         sqlx::query(
             r#"
@@ -793,14 +851,19 @@ impl ProcessingItemRepository {
         .execute(&self.pool)
         .await?;
 
-        debug!("Updated processing item: {} ({}) with new drive item data", 
-               item.drive_item.name.as_deref().unwrap_or("unnamed"),
-               item.drive_item.id);
+        debug!(
+            "Updated processing item: {} ({}) with new drive item data",
+            item.drive_item.name.as_deref().unwrap_or("unnamed"),
+            item.drive_item.id
+        );
         Ok(())
     }
 
     /// Get all processing items that have a specific parent ID
-    pub async fn get_processing_items_by_parent_id(&self, parent_id: &str) -> Result<Vec<ProcessingItem>> {
+    pub async fn get_processing_items_by_parent_id(
+        &self,
+        parent_id: &str,
+    ) -> Result<Vec<ProcessingItem>> {
         let rows = sqlx::query(
             r#"
             SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
@@ -839,7 +902,7 @@ impl ProcessingItemRepository {
         let parent_id: Option<String> = row.try_get("parent_id")?;
         let parent_path: Option<String> = row.try_get("parent_path")?;
         let status_str: String = row.try_get("status")?;
-        
+
         let error_message: Option<String> = row.try_get("error_message")?;
         let last_status_update: Option<String> = row.try_get("last_status_update")?;
         let retry_count: i32 = row.try_get("retry_count")?;
@@ -898,8 +961,6 @@ impl ProcessingItemRepository {
         let status = ProcessingStatus::from_str(&status_str)
             .ok_or_else(|| anyhow::anyhow!("Invalid status: {}", status_str))?;
 
-        
-
         let change_type = ChangeType::from_str(&change_type_str)
             .ok_or_else(|| anyhow::anyhow!("Invalid change_type: {}", change_type_str))?;
 
@@ -924,7 +985,7 @@ impl ProcessingItemRepository {
             id: Some(db_id),
             drive_item,
             status,
-            
+
             error_message,
             last_status_update,
             retry_count,
@@ -936,7 +997,11 @@ impl ProcessingItemRepository {
             user_decision,
         })
     }
-    pub async fn get_pending_processing_item_by_drive_item_id_and_change_type(&self, drive_item_id: &str, change_type: &ChangeType) -> Result<Option<ProcessingItem>> {
+    pub async fn get_pending_processing_item_by_drive_item_id_and_change_type(
+        &self,
+        drive_item_id: &str,
+        change_type: &ChangeType,
+    ) -> Result<Option<ProcessingItem>> {
         let row = sqlx::query(
             r#"
             SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
@@ -963,7 +1028,10 @@ impl ProcessingItemRepository {
     }
 
     /// Get the latest local processing item for a drive item that can be updated (for squashing FUSE writes)
-    pub async fn get_latest_updatable_local_processing_item(&self, drive_item_id: &str) -> Result<Option<ProcessingItem>> {
+    pub async fn get_latest_updatable_local_processing_item(
+        &self,
+        drive_item_id: &str,
+    ) -> Result<Option<ProcessingItem>> {
         let row = sqlx::query(
             r#"
             SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
@@ -991,9 +1059,19 @@ impl ProcessingItemRepository {
     }
 
     /// Update a processing item with new drive item data (used for squashing FUSE writes)
-    pub async fn update_processing_item_drive_data(&self, db_id: i64, updated_drive_item: &DriveItem) -> Result<()> {
-        let parent_id = updated_drive_item.parent_reference.as_ref().map(|p| p.id.clone());
-        let parent_path = updated_drive_item.parent_reference.as_ref().and_then(|p| p.path.clone());
+    pub async fn update_processing_item_drive_data(
+        &self,
+        db_id: i64,
+        updated_drive_item: &DriveItem,
+    ) -> Result<()> {
+        let parent_id = updated_drive_item
+            .parent_reference
+            .as_ref()
+            .map(|p| p.id.clone());
+        let parent_path = updated_drive_item
+            .parent_reference
+            .as_ref()
+            .and_then(|p| p.path.clone());
 
         sqlx::query(
             r#"
@@ -1010,7 +1088,12 @@ impl ProcessingItemRepository {
         .bind(&updated_drive_item.created_date)
         .bind(updated_drive_item.size.map(|s| s as i64))
         .bind(updated_drive_item.folder.is_some())
-        .bind(updated_drive_item.file.as_ref().and_then(|f| f.mime_type.clone()))
+        .bind(
+            updated_drive_item
+                .file
+                .as_ref()
+                .and_then(|f| f.mime_type.clone()),
+        )
         .bind(&updated_drive_item.download_url)
         .bind(updated_drive_item.deleted.is_some())
         .bind(parent_id)
@@ -1019,7 +1102,10 @@ impl ProcessingItemRepository {
         .execute(&self.pool)
         .await?;
 
-        debug!("Updated processing item {} with new drive data for squashing", db_id);
+        debug!(
+            "Updated processing item {} with new drive data for squashing",
+            db_id
+        );
         Ok(())
     }
-} 
+}

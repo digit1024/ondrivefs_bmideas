@@ -1,25 +1,26 @@
 //! Main FUSE filesystem implementation
 
+use crate::file_manager::DefaultFileManager;
 use crate::fuse::utils::sync_await;
-use crate::persistency::drive_item_with_fuse_repository::DriveItemWithFuseRepository;
 use crate::persistency::cached_drive_item_with_fuse_repository::CachedDriveItemWithFuseRepository;
 use crate::persistency::download_queue_repository::DownloadQueueRepository;
-use crate::file_manager::DefaultFileManager;
+use crate::persistency::drive_item_with_fuse_repository::DriveItemWithFuseRepository;
 use anyhow::Result;
 use log::{info, warn};
 use sqlx::Pool;
 use std::sync::Arc;
 
+use crate::fuse::database::DatabaseManager;
 use crate::fuse::file_handles::FileHandleManager;
 use crate::fuse::file_operations::FileOperationsManager;
-use crate::fuse::database::DatabaseManager;
 
 /// OneDrive FUSE filesystem implementation using DriveItemWithFuse
 pub struct OneDriveFuse {
     drive_item_with_fuse_repo: Arc<CachedDriveItemWithFuseRepository>,
     file_manager: Arc<DefaultFileManager>,
+    #[allow(dead_code)]
     app_state: Arc<crate::app_state::AppState>,
-    
+
     // Managers for different responsibilities
     file_handle_manager: FileHandleManager,
     file_operations_manager: FileOperationsManager,
@@ -29,26 +30,22 @@ pub struct OneDriveFuse {
 impl OneDriveFuse {
     /// Create a new OneDrive FUSE filesystem
     pub async fn new(
-        pool: Pool<sqlx::Sqlite>, 
-        download_queue_repo: DownloadQueueRepository, 
+        pool: Pool<sqlx::Sqlite>,
+        download_queue_repo: DownloadQueueRepository,
         file_manager: Arc<DefaultFileManager>,
         app_state: Arc<crate::app_state::AppState>,
     ) -> Result<Self> {
-        let drive_item_with_fuse_repo = Arc::new(
-            CachedDriveItemWithFuseRepository::new_with_default_ttl(
-                Arc::new(DriveItemWithFuseRepository::new(pool))
-            )
-        );
-        
-        let file_handle_manager = FileHandleManager::new(
-            file_manager.clone(),
-            app_state.clone(),
-        );
-        
+        let drive_item_with_fuse_repo =
+            Arc::new(CachedDriveItemWithFuseRepository::new_with_default_ttl(
+                Arc::new(DriveItemWithFuseRepository::new(pool)),
+            ));
+
+        let file_handle_manager = FileHandleManager::new(file_manager.clone(), app_state.clone());
+
         let file_operations_manager = FileOperationsManager::new(file_manager.clone());
-        
+
         let database_manager = DatabaseManager::new(drive_item_with_fuse_repo.clone());
-        
+
         Ok(Self {
             drive_item_with_fuse_repo,
             file_manager,
@@ -64,20 +61,25 @@ impl OneDriveFuse {
         info!("Initializing OneDrive FUSE filesystem...");
 
         // Check if root directory exists in database
-        let root_item = crate::fuse::utils::sync_await(self.drive_item_with_fuse_repo.get_drive_item_with_fuse_by_virtual_ino(1))?;
-        
+        let root_item = crate::fuse::utils::sync_await(
+            self.drive_item_with_fuse_repo
+                .get_drive_item_with_fuse_by_virtual_ino(1),
+        )?;
+
         if root_item.is_none() {
             // Database not initialized - root should come from delta sync
             // For now, we'll create a temporary stub for FUSE operations
             // This stub is NOT stored in DB and will be replaced by real OneDrive root
             warn!("Root directory not found in database - using temporary stub. Run delta sync to populate real OneDrive data.");
-            
+
             // Note: We don't store this stub in the database
             // The real root will be populated by delta sync process
         } else {
-            info!("Found root directory: {} (OneDrive ID: {})", 
-                  root_item.as_ref().unwrap().name().unwrap_or("root"),
-                  root_item.as_ref().unwrap().id());
+            info!(
+                "Found root directory: {} (OneDrive ID: {})",
+                root_item.as_ref().unwrap().name().unwrap_or("root"),
+                root_item.as_ref().unwrap().id()
+            );
         }
 
         info!("FUSE filesystem initialized successfully");
@@ -85,7 +87,7 @@ impl OneDriveFuse {
     }
 
     // Delegate methods to appropriate managers
-    
+
     /// Get file handle manager
     pub fn file_handles(&self) -> &FileHandleManager {
         &self.file_handle_manager
@@ -112,22 +114,30 @@ impl OneDriveFuse {
     }
 
     /// Get app state
+    #[allow(dead_code)]
     pub fn app_state(&self) -> &Arc<crate::app_state::AppState> {
         &self.app_state
     }
-    pub fn add_dot_entries_if_needed(&self, ino: u64,  reply: &mut fuser::ReplyDirectory, offset: i64) -> bool {
-        if offset <2  {
+    pub fn add_dot_entries_if_needed(
+        &self,
+        ino: u64,
+        reply: &mut fuser::ReplyDirectory,
+        offset: i64,
+    ) -> bool {
+        if offset < 2 {
             // We need to add at least .
-            let item =  sync_await(self.database().get_item_by_ino(ino)).unwrap().unwrap();
+            let item = sync_await(self.database().get_item_by_ino(ino))
+                .unwrap()
+                .unwrap();
             let dot_ino = item.virtual_ino().unwrap_or(ino);
             let _r = reply.add(dot_ino, 1, fuser::FileType::Directory, ".".to_string());
             //Assuming tht buffer cannot get full so fast
             if offset == 1 {
                 let dotdot_ino = item.parent_ino().unwrap_or(1);
-                let _r =reply.add(dotdot_ino, 2, fuser::FileType::Directory, "..".to_string());
+                let _r = reply.add(dotdot_ino, 2, fuser::FileType::Directory, "..".to_string());
             }
             return true;
         }
         return false;
-     }
-} 
+    }
+}

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::{sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
@@ -6,21 +7,25 @@ use log::{debug, error, info, warn};
 use crate::{
     app_state::AppState,
     onedrive_service::onedrive_models::DriveItem,
-    persistency::{download_queue_repository::DownloadQueueRepository, drive_item_with_fuse_repository::DriveItemWithFuseRepository, processing_item_repository::{ProcessingItem, ProcessingItemRepository}, sync_state_repository::SyncStateRepository},
+    persistency::{
+        download_queue_repository::DownloadQueueRepository,
+        drive_item_with_fuse_repository::DriveItemWithFuseRepository,
+        processing_item_repository::{ProcessingItem, ProcessingItemRepository},
+        sync_state_repository::SyncStateRepository,
+    },
     scheduler::{PeriodicTask, TaskMetrics},
 };
 
 use onedrive_sync_lib::notifications::{NotificationSender, NotificationUrgency};
 
 /// Default sync interval in seconds
-const DEFAULT_SYNC_INTERVAL_SECS: u64 = 30; 
+const DEFAULT_SYNC_INTERVAL_SECS: u64 = 30;
 
 /// Default metrics configuration
 const DEFAULT_METRICS_WINDOW: usize = 5;
 const DEFAULT_SLOW_THRESHOLD_SECS: u64 = 1;
 
 /// OneDrive API path prefix to strip
-const DRIVE_ROOT_PREFIX: &str = "/drive/root:/";
 
 /// Change types for delta synchronization
 #[derive(Debug, Clone, PartialEq)]
@@ -47,11 +52,12 @@ pub struct SyncCycle {
 impl SyncCycle {
     /// Create a new sync cycle
     pub fn new(app_state: Arc<AppState>) -> Self {
-        let processing_repo = app_state.persistency().processing_item_repository() ;
-        let drive_item_with_fuse_repo = app_state.persistency().drive_item_with_fuse_repository() ;
-        Self { app_state, 
-        processing_repo, 
-        drive_item_with_fuse_repo
+        let processing_repo = app_state.persistency().processing_item_repository();
+        let drive_item_with_fuse_repo = app_state.persistency().drive_item_with_fuse_repository();
+        Self {
+            app_state,
+            processing_repo,
+            drive_item_with_fuse_repo,
         }
     }
 
@@ -71,15 +77,15 @@ impl SyncCycle {
             task: Box::new(move || {
                 let app_state = app_state.clone();
                 Box::pin(async move {
-                                    // Execute sync cycle with panic recovery
-                let sync_cycle = SyncCycle::new(app_state);
-                let result = sync_cycle.run().await;
-                
-                if let Err(ref e) = result {
-                    error!("Sync cycle failed: {}", e);
-                }
-                
-                result
+                    // Execute sync cycle with panic recovery
+                    let sync_cycle = SyncCycle::new(app_state);
+                    let result = sync_cycle.run().await;
+
+                    if let Err(ref e) = result {
+                        error!("Sync cycle failed: {}", e);
+                    }
+
+                    result
                 })
             }),
         };
@@ -162,14 +168,11 @@ impl SyncCycle {
                 Err(e) => return Err(e.context("Failed to get delta changes")),
             }
         }
-   
-
 
         Ok(all_items)
     }
 
     /// Detect change type based on OneDrive delta response and existing DB state
-
 
     /// Check if parent ID changed (indicates move)
     fn parent_id_changed(&self, existing: &DriveItem, new: &DriveItem) -> bool {
@@ -179,27 +182,30 @@ impl SyncCycle {
 
     /// Check if etag changed (indicates file modification)
     fn some_attribute_changed(&self, existing: &DriveItem, new: &DriveItem) -> bool {
-        
         let etag_changed = existing.etag != new.etag;
         let name_changed = existing.name != new.name;
         let size_changed = existing.size != new.size;
         let last_modified_changed = existing.last_modified != new.last_modified;
         let created_date_changed = existing.created_date != new.created_date;
-        
-        if etag_changed || name_changed || size_changed || last_modified_changed || created_date_changed {
+
+        if etag_changed
+            || name_changed
+            || size_changed
+            || last_modified_changed
+            || created_date_changed
+        {
             info!("🔄 Item changed: {} (etag: {}, name: {}, size: {}, last_modified: {}, created_date: {})", 
                    new.name.as_deref().unwrap_or("unnamed"),
                    etag_changed, name_changed, size_changed, last_modified_changed, created_date_changed);
             return true;
         } else {
-            debug!("✅ Item unchanged: {} (etag matches)", new.name.as_deref().unwrap_or("unnamed"));
+            debug!(
+                "✅ Item unchanged: {} (etag matches)",
+                new.name.as_deref().unwrap_or("unnamed")
+            );
             return false;
         }
     }
-
-
-
-    
 
     /// Process download queue
     async fn process_download_queue(&self) -> Result<()> {
@@ -220,33 +226,49 @@ impl SyncCycle {
                         .await?;
                     info!("✅ Download completed: {}", drive_item_id);
 
-                    let drive_item_with_fuse_repo = DriveItemWithFuseRepository::new(self.app_state.persistency().pool().clone());
-                    let name = drive_item_with_fuse_repo.get_drive_item_with_fuse(&drive_item_id).await?.unwrap().drive_item.name.unwrap_or("unnamed".to_string());
+                    let drive_item_with_fuse_repo = DriveItemWithFuseRepository::new(
+                        self.app_state.persistency().pool().clone(),
+                    );
+                    let name = drive_item_with_fuse_repo
+                        .get_drive_item_with_fuse(&drive_item_id)
+                        .await?
+                        .unwrap()
+                        .drive_item
+                        .name
+                        .unwrap_or("unnamed".to_string());
 
-                    
                     let notification_sender = NotificationSender::new().await;
                     if let Ok(sender) = notification_sender {
                         let filename = name;
-                        let _ = sender.send_notification(
-                            "Open OneDrive",
-                            0,
-                            "open-onedrive", 
-                            "Open OneDrive",
-                            &format!("File {} finished downloading", filename),
-                            vec![],
-                            vec![("urgency", &NotificationUrgency::Normal.to_u8().to_string())],
-                            5000,
-                        ).await;
+                        let _ = sender
+                            .send_notification(
+                                "Open OneDrive",
+                                0,
+                                "open-onedrive",
+                                "Open OneDrive",
+                                &format!("File {} finished downloading", filename),
+                                vec![],
+                                vec![("urgency", &NotificationUrgency::Normal.to_u8().to_string())],
+                                5000,
+                            )
+                            .await;
                     }
                     // Get the inode for this file
-                    let drive_item_with_fuse_repo = DriveItemWithFuseRepository::new(self.app_state.persistency().pool().clone());
-                    if let Ok(Some(item)) = drive_item_with_fuse_repo.get_drive_item_with_fuse(&drive_item_id).await {
+                    let drive_item_with_fuse_repo = DriveItemWithFuseRepository::new(
+                        self.app_state.persistency().pool().clone(),
+                    );
+                    if let Ok(Some(item)) = drive_item_with_fuse_repo
+                        .get_drive_item_with_fuse(&drive_item_id)
+                        .await
+                    {
                         if let Some(ino) = item.virtual_ino() {
                             // Move the file to the local folder using inode
-                            self.app_state.file_manager.move_downloaded_file_to_local_folder(ino).await?;
+                            self.app_state
+                                .file_manager
+                                .move_downloaded_file_to_local_folder(ino)
+                                .await?;
                         }
                     }
-                    
                 }
                 Err(e) => {
                     download_queue_repo
@@ -285,10 +307,19 @@ impl SyncCycle {
             let data_len = download_result.file_data.len();
 
             // Get the inode for this file to determine local path
-            let drive_item_with_fuse_repo = DriveItemWithFuseRepository::new(self.app_state.persistency().pool().clone());
-            let actual_local_path = if let Ok(Some(item)) = drive_item_with_fuse_repo.get_drive_item_with_fuse(drive_item_id).await {
+            let drive_item_with_fuse_repo =
+                DriveItemWithFuseRepository::new(self.app_state.persistency().pool().clone());
+            let actual_local_path = if let Ok(Some(item)) = drive_item_with_fuse_repo
+                .get_drive_item_with_fuse(drive_item_id)
+                .await
+            {
                 if let Some(ino) = item.virtual_ino() {
-                    self.app_state.config().project_dirs.data_dir().join("downloads").join(ino.to_string())
+                    self.app_state
+                        .config()
+                        .project_dirs
+                        .data_dir()
+                        .join("downloads")
+                        .join(ino.to_string())
                 } else {
                     local_path.to_path_buf()
                 }
@@ -322,31 +353,39 @@ impl SyncCycle {
 
     /// Run the complete sync cycle
     pub async fn run(&self) -> Result<()> {
-
         info!("🔄 Starting two-way sync cycle");
 
         // Get delta changes from OneDrive
         let items = self.get_delta_changes().await?;
         info!("📊 Retrieved {} delta items", items.len());
-        
+
         // Create ProcessingItems for remote changes (skip items with no actual changes)
-        
+
         for item in &items {
             let change_operation = self.detect_change_operation(item);
-            
+
             // Skip creating processing items for items that haven't actually changed
-            if change_operation == crate::persistency::processing_item_repository::ChangeOperation::NoChange {
-                debug!("⏭️ Skipping item with no changes: {} ({})", 
-                       item.name.as_deref().unwrap_or("unnamed"), item.id);
+            if change_operation
+                == crate::persistency::processing_item_repository::ChangeOperation::NoChange
+            {
+                debug!(
+                    "⏭️ Skipping item with no changes: {} ({})",
+                    item.name.as_deref().unwrap_or("unnamed"),
+                    item.id
+                );
                 continue;
             }
-            
+
             let processing_item = ProcessingItem::new_remote(item.clone(), change_operation);
-            let _id = self.processing_repo.store_processing_item(&processing_item).await?;
+            let _id = self
+                .processing_repo
+                .store_processing_item(&processing_item)
+                .await?;
         }
 
         // Process all items using the new two-way sync system
-        let sync_processor = crate::sync::sync_processor::SyncProcessor::new(self.app_state.clone());
+        let sync_processor =
+            crate::sync::sync_processor::SyncProcessor::new(self.app_state.clone());
         sync_processor.process_all_items().await?;
         self.process_download_queue().await?;
         //self.process_upload_queue().await?;
@@ -356,13 +395,15 @@ impl SyncCycle {
     }
 
     /// Detect change operation based on OneDrive delta response and existing DB state
-    fn detect_change_operation(&self, item: &DriveItem) -> crate::persistency::processing_item_repository::ChangeOperation {
-       
-        
+    fn detect_change_operation(
+        &self,
+        item: &DriveItem,
+    ) -> crate::persistency::processing_item_repository::ChangeOperation {
         // Get existing item from DB
         let existing_item = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(
-                self.drive_item_with_fuse_repo.get_drive_item_with_fuse(&item.id)
+                self.drive_item_with_fuse_repo
+                    .get_drive_item_with_fuse(&item.id),
             )
         });
 
@@ -373,7 +414,11 @@ impl SyncCycle {
                 } else if self.parent_id_changed(&existing.drive_item, item) {
                     crate::persistency::processing_item_repository::ChangeOperation::Move {
                         old_path: existing.virtual_path().unwrap_or_default().to_string(),
-                        new_path: item.parent_reference.as_ref().and_then(|p| p.path.clone()).unwrap_or_default(),
+                        new_path: item
+                            .parent_reference
+                            .as_ref()
+                            .and_then(|p| p.path.clone())
+                            .unwrap_or_default(),
                     }
                 } else if self.some_attribute_changed(&existing.drive_item, item) {
                     crate::persistency::processing_item_repository::ChangeOperation::Update
@@ -395,6 +440,4 @@ impl SyncCycle {
             }
         }
     }
-
-
 }

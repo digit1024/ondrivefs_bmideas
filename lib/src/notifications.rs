@@ -69,7 +69,6 @@ impl NotificationSender {
         // Convert hints to DBus variant format
         let mut dbus_hints = std::collections::HashMap::new();
         for (key, value) in hints_map {
-            
             dbus_hints.insert(key, Value::Str(value.into()));
         }
 
@@ -101,7 +100,7 @@ impl NotificationSender {
     ) -> Result<()> {
         let s = urgency.to_u8().to_string();
         let hints = vec![("urgency", s.as_str())];
-        
+
         self.send_notification(
             "OneDrive Sync",
             0,
@@ -116,11 +115,7 @@ impl NotificationSender {
     }
 
     /// Send sync status notification
-    pub async fn send_sync_status_notification(
-        &self,
-        status: &str,
-        details: &str,
-    ) -> Result<()> {
+    pub async fn send_sync_status_notification(&self, status: &str, details: &str) -> Result<()> {
         let urgency = if status.contains("error") {
             NotificationUrgency::Critical
         } else if status.contains("paused") {
@@ -129,12 +124,8 @@ impl NotificationSender {
             NotificationUrgency::Normal
         };
 
-        self.send_simple_notification(
-            &format!("OneDrive Sync: {}", status),
-            details,
-            urgency,
-        )
-        .await
+        self.send_simple_notification(&format!("OneDrive Sync: {}", status), details, urgency)
+            .await
     }
 
     /// Send sync progress notification
@@ -161,12 +152,8 @@ impl NotificationSender {
 
     /// Send error notification
     pub async fn send_error_notification(&self, error: &str) -> Result<()> {
-        self.send_simple_notification(
-            "OneDrive Sync Error",
-            error,
-            NotificationUrgency::Critical,
-        )
-        .await
+        self.send_simple_notification("OneDrive Sync Error", error, NotificationUrgency::Critical)
+            .await
     }
 
     /// Send success notification
@@ -178,4 +165,4 @@ impl NotificationSender {
         )
         .await
     }
-} 
+}
