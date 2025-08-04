@@ -3,9 +3,7 @@ use crate::file_manager::FileManager;
 use crate::persistency::drive_item_with_fuse_repository::DriveItemWithFuseRepository;
 use crate::persistency::processing_item_repository::{
     ChangeOperation, ChangeType, ProcessingItem, ProcessingItemRepository, ProcessingStatus,
-    ValidationResult,
 };
-use crate::sync::conflict_resolution::ConflictResolution;
 use crate::sync::sync_strategy::SyncStrategy;
 use anyhow::{Context, Result};
 use log::{debug, error, info, warn};
@@ -74,79 +72,65 @@ impl SyncProcessor {
 
     /// Process a single item with validation and conflict resolution
     pub async fn process_single_item(&self, item: &ProcessingItem) -> Result<()> {
-        // Get the database ID for this item
         let db_id = item
             .id
             .ok_or_else(|| anyhow::anyhow!("ProcessingItem has no database ID"))?;
 
-        // Validate the item
-        let validation_result = self.strategy.validate_and_resolve_conflicts(item).await;
-
-        match validation_result {
-            ValidationResult::Valid => {
-                // Mark as validated and ready for processing
-                self.processing_repo
-                    .update_status_by_id(db_id, &ProcessingStatus::Validated)
-                    .await?;
-
-                // Process the item based on its change type and operation
-                match item.change_type {
-                    ChangeType::Remote => self.process_remote_item(item).await?,
-                    ChangeType::Local => self.process_local_item(item).await?,
-                }
-            }
-            ValidationResult::Invalid(errors) => {
-                // Mark as conflicted with error details
-                self.processing_repo
-                    .update_status_by_id(db_id, &ProcessingStatus::Conflicted)
-                    .await?;
-
-                let error_strings: Vec<String> =
-                    errors.iter().map(|e| e.human_readable()).collect();
-                self.processing_repo
-                    .update_validation_errors_by_id(db_id, &error_strings)
-                    .await?;
-
-                // Log human-readable errors
-                for error in &errors {
+        match item.change_type {
+            ChangeType::Remote => {
+                let conflicts = self.strategy.detect_remote_conflicts(item).await?;
+                if conflicts.is_empty() {
+                    self.processing_repo
+                        .update_status_by_id(db_id, &ProcessingStatus::Validated)
+                        .await?;
+                    self.process_remote_item(item).await?;
+                } else {
+                    let error_strings: Vec<String> = conflicts.iter().map(|e| e.to_string()).collect();
                     warn!(
-                        "❌ Validation error for {}: {}",
-                        item.drive_item.name.as_deref().unwrap_or("unnamed"),
-                        error.human_readable()
+                        "Remote conflicts detected for item {}: {:?}",
+                        item.drive_item.id, error_strings
                     );
+                    self.processing_repo
+                        .update_status_by_id(db_id, &ProcessingStatus::Conflicted)
+                        .await?;
+                    self.processing_repo
+                        .update_validation_errors_by_id(db_id, &error_strings)
+                        .await?;
                 }
             }
-            ValidationResult::Resolved(resolution) => {
-                // Apply the resolution
-                match resolution {
-                    ConflictResolution::UseRemote => {
-                        debug!(
-                            "✅ Using remote version for: {}",
-                            item.drive_item.name.as_deref().unwrap_or("unnamed")
-                        );
-                        self.apply_remote_resolution(item).await?;
-                    }
-                    ConflictResolution::UseLocal => {
-                        debug!(
-                            "✅ Using local version for: {}",
-                            item.drive_item.name.as_deref().unwrap_or("unnamed")
-                        );
-                        self.apply_local_resolution(item).await?;
-                    }
-                    ConflictResolution::Skip => {
-                        debug!(
-                            "⏭️ Skipping item: {}",
-                            item.drive_item.name.as_deref().unwrap_or("unnamed")
-                        );
+            ChangeType::Local => {
+                // Before processing a local change, check if a remote change for the same item is already conflicted
+                if let Ok(Some(remote_item)) = self.processing_repo.get_pending_processing_item_by_drive_item_id_and_change_type(&item.drive_item.id, &ChangeType::Remote).await {
+                    if remote_item.status == ProcessingStatus::Conflicted {
                         self.processing_repo
-                            .update_status_by_id(db_id, &ProcessingStatus::Cancelled)
+                            .update_status_by_id(db_id, &ProcessingStatus::Conflicted)
                             .await?;
+                        warn!(
+                            "Local change for item {} conflicts with a prior remote change. Both are marked as conflicted.",
+                            item.drive_item.id
+                        );
+                        return Ok(());
                     }
+                }
 
-                    ConflictResolution::Manual => {
-                        // This should not happen with automatic resolution
-                        warn!("⚠️ Manual resolution requested but not implemented");
-                    }
+                let conflicts = self.strategy.detect_local_conflicts(item).await?;
+                if conflicts.is_empty() {
+                    self.processing_repo
+                        .update_status_by_id(db_id, &ProcessingStatus::Validated)
+                        .await?;
+                    self.process_local_item(item).await?;
+                } else {
+                    let error_strings: Vec<String> = conflicts.iter().map(|e| e.to_string()).collect();
+                    warn!(
+                        "Local conflicts detected for item {}: {:?}",
+                        item.drive_item.id, error_strings
+                    );
+                    self.processing_repo
+                        .update_status_by_id(db_id, &ProcessingStatus::Conflicted)
+                        .await?;
+                    self.processing_repo
+                        .update_validation_errors_by_id(db_id, &error_strings)
+                        .await?;
                 }
             }
         }
@@ -1047,20 +1031,7 @@ impl SyncProcessor {
         Ok(())
     }
 
-    // Conflict resolution handlers
-    async fn apply_remote_resolution(&self, item: &ProcessingItem) -> Result<()> {
-        if item.change_type == crate::persistency::processing_item_repository::ChangeType::Remote {
-            //TODO: Implement remote resolution logic
-        } else {
-            //TODO: Implement local resolution logic
-        }
-        Ok(())
-    }
 
-    async fn apply_local_resolution(&self, item: &ProcessingItem) -> Result<()> {
-        // TODO: Implement local resolution logic
-        Ok(())
-    }
 
     // Helper methods adapted from delta_update.rs
     async fn setup_fuse_metadata(

@@ -145,35 +145,7 @@ impl UserDecision {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum ValidationError {
-    TreeInvalid(String),     // Parent folder doesn't exist
-    NameCollision(String),   // File with same name exists
-    ContentConflict(String), // File modified in both places
-}
 
-impl ValidationError {
-    pub fn human_readable(&self) -> String {
-        match self {
-            ValidationError::TreeInvalid(details) => {
-                format!("Parent folder was deleted or moved: {}", details)
-            }
-            ValidationError::NameCollision(details) => {
-                format!("A file with the same name already exists: {}", details)
-            }
-            ValidationError::ContentConflict(details) => {
-                format!("File was modified both locally and remotely: {}", details)
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum ValidationResult {
-    Valid,
-    Invalid(Vec<ValidationError>),
-    Resolved(crate::sync::conflict_resolution::ConflictResolution),
-}
 
 #[derive(Debug, Clone)]
 pub struct ProcessingItem {
