@@ -9,7 +9,7 @@ use cosmic::iced::{Length, Subscription};
 use cosmic::prelude::*;
 use cosmic::widget::{self, icon, menu, nav_bar};
 
-use crate::pages::{self, about_element, folders_page, queues_page, status_page};
+use crate::pages::{self, about_element, conflicts_page, folders_page, queues_page, status_page};
 use log::info;
 use std::collections::HashMap;
 
@@ -19,6 +19,7 @@ enum PageId {
     Status,
     Folders,
     Queues,
+    Conflicts,
     Logs,
 }
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
@@ -53,6 +54,7 @@ pub struct AppModel {
     status_page: pages::status_page::Page,
     folders_page: pages::folders_page::Page,
     queues_page: pages::queues_page::Page,
+    conflicts_page: pages::conflicts_page::ConflictsPage,
     logs_page: pages::logs_page::Page,
 }
 
@@ -65,6 +67,7 @@ pub enum Message {
     StatusPage(status_page::Message),
     FoldersPage(folders_page::Message),
     QueuesPage(queues_page::Message),
+    ConflictsPage(conflicts_page::Message),
     AboutElement(about_element::Message),
     LogsPage(pages::logs_page::Message),
 }
@@ -150,6 +153,11 @@ impl cosmic::Application for AppModel {
             .icon(icon::from_name("view-refresh-symbolic"));
 
         nav.insert()
+            .text("Conflicts")
+            .data::<PageId>(PageId::Conflicts)
+            .icon(icon::from_name("dialog-warning-symbolic"));
+
+        nav.insert()
             .text("Logs")
             .data::<PageId>(PageId::Logs)
             .icon(icon::from_name("text-x-generic-symbolic"));
@@ -175,6 +183,7 @@ impl cosmic::Application for AppModel {
             status_page: pages::status_page::Page::new(),
             folders_page: pages::folders_page::Page::new(),
             queues_page: pages::queues_page::Page::new(),
+            conflicts_page: pages::conflicts_page::ConflictsPage::new(),
             logs_page: pages::logs_page::Page::new(),
         };
 
@@ -252,6 +261,7 @@ impl cosmic::Application for AppModel {
             PageId::Status => self.status_page.view().map(Message::StatusPage),
             PageId::Folders => self.folders_page.view().map(Message::FoldersPage),
             PageId::Queues => self.queues_page.view().map(Message::QueuesPage),
+            PageId::Conflicts => self.conflicts_page.view().map(Message::ConflictsPage),
             PageId::Logs => self.logs_page.view().map(Message::LogsPage),
         };
 
@@ -284,6 +294,7 @@ impl cosmic::Application for AppModel {
             }
             Message::FoldersPage(folders_message) => self.folders_page.update(folders_message),
             Message::QueuesPage(queues_message) => self.queues_page.update(queues_message),
+            Message::ConflictsPage(conflicts_message) => self.conflicts_page.update(conflicts_message),
             Message::AboutElement(about_element::Message::OpenRepositoryUrl) => {
                 _ = open::that_detached("REPOITORY");
                 Task::none()
@@ -303,6 +314,10 @@ impl cosmic::Application for AppModel {
         if self.nav.active_data::<PageId>() == Some(&PageId::Folders) {
             tasks.push(cosmic::task::future(async move {
                 Message::FoldersPage(folders_page::Message::FetchFolders)
+            }));
+        } else if self.nav.active_data::<PageId>() == Some(&PageId::Conflicts) {
+            tasks.push(cosmic::task::future(async move {
+                Message::ConflictsPage(conflicts_page::Message::Reload)
             }));
         }
         Task::batch(tasks)

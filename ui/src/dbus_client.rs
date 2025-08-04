@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use log::info;
-use onedrive_sync_lib::dbus::types::{DaemonStatus, SyncQueueItem, UserProfile};
+use onedrive_sync_lib::dbus::types::{ConflictItem, DaemonStatus, SyncQueueItem, UserChoice, UserProfile};
 use zbus::connection::Builder;
 use zbus::Proxy;
 
@@ -45,6 +45,32 @@ impl DbusClient {
         Ok(Self { connection })
     }
 
+    // ... existing methods ...
+
+    pub async fn get_conflicts(&self) -> Result<Vec<ConflictItem>> {
+        info!("Fetching conflicts from daemon");
+        let proxy = self.get_proxy().await?;
+
+        let items = proxy
+            .call_method("GetConflicts", &())
+            .await?
+            .body()
+            .deserialize::<Vec<ConflictItem>>()?;
+            
+        info!("Successfully fetched {} conflicts", items.len());
+        Ok(items)
+    }
+
+    pub async fn resolve_conflict(&self, db_id: i64, choice: UserChoice) -> Result<()> {
+        info!("Resolving conflict for item {}", db_id);
+        let proxy = self.get_proxy().await?;
+        
+        proxy.call_method("ResolveConflict", &(db_id, choice)).await?;
+        
+        info!("Successfully resolved conflict for item {}", db_id);
+        Ok(())
+    }
+    
     /// Get the user profile from the daemon
     pub async fn get_user_profile(&self) -> Result<UserProfile> {
         info!("Fetching user profile from daemon");
