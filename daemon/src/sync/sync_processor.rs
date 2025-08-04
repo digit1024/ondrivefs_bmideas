@@ -31,6 +31,9 @@ impl SyncProcessor {
 
     /// Process all items with priority: Remote first, then Local
     pub async fn process_all_items(&self) -> Result<()> {
+        debug!("🏠️ Clean up processing items...");
+        self.processing_repo.hause_keeping().await?;
+
         // 1. Process Remote changes first
         debug!("🔄 Processing remote changes...");
         let remote_items = self

@@ -1079,4 +1079,21 @@ impl ProcessingItemRepository {
         );
         Ok(())
     }
+
+    pub async fn hause_keeping(&self) -> Result<()> {
+        sqlx::query("DELETE FROM processing_items WHERE status = 'done' ")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("Delete from processing_items WHERE parent_path LIKE '/drive/root:/root/.%' and drive_item_id LIKE 'local_%'")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("update processing_items set change_operation = 'delete' WHERE parent_path LIKE '/drive/root:/root/.%' ")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("delete from sync_state where id != (select max (id) from sync_state)")
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
 }
