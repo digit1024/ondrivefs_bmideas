@@ -1090,6 +1090,9 @@ impl ProcessingItemRepository {
         sqlx::query("update processing_items set change_operation = 'delete' WHERE parent_path LIKE '/drive/root:/root/.%' ")
             .execute(&self.pool)
             .await?;
+        sqlx::query("Delete  from drive_items_with_fuse  where virtual_path like '/root/.Trash-1000/%' and onedrive_id like 'local_%'")
+            .execute(&self.pool)
+            .await?;
         sqlx::query("delete from sync_state where id != (select max (id) from sync_state)")
             .execute(&self.pool)
             .await?;
