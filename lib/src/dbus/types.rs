@@ -47,3 +47,9 @@ pub struct ConflictItem {
     pub error_message: String,
     pub change_type: String, // "Local" or "Remote"
 }
+#[derive(Debug, Clone, Deserialize, Serialize, Type)]
+pub struct ConflictedDriveItem {
+    pub name: String,
+    pub path: String,
+    pub conflicts: Vec<ConflictItem>
+} 

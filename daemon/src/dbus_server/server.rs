@@ -20,7 +20,7 @@ impl ServiceImpl {
 
 #[interface(name = "org.freedesktop.OneDriveSync")]
 impl ServiceImpl {
-    // ... existing methods ...
+    
 
     async fn get_conflicts(&self) -> zbus::fdo::Result<Vec<ConflictItem>> {
         debug!("DBus: get_conflicts called");

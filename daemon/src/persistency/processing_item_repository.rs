@@ -981,7 +981,7 @@ impl ProcessingItemRepository {
                    change_type, change_operation, conflict_resolution, validation_errors, user_decision
             FROM processing_items 
             WHERE drive_item_id = ? AND change_type = ? AND status IN ('new', 'validated', 'conflicted', 'error')
-            AND ( parent_path  NOT LIKE '/root/.%' OR (name ='root' and parent_path is null))
+            AND ( COALESCE(parent_path, '') NOT LIKE '/root/.%' OR (COALESCE(name, '') ='root' and COALESCE(parent_path, '') = ''))
             ORDER BY id ASC LIMIT 1
             "#,
         )

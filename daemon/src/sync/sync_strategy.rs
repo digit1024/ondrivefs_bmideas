@@ -2,7 +2,7 @@ use crate::app_state::AppState;
 use crate::persistency::drive_item_with_fuse_repository::DriveItemWithFuseRepository;
 use crate::persistency::processing_item_repository::{ChangeOperation, ChangeType, ProcessingItem};
 use crate::sync::conflicts::{LocalConflict, RemoteConflict};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use log::debug;
 use std::sync::Arc;
 
@@ -109,10 +109,10 @@ impl SyncStrategy {
         item: &ProcessingItem,
     ) -> Result<Vec<LocalConflict>> {
         let mut conflicts = Vec::new();
-        let drive_item_repo = self.app_state.persistency().drive_item_with_fuse_repository();
+        
 
         // Check for existing item on remote to detect certain conflicts
-        let remote_item = drive_item_repo.get_drive_item_with_fuse(&item.drive_item.id).await?;
+        let remote_item = self.app_state.persistency().processing_item_repository().get_pending_processing_item_by_drive_item_id_and_change_type(&item.drive_item().id, &ChangeType::Remote).await.context("Failed to get remote item")?;
 
         match &item.change_operation {
             ChangeOperation::Create => {
@@ -122,7 +122,7 @@ impl SyncStrategy {
             }
             ChangeOperation::Update { .. } => {
                 if let Some(remote) = remote_item {
-                    if remote.is_deleted() {
+                    if remote.change_operation == ChangeOperation::Delete {
                         conflicts.push(LocalConflict::ModifyOnDeleted);
                     } else if remote.drive_item.etag != item.drive_item.etag {
                         // This assumes e_tag is populated from the local DB state before modification
@@ -139,7 +139,7 @@ impl SyncStrategy {
             }
             ChangeOperation::Rename { .. } | ChangeOperation::Move { .. } => {
                 if let Some(remote) = remote_item {
-                    if remote.is_deleted() {
+                    if remote.change_operation == ChangeOperation::Delete {
                         conflicts.push(LocalConflict::RenameOrMoveOfDeleted);
                     }
                 }
