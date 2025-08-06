@@ -223,6 +223,21 @@ impl DbusClient {
             .deserialize::<bool>()?;
         Ok(result)
     }
+
+    /// Toggle sync pause state
+    pub async fn toggle_sync_pause(&self) -> Result<bool> {
+        info!("Toggling sync pause state");
+        let proxy = self.get_proxy().await?;
+
+        let result = proxy
+            .call_method("ToggleSyncPause", &())
+            .await?
+            .body()
+            .deserialize::<bool>()?;
+        
+        info!("Sync pause toggled: {}", if result { "paused" } else { "resumed" });
+        Ok(result)
+    }
 }
 
 #[cfg(test)]

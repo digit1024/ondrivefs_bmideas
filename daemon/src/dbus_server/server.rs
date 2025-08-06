@@ -428,4 +428,30 @@ impl ServiceImpl {
         }
         Ok(true)
     }
+
+    /// Toggle sync pause state
+    async fn toggle_sync_pause(&self) -> zbus::fdo::Result<bool> {
+        debug!("DBus: toggle_sync_pause called");
+        
+        let mut settings = self.app_state.config().settings.write().await;
+        settings.sync_paused = !settings.sync_paused;
+        
+        // Save settings to file
+        let config_path = self
+            .app_state
+            .config()
+            .project_dirs
+            .config_dir()
+            .join("settings.json");
+        
+        if let Err(e) = settings.save_to_file(&config_path) {
+            error!("Failed to save settings: {}", e);
+            return Err(zbus::fdo::Error::Failed(format!("Failed to save settings: {}", e)));
+        }
+        
+        let is_paused = settings.sync_paused;
+        info!("Sync pause toggled: {}", if is_paused { "paused" } else { "resumed" });
+        
+        Ok(is_paused)
+    }
 }
