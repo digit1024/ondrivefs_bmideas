@@ -3,6 +3,7 @@ use std::{fs, sync::Arc};
 use log::{debug, error, info};
 use onedrive_sync_lib::dbus::types::{DaemonStatus, SyncQueueItem, SyncStatus, UserProfile};
 use zbus::interface;
+use zbus::object_server::SignalEmitter;
 
 use crate::file_manager::FileManager;
 use crate::persistency::sync_state_repository;
@@ -15,10 +16,22 @@ impl ServiceImpl {
     pub fn new(app_state: Arc<crate::app_state::AppState>) -> Self {
         Self { app_state }
     }
+    pub async fn emit_daemon_status_changed(
+        emitter: &SignalEmitter<'_>,
+        status: DaemonStatus,
+    ) -> zbus::Result<()> {
+        Self::daemon_status_changed(emitter, status).await
+    }
 }
 
 #[interface(name = "org.freedesktop.OneDriveSync")]
 impl ServiceImpl {
+    #[zbus(signal)]
+    async fn daemon_status_changed(
+        #[zbus(signal_context)] _emitter: &SignalEmitter<'_>,
+        _status: DaemonStatus,
+    ) -> zbus::Result<()> {}
+
     async fn get_user_profile(&self) -> zbus::fdo::Result<UserProfile> {
         debug!("DBus: get_user_profile called");
 
@@ -328,5 +341,12 @@ impl ServiceImpl {
             }
         }
         Ok(true)
+    }
+}
+
+/// Helper to emit status-changed signal from outside this module
+pub async fn emit_daemon_status(connection: &zbus::Connection, status: DaemonStatus) {
+    if let Ok(emitter) = SignalEmitter::new(connection, "/org/freedesktop/OneDriveSync") {
+        let _ = ServiceImpl::daemon_status_changed(&emitter, status).await;
     }
 }

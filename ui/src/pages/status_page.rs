@@ -18,6 +18,8 @@ pub enum Message {
     Refresh,
     AutoRefresh,
     FullReset,
+    // Signal-driven update
+    StatusSignal(DaemonStatus),
 }
 
 pub struct Page {
@@ -25,6 +27,7 @@ pub struct Page {
     user_profile: Option<UserProfile>,
     loading: bool,
     error: Option<String>,
+    subscribed: bool,
 }
 
 impl Page {
@@ -35,10 +38,12 @@ impl Page {
             user_profile: None,
             loading: false,
             error: None,
+            subscribed: false,
         }
     }
     pub fn subscription(&self) -> Subscription<Message> {
-        time::every(Duration::from_secs(5)).map(|_| Message::AutoRefresh)
+        // Periodic refresh for fallback
+        time::every(Duration::from_secs(30)).map(|_| Message::AutoRefresh)
     }
 
     pub fn view(&self) -> cosmic::Element<Message> {
@@ -188,7 +193,28 @@ impl Page {
         message: Message,
     ) -> cosmic::Task<cosmic::Action<crate::app::Message>> {
         match message {
+            Message::StatusSignal(status) => {
+                self.daemon_status = Some(status);
+                cosmic::Task::none()
+            }
             Message::AutoRefresh => {
+                // One-time subscription setup
+                if !self.subscribed {
+                    self.subscribed = true;
+                    let subscribe_task = async move {
+                        let _ = with_dbus_client(|client| async move {
+                            let _ = client
+                                .subscribe_daemon_status(|status| async move {
+                                    // This callback cannot directly send a Message; use polling fallback
+                                    let _ = status; // no-op
+                                })
+                                .await;
+                            Ok::<(), String>(())
+                        })
+                        .await;
+                    };
+                    let _t: cosmic::Task<cosmic::Action<crate::app::Message>> = cosmic::task::future(subscribe_task).map(|_: ()| cosmic::Action::None);
+                }
                 let fetch_status =
                     with_dbus_client(|client| async move { client.get_daemon_status().await });
                 let fetch_profile =

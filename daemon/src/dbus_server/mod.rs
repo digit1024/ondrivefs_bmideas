@@ -7,6 +7,36 @@ use log::{debug, error, info};
 use server::ServiceImpl;
 use std::sync::Arc;
 use zbus::connection;
+use zbus::object_server::SignalEmitter;
+use onedrive_sync_lib::dbus::types::DaemonStatus;
+
+async fn compute_status(app_state: &Arc<AppState>) -> DaemonStatus {
+    use onedrive_sync_lib::dbus::types::SyncStatus;
+    let is_authenticated = app_state.auth().get_valid_token().await.is_ok();
+    let is_connected = matches!(
+        app_state.connectivity().check_connectivity().await,
+        crate::connectivity::ConnectivityStatus::Online
+    );
+    let sync_status = if let Some(metrics) = app_state.scheduler().get_task_metrics("sync_cycle").await {
+        if metrics.is_running { SyncStatus::Running } else { SyncStatus::Paused }
+    } else { SyncStatus::Paused };
+    let has_conflicts = app_state
+        .persistency()
+        .processing_item_repository()
+        .get_processing_items_by_status(
+            &crate::persistency::processing_item_repository::ProcessingStatus::Conflicted,
+        )
+        .await
+        .map(|items| !items.is_empty())
+        .unwrap_or(false);
+    let path_str = format!("{}/OneDrive", std::env::var("HOME").unwrap_or_default());
+    let p = std::path::Path::new(&path_str);
+    let mounts = std::fs::read_to_string("/proc/mounts").unwrap_or_default();
+    let is_mounted = mounts
+        .lines()
+        .any(|line| line.split_whitespace().nth(1) == Some(p.to_str().unwrap_or_default()));
+    DaemonStatus { is_authenticated, is_connected, sync_status, has_conflicts, is_mounted }
+}
 
 pub struct DbusServerManager {
     app_state: Arc<AppState>,
@@ -28,12 +58,25 @@ impl DbusServerManager {
         // Create service implementation
         let service = ServiceImpl::new(self.app_state.clone());
 
-        // Create connection and register service using session bus (more appropriate for user apps)
+        // Create connection
         let connection = connection::Builder::session()?
             .name("org.freedesktop.OneDriveSync")?
             .serve_at("/org/freedesktop/OneDriveSync", service)?
             .build()
             .await?;
+
+        // Spawn periodic status signal emitter
+        let app_state_clone = self.app_state.clone();
+        let connection_clone = connection.clone();
+        tokio::spawn(async move {
+            loop {
+                let status = compute_status(&app_state_clone).await;
+                if let Ok(emitter) = SignalEmitter::new(&connection_clone, "/org/freedesktop/OneDriveSync") {
+                    let _ = server::ServiceImpl::emit_daemon_status_changed(&emitter, status).await;
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+        });
 
         self.connection = Some(connection);
         info!(

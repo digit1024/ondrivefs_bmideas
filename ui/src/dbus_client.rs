@@ -5,6 +5,7 @@ use log::info;
 use onedrive_sync_lib::dbus::types::{DaemonStatus, SyncQueueItem, UserProfile};
 use zbus::connection::Builder;
 use zbus::Proxy;
+// use zbus::proxy::SignalStream;
 
 const DBUS_SERVICE: &str = "org.freedesktop.OneDriveSync";
 const DBUS_PATH: &str = "/org/freedesktop/OneDriveSync";
@@ -43,6 +44,25 @@ impl DbusClient {
 
         info!("DBus client created successfully");
         Ok(Self { connection })
+    }
+
+    /// Subscribe to daemon_status_changed signals, invoking the provided callback for each payload
+    pub async fn subscribe_daemon_status<F, Fut>(&self, mut on_status: F) -> Result<()>
+    where
+        F: FnMut(DaemonStatus) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let proxy = self.get_proxy().await?;
+        let mut stream = proxy.receive_signal("DaemonStatusChanged").await?;
+        tokio::spawn(async move {
+            use futures_util::StreamExt;
+            while let Some(msg) = stream.next().await {
+                if let Ok(status) = msg.body().deserialize::<DaemonStatus>() {
+                    on_status(status).await;
+                }
+            }
+        });
+        Ok(())
     }
 
     /// Get the user profile from the daemon
