@@ -5,6 +5,7 @@ use std::{fs, sync::Arc};
 use log::{debug, error, info};
 use onedrive_sync_lib::dbus::types::{DaemonStatus, SyncQueueItem, SyncStatus, UserProfile};
 use zbus::interface;
+use zbus::object_server::SignalEmitter;
 
 use crate::file_manager::FileManager;
 
@@ -16,10 +17,23 @@ impl ServiceImpl {
     pub fn new(app_state: Arc<crate::app_state::AppState>) -> Self {
         Self { app_state }
     }
+    pub async fn emit_daemon_status_changed(
+        emitter: &SignalEmitter<'_>,
+        status: DaemonStatus,
+    ) -> zbus::Result<()> {
+        Self::daemon_status_changed(emitter, status).await
+    }
 }
 
 #[interface(name = "org.freedesktop.OneDriveSync")]
 impl ServiceImpl {
+    #[zbus(signal)]
+    pub async fn daemon_status_changed(
+        _emitter: &SignalEmitter<'_>,
+        _status: DaemonStatus,
+    ) -> zbus::Result<()> {
+        Ok(())
+    }
     
 
     async fn get_conflicts(&self) -> zbus::fdo::Result<Vec<ConflictItem>> {
@@ -455,3 +469,5 @@ impl ServiceImpl {
         Ok(is_paused)
     }
 }
+
+

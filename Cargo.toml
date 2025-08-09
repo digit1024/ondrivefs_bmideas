@@ -1,8 +1,8 @@
- [workspace]
-resolver = "3"
+[workspace]
+resolver = "2"
 members = [
     "daemon",
     "lib",
     "ui",
-    "applet"  
+    "applet"
 ]

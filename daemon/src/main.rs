@@ -241,17 +241,19 @@ async fn main() -> Result<()> {
         return handle_file_path(file_path).await;
     }
 
-    let _ = std::process::Command::new("fusermount")
-        .arg("-u")
-        .arg("~/OneDrive")
-        .status();
+    let home_dir = std::env::var("HOME").unwrap_or_default();
+        let _ = std::process::Command::new("fusermount")
+            .arg("-u")
+            .arg(format!("{}/OneDrive", home_dir))
+            .status();
 
     // Set panic hook for user notification
     std::panic::set_hook(Box::new(|panic_info| {
-        let _ = std::process::Command::new("fusermount")
-            .arg("-u")
-            .arg("~/OneDrive")
-            .status();
+        let home_dir = std::env::var("HOME").unwrap_or_default();
+             let _ = std::process::Command::new("fusermount")
+                 .arg("-u")
+                 .arg(format!("{}/OneDrive", home_dir))
+                 .status();
 
         let msg = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
             s.to_string()
