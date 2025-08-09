@@ -2,11 +2,20 @@ use serde::{Deserialize, Serialize};
 
 /// ParentReference: Represents the parent reference of a drive item.
 /// Used to get the  actual path of the item.
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 pub struct ParentReference {
     #[serde(default)]
     pub id: String,
     pub path: Option<String>,
+}
+
+impl From<&DriveItem> for ParentReference {
+    fn from(item: &DriveItem) -> Self {
+        Self {
+            id: item.id.clone(),
+            path: item.parent_reference.as_ref().and_then(|p| p.path.clone()),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

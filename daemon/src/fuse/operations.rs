@@ -5,6 +5,7 @@ use crate::fuse::drive_item_manager::DriveItemManager;
 use crate::fuse::file_handles::VIRTUAL_FILE_HANDLE_ID;
 use crate::fuse::filesystem::OneDriveFuse;
 use crate::fuse::utils::{sync_await, FUSE_CAP_READDIRPLUS};
+use anyhow::Context;
 use fuser::{
     FileAttr, FileType, KernelConfig, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory,
     ReplyDirectoryPlus, ReplyEntry, ReplyStatfs, ReplyWrite,
@@ -477,9 +478,21 @@ impl fuser::Filesystem for OneDriveFuse {
         match sync_await(
             self.database()
                 .apply_local_change_to_db_repository("mkdir", parent, &name_str, true),
+                
+
         ) {
             Ok(ino) => {
                 if let Ok(Some(item)) = sync_await(self.database().get_item_by_ino(ino)) {
+                    let result = sync_await(
+                        self.file_handles().create_processing_item_for_handle(&item.drive_item().id.clone())
+                    );
+                    if let Err(e) = result {
+                        error!("Failed to create processing item for handle: {}", e);
+                        reply.error(libc::EIO);
+                        return;
+                    }
+
+
                     reply.entry(
                         &Duration::from_secs(3),
                         &AttributeManager::item_to_file_attr(&item),

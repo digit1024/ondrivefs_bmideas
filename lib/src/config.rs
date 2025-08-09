@@ -69,6 +69,8 @@ pub struct Settings {
     pub sync_config: SyncConfig,
     /// Conflict resolution strategy
     pub conflict_resolution_strategy: ConflictResolutionStrategy,
+    /// Whether sync is currently paused
+    pub sync_paused: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

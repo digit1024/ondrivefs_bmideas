@@ -1,3 +1,5 @@
+use crate::persistency::processing_item_repository::{ChangeType, ProcessingStatus};
+use onedrive_sync_lib::dbus::types::{ConflictItem, UserChoice};
 use std::{fs, sync::Arc};
 
 use log::{debug, error, info};
@@ -6,7 +8,6 @@ use zbus::interface;
 use zbus::object_server::SignalEmitter;
 
 use crate::file_manager::FileManager;
-use crate::persistency::sync_state_repository;
 
 pub struct ServiceImpl {
     app_state: Arc<crate::app_state::AppState>,
@@ -26,12 +27,104 @@ impl ServiceImpl {
 
 #[interface(name = "org.freedesktop.OneDriveSync")]
 impl ServiceImpl {
-    #[zbus(signal)]
-    async fn daemon_status_changed(
-        #[zbus(signal_context)] _emitter: &SignalEmitter<'_>,
-        _status: DaemonStatus,
-    ) -> zbus::Result<()> {}
+    
 
+    async fn get_conflicts(&self) -> zbus::fdo::Result<Vec<ConflictItem>> {
+        debug!("DBus: get_conflicts called");
+        let processing_repo = self.app_state.persistency().processing_item_repository();
+        let conflicted_items = processing_repo
+            .get_processing_items_by_status(&ProcessingStatus::Conflicted)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to get conflicts: {}", e)))?;
+
+        let mut conflict_list = Vec::new();
+        for item in conflicted_items {
+            let error_message = item.validation_errors.join(", ");
+            conflict_list.push(ConflictItem {
+                db_id: item.id.unwrap_or(0),
+                onedrive_id: item.drive_item.id.clone(),
+                name: item.drive_item.name.clone().unwrap_or_default(),
+                path: item
+                    .drive_item
+                    .parent_reference
+                    .as_ref()
+                    .and_then(|p| p.path.clone())
+                    .unwrap_or_default(),
+                error_message,
+                change_type: item.change_type.as_str().to_string(),
+            });
+        }
+        Ok(conflict_list)
+    }
+
+    async fn resolve_conflict(
+        &self,
+        conflicted_item_db_id: i64,
+        choice: UserChoice,
+    ) -> zbus::fdo::Result<()> {
+        debug!(
+            "DBus: resolve_conflict called for item {} with choice {:?}",
+            conflicted_item_db_id, choice
+        );
+        let processing_repo = self.app_state.persistency().processing_item_repository();
+
+        let conflicted_item = match processing_repo
+            .get_processing_item_by_id(conflicted_item_db_id)
+            .await
+        {
+            Ok(Some(item)) => item,
+            _ => {
+                return Err(zbus::fdo::Error::Failed(
+                    "Conflicted item not found".to_string(),
+                ))
+            }
+        };
+
+        let opposite_change_type = match conflicted_item.change_type {
+            ChangeType::Local => ChangeType::Remote,
+            ChangeType::Remote => ChangeType::Local,
+        };
+
+        let corresponding_item = processing_repo
+            .get_pending_processing_item_by_drive_item_id_and_change_type(
+                &conflicted_item.drive_item.id,
+                &opposite_change_type,
+            )
+            .await
+            .map_err(|e| {
+                zbus::fdo::Error::Failed(format!("Failed to find corresponding item: {}", e))
+            })?
+            .ok_or_else(|| {
+                zbus::fdo::Error::Failed("Corresponding conflicted item not found".to_string())
+            })?;
+
+        let (winning_item, losing_item) = match (choice, &conflicted_item.change_type) {
+            (UserChoice::KeepLocal, &ChangeType::Local) => (conflicted_item, corresponding_item),
+            (UserChoice::KeepLocal, &ChangeType::Remote) => (corresponding_item, conflicted_item),
+            (UserChoice::UseRemote, &ChangeType::Remote) => (conflicted_item, corresponding_item),
+            (UserChoice::UseRemote, &ChangeType::Local) => (corresponding_item, conflicted_item),
+        };
+
+        // Cancel the losing item
+        processing_repo
+            .update_status_by_id(losing_item.id.unwrap(), &ProcessingStatus::Cancelled)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to cancel losing item: {}", e)))?;
+
+        // Re-queue the winning item by setting its status to New
+        processing_repo
+            .update_status_by_id(winning_item.id.unwrap(), &ProcessingStatus::New)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to re-queue winning item: {}", e)))?;
+
+        info!(
+            "Conflict resolved for OneDrive item {}. Kept {} version.",
+            winning_item.drive_item.id,
+            winning_item.change_type.as_str()
+        );
+
+        Ok(())
+    }
     async fn get_user_profile(&self) -> zbus::fdo::Result<UserProfile> {
         debug!("DBus: get_user_profile called");
 
@@ -341,6 +434,32 @@ impl ServiceImpl {
             }
         }
         Ok(true)
+    }
+
+    /// Toggle sync pause state
+    async fn toggle_sync_pause(&self) -> zbus::fdo::Result<bool> {
+        debug!("DBus: toggle_sync_pause called");
+        
+        let mut settings = self.app_state.config().settings.write().await;
+        settings.sync_paused = !settings.sync_paused;
+        
+        // Save settings to file
+        let config_path = self
+            .app_state
+            .config()
+            .project_dirs
+            .config_dir()
+            .join("settings.json");
+        
+        if let Err(e) = settings.save_to_file(&config_path) {
+            error!("Failed to save settings: {}", e);
+            return Err(zbus::fdo::Error::Failed(format!("Failed to save settings: {}", e)));
+        }
+        
+        let is_paused = settings.sync_paused;
+        info!("Sync pause toggled: {}", if is_paused { "paused" } else { "resumed" });
+        
+        Ok(is_paused)
     }
 }
 

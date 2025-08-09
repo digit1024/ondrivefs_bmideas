@@ -222,7 +222,7 @@ impl FileHandleManager {
     }
 
     /// Create a processing item for a dirty handle
-    async fn create_processing_item_for_handle(&self, onedrive_id: &str) -> Result<()> {
+    pub async fn create_processing_item_for_handle(&self, onedrive_id: &str) -> Result<()> {
         // Get the item from database
         if let Ok(Some(item)) = sync_await(
             self.app_state

@@ -469,6 +469,7 @@ impl DriveItemWithFuseRepository {
         debug!("Updated Fuse metadata for drive item: {}", onedrive_id);
         Ok(())
     }
+    
 
     /// Delete a drive item with Fuse metadata by OneDrive ID
     pub async fn mark_as_deleted_by_onedrive_id(&self, onedrive_id: &str) -> Result<()> {

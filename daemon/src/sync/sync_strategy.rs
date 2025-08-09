@@ -1,18 +1,13 @@
 use crate::app_state::AppState;
-use crate::onedrive_service::onedrive_models::DriveItem;
 use crate::persistency::drive_item_with_fuse_repository::DriveItemWithFuseRepository;
-use crate::persistency::processing_item_repository::UserDecision;
-use crate::persistency::processing_item_repository::{self, ProcessingItem};
-use crate::sync::conflict_resolution::{ConflictResolution, ConflictResolver};
-use crate::sync::strategies::ConflictResolutionFactory;
+use crate::persistency::processing_item_repository::{ChangeOperation, ChangeType, ProcessingItem};
+use crate::sync::conflicts::{LocalConflict, RemoteConflict};
 use anyhow::{Context, Result};
-use log::{debug, warn};
-use onedrive_sync_lib::config::ConflictResolutionStrategy;
+use log::debug;
 use std::sync::Arc;
 
 pub struct SyncStrategy {
     app_state: Arc<AppState>,
-    #[allow(dead_code)]
     drive_item_with_fuse_repo: DriveItemWithFuseRepository,
 }
 
@@ -25,189 +20,148 @@ impl SyncStrategy {
         }
     }
 
-    pub async fn validate_and_resolve_conflicts(
+    pub async fn detect_remote_conflicts(
         &self,
         item: &ProcessingItem,
-    ) -> crate::persistency::processing_item_repository::ValidationResult {
-        let mut errors = Vec::new();
+    ) -> Result<Vec<RemoteConflict>> {
+        let mut conflicts = Vec::new();
 
-        // 1. Tree validity check
-        if let Err(e) = self.check_tree_validity(item).await {
-            errors.push(
-                crate::persistency::processing_item_repository::ValidationError::TreeInvalid(e),
-            );
-        }
-
-        // 2. Name collision check
-        if let Err(e) = self.check_name_collision(item).await {
-            errors.push(
-                crate::persistency::processing_item_repository::ValidationError::NameCollision(e),
-            );
-        }
-
-        // 3. Content conflict check
-        if let Err(e) = self.check_content_conflict(item).await {
-            errors.push(
-                crate::persistency::processing_item_repository::ValidationError::ContentConflict(e),
-            );
-        }
-
-        if errors.is_empty() {
-            crate::persistency::processing_item_repository::ValidationResult::Valid
-        } else {
-            // Apply conflict resolution strategy
-            let strategy = self
-                .app_state
-                .config()
-                .settings
-                .read()
-                .await
-                .conflict_resolution_strategy
-                .clone();
-            let resolver = ConflictResolutionFactory::create_strategy(&strategy);
-
-            // Check if user has already made a decision for manual resolution
-            if let Some(user_decision) = &item.user_decision {
-                match user_decision {
-                    UserDecision::UseRemote => {
-                        crate::persistency::processing_item_repository::ValidationResult::Resolved(
-                            ConflictResolution::UseRemote,
-                        )
-                    }
-                    UserDecision::UseLocal => {
-                        crate::persistency::processing_item_repository::ValidationResult::Resolved(
-                            ConflictResolution::UseLocal,
-                        )
-                    }
-
-                    UserDecision::Skip => {
-                        crate::persistency::processing_item_repository::ValidationResult::Resolved(
-                            ConflictResolution::Skip,
-                        )
-                    }
-                    UserDecision::Rename { new_name } => {
-                        // Handle rename logic
-                        crate::persistency::processing_item_repository::ValidationResult::Resolved(
-                            ConflictResolution::UseLocal,
-                        )
-                    }
-                }
-            } else {
-                let resolution = resolver.resolve_conflict(item);
-                match resolution {
-                    ConflictResolution::Manual => {
-                        crate::persistency::processing_item_repository::ValidationResult::Invalid(
-                            errors,
-                        )
-                    }
-                    _ => {
-                        crate::persistency::processing_item_repository::ValidationResult::Resolved(
-                            resolution,
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    /// Check if parent folder exists and is accessible
-    async fn check_tree_validity(&self, item: &ProcessingItem) -> Result<(), String> {
-        //Parent reference for root exists at this point but it's equal to ""
+        // 1. Parent folder state
         if let Some(parent_ref) = &item.drive_item.parent_reference {
-            if parent_ref.id == "" {
-                //handles root correctly
-                return Ok(());
-            }
-            let drive_item_repo =
-                DriveItemWithFuseRepository::new(self.app_state.persistency().pool().clone());
-
-            // Check if parent exists in database
-            match drive_item_repo
-                .get_drive_item_with_fuse(&parent_ref.id)
-                .await
-            {
-                Ok(Some(_)) => Ok(()),
-                Ok(None) => Err(format!("Parent folder '{}' does not exist", parent_ref.id)),
-                Err(e) => Err(format!("Failed to check parent folder: {}", e)),
-            }
-        } else {
-            // Root item, always valid
-            Ok(())
-        }
-    }
-
-    /// Check for name collisions in the same parent folder
-    async fn check_name_collision(&self, item: &ProcessingItem) -> Result<(), String> {
-        if item.change_operation
-            == crate::persistency::processing_item_repository::ChangeOperation::Delete
-        {
-            return Ok(());
-        }
-        if let Some(parent_ref) = &item.drive_item.parent_reference {
-            let drive_item_repo =
-                DriveItemWithFuseRepository::new(self.app_state.persistency().pool().clone());
-
-            // Get all siblings in the same parent folder
-            let siblings = drive_item_repo
-                .get_drive_items_with_fuse_by_parent(&parent_ref.id)
-                .await
-                .map_err(|e| format!("Failed to get siblings: {}", e))?;
-
-            let item_name = item.drive_item.name.as_deref().unwrap_or("");
-
-            // Check for name collision (excluding the current item)
-            for sibling in siblings {
-                if sibling.id() != item.drive_item.id
-                    && sibling.name().unwrap_or("").eq_ignore_ascii_case(item_name)
+            if parent_ref.id != "" {
+                if let Ok(Some(parent_item)) = self
+                    .drive_item_with_fuse_repo
+                    .get_drive_item_with_fuse(&parent_ref.id)
+                    .await
                 {
-                    return Err(format!(
-                        "File '{}' already exists in this folder",
-                        item_name
-                    ));
+                    if parent_item.is_deleted() {
+                        conflicts.push(RemoteConflict::ModifyOnParentDelete);
+                    }
+                } else {
+                    // Parent does not exist, might be a conflict if the item is not a create operation
+                    if item.change_operation != ChangeOperation::Create {
+                        conflicts.push(RemoteConflict::MoveToDeletedParent)
+                    }
                 }
             }
         }
 
-        Ok(())
-    }
+        // 2. Name collision
+        if item.change_operation != ChangeOperation::Delete {
+            if let Some(parent_ref) = &item.drive_item.parent_reference {
+                if let Ok(siblings) = self
+                    .drive_item_with_fuse_repo
+                    .get_drive_items_with_fuse_by_parent(&parent_ref.id)
+                    .await
+                {
+                    let item_name = item.drive_item.name.as_deref().unwrap_or("");
+                    for sibling in siblings {
+                        if sibling.id() != item.drive_item.id
+                            && sibling.name().unwrap_or("").eq_ignore_ascii_case(item_name)
+                        {
+                            conflicts.push(RemoteConflict::RenameOrMoveOnExisting);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
 
-    /// Check for content conflicts between local and remote versions
-    async fn check_content_conflict(&self, item: &ProcessingItem) -> Result<(), String> {
-        let processing_item_repository = self.app_state.persistency().processing_item_repository();
-        let searched_change_type = if item.change_type
-            == crate::persistency::processing_item_repository::ChangeType::Remote
-        {
-            crate::persistency::processing_item_repository::ChangeType::Local
-        } else {
-            crate::persistency::processing_item_repository::ChangeType::Remote
-        };
-
-        let searched_item = processing_item_repository
+        // 3. Content conflict
+        let processing_item_repo = self.app_state.persistency().processing_item_repository();
+        if let Ok(Some(local_change)) = processing_item_repo
             .get_pending_processing_item_by_drive_item_id_and_change_type(
                 &item.drive_item.id,
-                &searched_change_type,
+                &ChangeType::Local,
             )
             .await
-            .map_err(|e| format!("Failed to get pending processing item: {e}"))?;
-        match searched_item {
-            Some(searched_item) => {
-                //If both are deleted, it's ok
-                if item.change_operation
-                    == crate::persistency::processing_item_repository::ChangeOperation::Delete
-                    && searched_item.change_operation
-                        == crate::persistency::processing_item_repository::ChangeOperation::Delete
-                {
-                    return Ok(());
-                } else {
-                    return Err(format!(
-                        "File '{}' was modified both locally and remotely",
-                        item.drive_item.name.as_deref().unwrap_or("unnamed")
+        {
+            match (&item.change_operation, &local_change.change_operation) {
+                (ChangeOperation::Update { .. }, ChangeOperation::Update { .. }) => {
+                    conflicts.push(RemoteConflict::ModifyOnModify(
+                        item.drive_item.id.clone(),
+                        local_change.drive_item.id.clone(),
                     ));
                 }
-            }
-            None => {
-                return Ok(());
+                (ChangeOperation::Create, ChangeOperation::Create) => {
+                    conflicts.push(RemoteConflict::CreateOnCreate(item.drive_item.id.clone()));
+                }
+                (ChangeOperation::Update { .. }, ChangeOperation::Delete) => {
+                    conflicts.push(RemoteConflict::ModifyOnDelete);
+                }
+                (ChangeOperation::Delete, ChangeOperation::Update { .. }) => {
+                    conflicts.push(RemoteConflict::DeleteOnModify);
+                }
+                (ChangeOperation::Move { .. }, ChangeOperation::Move { .. }) => {
+                    if item.drive_item.parent_reference != local_change.drive_item.parent_reference {
+                        conflicts.push(RemoteConflict::MoveOnMove);
+                    }
+                }
+                _ => {}
             }
         }
+
+        Ok(conflicts)
+    }
+
+    pub async fn detect_local_conflicts(
+        &self,
+        item: &ProcessingItem,
+    ) -> Result<Vec<LocalConflict>> {
+        let mut conflicts = Vec::new();
+        
+
+        // Check for existing item on remote to detect certain conflicts
+        let remote_item = self.app_state.persistency().processing_item_repository().get_pending_processing_item_by_drive_item_id_and_change_type(&item.drive_item().id, &ChangeType::Remote).await.context("Failed to get remote item")?;
+
+        match &item.change_operation {
+            ChangeOperation::Create => {
+                if remote_item.is_some() {
+                    conflicts.push(LocalConflict::CreateOnExisting);
+                }
+            }
+            ChangeOperation::Update { .. } => {
+                if let Some(remote) = remote_item {
+                    if remote.change_operation == ChangeOperation::Delete {
+                        conflicts.push(LocalConflict::ModifyOnDeleted);
+                    } else if remote.drive_item.etag != item.drive_item.etag {
+                        // This assumes e_tag is populated from the local DB state before modification
+                        conflicts.push(LocalConflict::ModifyOnModified);
+                    }
+                }
+            }
+            ChangeOperation::Delete => {
+                if let Some(remote) = remote_item {
+                     if remote.drive_item.etag != item.drive_item.etag {
+                        conflicts.push(LocalConflict::DeleteOnModified);
+                    }
+                }
+            }
+            ChangeOperation::Rename { .. } | ChangeOperation::Move { .. } => {
+                if let Some(remote) = remote_item {
+                    if remote.change_operation == ChangeOperation::Delete {
+                        conflicts.push(LocalConflict::RenameOrMoveOfDeleted);
+                    }
+                }
+                if let Some(parent_ref) = &item.drive_item.parent_reference {
+                    if let Ok(siblings) = self
+                        .drive_item_with_fuse_repo
+                        .get_drive_items_with_fuse_by_parent(&parent_ref.id)
+                        .await
+                    {
+                        let item_name = item.drive_item.name.as_deref().unwrap_or("");
+                        for sibling in siblings {
+                            if sibling.id() != item.drive_item.id && sibling.name().unwrap_or("") == item_name {
+                                conflicts.push(LocalConflict::RenameOrMoveToExisting);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        Ok(conflicts)
     }
 }

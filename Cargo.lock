@@ -4349,6 +4349,7 @@ dependencies = [
  "sled",
  "sqlx",
  "tempfile",
+ "thiserror 2.0.12",
  "time",
  "tiny_http",
  "tokio",

@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use log::info;
-use onedrive_sync_lib::dbus::types::{DaemonStatus, SyncQueueItem, UserProfile};
+use onedrive_sync_lib::dbus::types::{ConflictItem, DaemonStatus, SyncQueueItem, UserChoice, UserProfile};
 use zbus::connection::Builder;
 use zbus::Proxy;
 // use zbus::proxy::SignalStream;
@@ -46,25 +46,32 @@ impl DbusClient {
         Ok(Self { connection })
     }
 
-    /// Subscribe to daemon_status_changed signals, invoking the provided callback for each payload
-    pub async fn subscribe_daemon_status<F, Fut>(&self, mut on_status: F) -> Result<()>
-    where
-        F: FnMut(DaemonStatus) -> Fut + Send + 'static,
-        Fut: std::future::Future<Output = ()> + Send + 'static,
-    {
+    // ... existing methods ...
+
+    pub async fn get_conflicts(&self) -> Result<Vec<ConflictItem>> {
+        info!("Fetching conflicts from daemon");
         let proxy = self.get_proxy().await?;
-        let mut stream = proxy.receive_signal("DaemonStatusChanged").await?;
-        tokio::spawn(async move {
-            use futures_util::StreamExt;
-            while let Some(msg) = stream.next().await {
-                if let Ok(status) = msg.body().deserialize::<DaemonStatus>() {
-                    on_status(status).await;
-                }
-            }
-        });
-        Ok(())
+
+        let items = proxy
+            .call_method("GetConflicts", &())
+            .await?
+            .body()
+            .deserialize::<Vec<ConflictItem>>()?;
+            
+        info!("Successfully fetched {} conflicts", items.len());
+        Ok(items)
     }
 
+    pub async fn resolve_conflict(&self, db_id: i64, choice: UserChoice) -> Result<()> {
+        info!("Resolving conflict for item {}", db_id);
+        let proxy = self.get_proxy().await?;
+        
+        proxy.call_method("ResolveConflict", &(db_id, choice)).await?;
+        
+        info!("Successfully resolved conflict for item {}", db_id);
+        Ok(())
+    }
+    
     /// Get the user profile from the daemon
     pub async fn get_user_profile(&self) -> Result<UserProfile> {
         info!("Fetching user profile from daemon");
@@ -215,6 +222,21 @@ impl DbusClient {
             .await?
             .body()
             .deserialize::<bool>()?;
+        Ok(result)
+    }
+
+    /// Toggle sync pause state
+    pub async fn toggle_sync_pause(&self) -> Result<bool> {
+        info!("Toggling sync pause state");
+        let proxy = self.get_proxy().await?;
+
+        let result = proxy
+            .call_method("ToggleSyncPause", &())
+            .await?
+            .body()
+            .deserialize::<bool>()?;
+        
+        info!("Sync pause toggled: {}", if result { "paused" } else { "resumed" });
         Ok(result)
     }
 }
