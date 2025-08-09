@@ -185,7 +185,7 @@ impl DbusClient {
     }
 
     /// List media items (images/videos) newest first with pagination and optional date filters
-    pub async fn list_media(&self, offset: u32, limit: u32, start_date: Option<String>, end_date: Option<String>) -> Result<Vec<MediaItem>> {
+    pub async fn list_media(&self, offset: u32, limit: u32, start_date: String, end_date: String) -> Result<Vec<MediaItem>> {
         info!("Fetching media list from daemon: offset={}, limit={}", offset, limit);
         let proxy = self.get_proxy().await?;
         let items = proxy

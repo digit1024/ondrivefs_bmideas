@@ -291,10 +291,12 @@ impl ServiceImpl {
     }
 
     /// List media items (images/videos) newest first with pagination and optional date filters
-    async fn list_media(&self, offset: u32, limit: u32, start_date: Option<String>, end_date: Option<String>) -> zbus::fdo::Result<Vec<MediaItem>> {
+    async fn list_media(&self, offset: u32, limit: u32, start_date: String, end_date: String) -> zbus::fdo::Result<Vec<MediaItem>> {
         let repo = self.app_state.persistency().drive_item_with_fuse_repository();
+        let start_opt = if start_date.trim().is_empty() { None } else { Some(start_date.as_str()) };
+        let end_opt = if end_date.trim().is_empty() { None } else { Some(end_date.as_str()) };
         let items = repo
-            .get_media_items_paginated(start_date.as_deref(), end_date.as_deref(), offset as usize, limit as usize)
+            .get_media_items_paginated(start_opt, end_opt, offset as usize, limit as usize)
             .await
             .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to list media: {}", e)))?;
         let mapped: Vec<MediaItem> = items
@@ -304,9 +306,9 @@ impl ServiceImpl {
                 ino: it.fuse_metadata.virtual_ino.unwrap_or(0),
                 name: it.drive_item.name.unwrap_or_default(),
                 virtual_path: it.fuse_metadata.virtual_path.unwrap_or_default(),
-                mime_type: it.mime_type().map(|m| m.to_string()),
-                created_date: it.drive_item.created_date.clone(),
-                last_modified: it.drive_item.last_modified.clone(),
+                mime_type: it.mime_type().unwrap_or("").to_string(),
+                created_date: it.drive_item.created_date.clone().unwrap_or_default(),
+                last_modified: it.drive_item.last_modified.clone().unwrap_or_default(),
             })
             .collect();
         Ok(mapped)

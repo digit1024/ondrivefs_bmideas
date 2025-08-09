@@ -60,7 +60,7 @@ pub struct MediaItem {
     pub ino: u64,
     pub name: String,
     pub virtual_path: String,
-    pub mime_type: Option<String>,
-    pub created_date: Option<String>,
-    pub last_modified: Option<String>,
+    pub mime_type: String,
+    pub created_date: String,
+    pub last_modified: String,
 } 

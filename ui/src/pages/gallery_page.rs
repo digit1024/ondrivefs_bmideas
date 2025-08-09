@@ -123,8 +123,8 @@ impl Page {
                 self.error = None;
                 let offset = self.offset;
                 let limit = self.limit;
-                let start = if self.start_date.trim().is_empty() { None } else { Some(self.start_date.clone()) };
-                let end = if self.end_date.trim().is_empty() { None } else { Some(self.end_date.clone()) };
+                let start = self.start_date.clone();
+                let end = self.end_date.clone();
                 let fut = with_dbus_client(move |client| async move { client.list_media(offset, limit, start, end).await });
                 cosmic::task::future(fut).map(|result| {
                     cosmic::Action::App(crate::app::Message::GalleryPage(Message::MediaLoaded(result)))

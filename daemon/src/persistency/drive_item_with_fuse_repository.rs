@@ -351,10 +351,10 @@ impl DriveItemWithFuseRepository {
                 )"#,
         );
         if start_date.is_some() {
-            base.push_str(" AND created_date >= ?");
+            base.push_str(" AND created_date IS NOT NULL AND created_date >= ?");
         }
         if end_date.is_some() {
-            base.push_str(" AND created_date <= ?");
+            base.push_str(" AND created_date IS NOT NULL AND created_date <= ?");
         }
         base.push_str(" ORDER BY COALESCE(last_modified, created_date) DESC LIMIT ? OFFSET ?");
 
