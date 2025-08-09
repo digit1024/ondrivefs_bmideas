@@ -7,7 +7,7 @@ use zbus::connection::Builder;
 use zbus::Proxy;
 // use zbus::proxy::SignalStream;
 use once_cell::sync::Lazy;
-use tokio::sync::{broadcast::{self, Receiver, Sender}, RwLock};
+use tokio::sync::{broadcast::{self, Sender}, RwLock};
 
 const DBUS_SERVICE: &str = "org.freedesktop.OneDriveSync";
 const DBUS_PATH: &str = "/org/freedesktop/OneDriveSync";
@@ -19,9 +19,9 @@ pub static DAEMON_STATUS_TX: Lazy<Sender<DaemonStatus>> = Lazy::new(|| {
     tx
 });
 
-pub fn subscribe_status_receiver() -> Receiver<DaemonStatus> {
-    DAEMON_STATUS_TX.subscribe()
-}
+// pub fn subscribe_status_receiver() -> Receiver<DaemonStatus> {
+//     DAEMON_STATUS_TX.subscribe()
+// }
 
 static LATEST_STATUS: Lazy<RwLock<Option<DaemonStatus>>> = Lazy::new(|| RwLock::new(None));
 

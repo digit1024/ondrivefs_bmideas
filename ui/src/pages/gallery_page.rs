@@ -1,8 +1,8 @@
 use crate::dbus_client::with_dbus_client;
-use cosmic::iced::{time, Alignment, ContentFit, Length, Subscription};
+use cosmic::iced::{time, Alignment, Length, Subscription};
 use cosmic::widget::{button, column, container, row, scrollable, text, text_input, image as image_widget};
 use cosmic::iced::widget::image::Handle as ImageHandle;
-use log::info;
+
 use onedrive_sync_lib::dbus::types::MediaItem;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -16,7 +16,7 @@ pub enum Message {
     DateEndChanged(String),
     ApplyFilters,
     AutoRefresh,
-    ThumbRequested(u64),
+    //ThumbRequested(u64),
     ThumbLoaded(u64, Result<String, String>),
     OpenItem(u64),
     Opened(Result<String, String>),
@@ -189,13 +189,13 @@ impl Page {
                 self.offset = 0;
                 self.update(Message::FetchPage)
             }
-            Message::ThumbRequested(ino) => {
-                // Fire request
-                let fut = with_dbus_client(move |client| async move { client.fetch_thumbnail(ino).await });
-                cosmic::task::future(fut).map(move |result| {
-                    cosmic::Action::App(crate::app::Message::GalleryPage(Message::ThumbLoaded(ino, result)))
-                })
-            }
+            // Message::ThumbRequested(ino) => {
+            //     // Fire request
+            //     let fut = with_dbus_client(move |client| async move { client.fetch_thumbnail(ino).await });
+            //     cosmic::task::future(fut).map(move |result| {
+            //         cosmic::Action::App(crate::app::Message::GalleryPage(Message::ThumbLoaded(ino, result)))
+            //     })
+            // }
             Message::ThumbLoaded(ino, result) => {
                 if let Ok(path) = result {
                     self.thumb_paths.insert(ino, path);
