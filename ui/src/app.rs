@@ -9,18 +9,20 @@ use cosmic::iced::{Length, Subscription};
 use cosmic::prelude::*;
 use cosmic::widget::{self, icon, menu, nav_bar};
 
-use crate::pages::{self, about_element, conflicts_page, folders_page, queues_page, status_page};
+use crate::pages::{self, about_element, conflicts_page, folders_page, queues_page, status_page, gallery_page};
 use log::info;
 use std::collections::HashMap;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
 enum PageId {
     #[default]
+    Gallery,
     Status,
     Folders,
     Queues,
     Conflicts,
     Logs,
+
 }
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub enum ContextPage {
@@ -56,6 +58,7 @@ pub struct AppModel {
     queues_page: pages::queues_page::Page,
     conflicts_page: pages::conflicts_page::ConflictsPage,
     logs_page: pages::logs_page::Page,
+    gallery_page: pages::gallery_page::Page,
 }
 
 /// Messages emitted by the application and its widgets.
@@ -70,6 +73,7 @@ pub enum Message {
     ConflictsPage(conflicts_page::Message),
     AboutElement(about_element::Message),
     LogsPage(pages::logs_page::Message),
+    GalleryPage(gallery_page::Message),
 }
 // impl From<status_page::Message> for Message {
 //     fn from(message: status_page::Message) -> Self {
@@ -105,6 +109,9 @@ impl From<pages::logs_page::Message> for Message {
         Self::LogsPage(message)
     }
 }
+impl From<gallery_page::Message> for Message {
+    fn from(message: gallery_page::Message) -> Self { Self::GalleryPage(message) }
+}
 
 /// Create a COSMIC application from the app model
 impl cosmic::Application for AppModel {
@@ -135,12 +142,16 @@ impl cosmic::Application for AppModel {
     ) -> (Self, Task<cosmic::Action<Self::Message>>) {
         // Create a nav bar with three page items.
         let mut nav = nav_bar::Model::default();
+        nav.insert()
+            .text("Gallery")
+            .data::<PageId>(PageId::Gallery)
+            .icon(icon::from_name("image-x-generic-symbolic"))
+            .activate();
 
         nav.insert()
             .text("Status")
             .data::<PageId>(PageId::Status)
-            .icon(icon::from_name("applications-system-symbolic"))
-            .activate();
+            .icon(icon::from_name("applications-system-symbolic"));
 
         nav.insert()
             .text("Folders")
@@ -162,10 +173,9 @@ impl cosmic::Application for AppModel {
             .data::<PageId>(PageId::Logs)
             .icon(icon::from_name("text-x-generic-symbolic"));
 
-        nav.insert()
-            .text("Settings")
-            //.data::<Page>(Page::Settings)
-            .icon(icon::from_name("applications-science-symbolic"));
+
+
+
 
         // Construct the app model with the runtime's core.
         let mut app = AppModel {
@@ -179,15 +189,16 @@ impl cosmic::Application for AppModel {
                     Err((_errors, config)) => config,
                 })
                 .unwrap_or_default(),
-            active_page: PageId::Status,
+            active_page: PageId::Gallery,
             status_page: pages::status_page::Page::new(),
             folders_page: pages::folders_page::Page::new(),
             queues_page: pages::queues_page::Page::new(),
             conflicts_page: pages::conflicts_page::ConflictsPage::new(),
             logs_page: pages::logs_page::Page::new(),
+            gallery_page: pages::gallery_page::Page::new(),
         };
 
-        // Create startup commands: set window title and fetch initial status/queues
+        // Create startup commands: set window title and fetch initial data for pages
         let title_command = app.update_title();
         let fetch_status_command = cosmic::task::future(async move {
             info!("App: Initializing StatusPage with fetch command");
@@ -200,6 +211,9 @@ impl cosmic::Application for AppModel {
         let fetch_folders_command = cosmic::task::future(async move {
             Message::FoldersPage(folders_page::Message::FetchFolders)
         });
+        let fetch_gallery_command = cosmic::task::future(async move {
+            Message::GalleryPage(gallery_page::Message::FetchPage)
+        });
 
         (
             app,
@@ -208,6 +222,7 @@ impl cosmic::Application for AppModel {
                 fetch_status_command,
                 fetch_queues_command,
                 fetch_folders_command,
+                fetch_gallery_command,
             ]),
         )
     }
@@ -216,6 +231,7 @@ impl cosmic::Application for AppModel {
         match self.nav.active_data::<PageId>() {
             Some(PageId::Status) => self.status_page.subscription().map(Message::StatusPage),
             Some(PageId::Queues) => self.queues_page.subscription().map(Message::QueuesPage),
+            Some(PageId::Gallery) => self.gallery_page.subscription().map(Message::GalleryPage),
             _ => Subscription::none(),
         }
     }
@@ -255,7 +271,7 @@ impl cosmic::Application for AppModel {
 
     /// Describes the interface based on the current state of the application model.
     fn view(&self) -> Element<Self::Message> {
-        let page = self.nav.active_data::<PageId>().unwrap_or(&PageId::Status);
+        let page = self.nav.active_data::<PageId>().unwrap_or(&PageId::Gallery);
 
         let content = match page {
             PageId::Status => self.status_page.view().map(Message::StatusPage),
@@ -263,6 +279,7 @@ impl cosmic::Application for AppModel {
             PageId::Queues => self.queues_page.view().map(Message::QueuesPage),
             PageId::Conflicts => self.conflicts_page.view().map(Message::ConflictsPage),
             PageId::Logs => self.logs_page.view().map(Message::LogsPage),
+            PageId::Gallery => self.gallery_page.view().map(Message::GalleryPage),
         };
 
         widget::container(content)
@@ -304,6 +321,7 @@ impl cosmic::Application for AppModel {
                 Task::none()
             }
             Message::LogsPage(logs_message) => self.logs_page.update(logs_message),
+            Message::GalleryPage(gallery_message) => self.gallery_page.update(gallery_message),
         }
     }
 
@@ -319,6 +337,8 @@ impl cosmic::Application for AppModel {
             tasks.push(cosmic::task::future(async move {
                 Message::ConflictsPage(conflicts_page::Message::Reload)
             }));
+        } else if self.nav.active_data::<PageId>() == Some(&PageId::Gallery) {
+            tasks.push(cosmic::task::future(async move { Message::GalleryPage(gallery_page::Message::FetchPage) }));
         }
         Task::batch(tasks)
     }

@@ -53,3 +53,14 @@ pub struct ConflictedDriveItem {
     pub path: String,
     pub conflicts: Vec<ConflictItem>
 } 
+
+#[derive(Debug, Clone, Deserialize, Serialize, Type)]
+pub struct MediaItem {
+    pub onedrive_id: String,
+    pub ino: u64,
+    pub name: String,
+    pub virtual_path: String,
+    pub mime_type: String,
+    pub created_date: String,
+    pub last_modified: String,
+} 

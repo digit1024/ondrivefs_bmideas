@@ -743,6 +743,28 @@ impl OneDriveClient {
         }
     }
 
+    /// Download a medium thumbnail for an item
+    pub async fn download_thumbnail_medium(&self, item_id: &str) -> Result<Vec<u8>> {
+        let auth_header = self.auth_header().await?;
+        let rel = format!("/me/drive/items/{}/thumbnails/0/medium/content", item_id);
+        let url = self
+            .http_client
+            .get_full_url(&rel)
+            .context("Failed to build thumbnail url")?;
+        let response = self
+            .http_client
+            .request_builder("GET", &url)
+            .header("Authorization", auth_header)
+            .send()
+            .await
+            .context("Failed to send thumbnail request")?;
+        if !response.status().is_success() {
+            return Err(anyhow!("Thumbnail download failed with status: {}", response.status()));
+        }
+        let bytes = response.bytes().await.context("Failed to read thumbnail bytes")?;
+        Ok(bytes.to_vec())
+    }
+
     /// Download file with optional range and thumbnail support
     pub async fn download_file_with_options(
         &self,

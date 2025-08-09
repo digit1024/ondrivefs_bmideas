@@ -36,6 +36,7 @@ impl ProjectConfig {
             &d.to_path_buf(),
             &u.to_path_buf(),
             &l.to_path_buf(),
+            &proj_dirs.data_dir().join("thumbnails").to_path_buf(),
         ] {
             if !x.exists() {
                 fs::create_dir_all(x).context("Failed to create config directory")?;
@@ -59,6 +60,9 @@ impl ProjectConfig {
     }
     pub fn upload_dir(&self) -> PathBuf {
         self.project_dirs.data_dir().join("uploads")
+    }
+    pub fn thumbnails_dir(&self) -> PathBuf {
+        self.project_dirs.data_dir().join("thumbnails")
     }
 }
 

@@ -4,6 +4,7 @@ use std::{fs, sync::Arc};
 
 use log::{debug, error, info};
 use onedrive_sync_lib::dbus::types::{DaemonStatus, SyncQueueItem, SyncStatus, UserProfile};
+use onedrive_sync_lib::dbus::types::MediaItem;
 use zbus::interface;
 use zbus::object_server::SignalEmitter;
 
@@ -287,6 +288,113 @@ impl ServiceImpl {
         let total = lines.len();
         let start = if total > 50 { total - 50 } else { 0 };
         Ok(lines[start..].to_vec())
+    }
+
+    /// List media items (images/videos) newest first with pagination and optional date filters
+    async fn list_media(&self, offset: u32, limit: u32, start_date: String, end_date: String) -> zbus::fdo::Result<Vec<MediaItem>> {
+        let repo = self.app_state.persistency().drive_item_with_fuse_repository();
+        let start_opt = if start_date.trim().is_empty() { None } else { Some(start_date.as_str()) };
+        let end_opt = if end_date.trim().is_empty() { None } else { Some(end_date.as_str()) };
+        let items = repo
+            .get_media_items_paginated(start_opt, end_opt, offset as usize, limit as usize)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to list media: {}", e)))?;
+        let mapped: Vec<MediaItem> = items
+            .into_iter()
+            .map(|it| {
+                let name = it.drive_item.name.clone().unwrap_or_default();
+                let virtual_path = it.fuse_metadata.virtual_path.clone().unwrap_or_default();
+                let mime = it.mime_type().unwrap_or("").to_string();
+                let created = it.drive_item.created_date.clone().unwrap_or_default();
+                let modified = it.drive_item.last_modified.clone().unwrap_or_default();
+                MediaItem {
+                    onedrive_id: it.drive_item.id.clone(),
+                    ino: it.fuse_metadata.virtual_ino.unwrap_or(0),
+                    name,
+                    virtual_path,
+                    mime_type: mime,
+                    created_date: created,
+                    last_modified: modified,
+                }
+            })
+            .collect();
+        Ok(mapped)
+    }
+
+    /// Ensure a medium thumbnail exists for inode; returns absolute file path
+    async fn fetch_thumbnail(&self, ino: u64) -> zbus::fdo::Result<String> {
+        use tokio::fs;
+        use tokio::io::AsyncWriteExt;
+        let repo = self.app_state.persistency().drive_item_with_fuse_repository();
+        let item = repo
+            .get_drive_item_with_fuse_by_virtual_ino(ino)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to query item: {}", e)))?
+            .ok_or_else(|| zbus::fdo::Error::Failed("Item not found".to_string()))?;
+        let thumb_dir = self.app_state.config().thumbnails_dir();
+        if !thumb_dir.exists() {
+            std::fs::create_dir_all(&thumb_dir).map_err(|e| zbus::fdo::Error::Failed(format!("Failed to create thumbnails dir: {}", e)))?;
+        }
+        let path = thumb_dir.join(format!("{}.jpg", ino));
+        if path.exists() {
+            return Ok(path.to_string_lossy().to_string());
+        }
+        let bytes = self
+            .app_state
+            .onedrive()
+            .download_thumbnail_medium(&item.drive_item.id)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to download thumbnail: {}", e)))?;
+        let mut file = fs::File::create(&path).await.map_err(|e| zbus::fdo::Error::Failed(format!("Failed to create thumbnail file: {}", e)))?;
+        file.write_all(&bytes).await.map_err(|e| zbus::fdo::Error::Failed(format!("Failed to write thumbnail: {}", e)))?;
+        Ok(path.to_string_lossy().to_string())
+    }
+
+    /// Ensure file is downloaded locally at local/{ino}; return absolute path
+    async fn ensure_local_by_ino(&self, ino: u64) -> zbus::fdo::Result<String> {
+        info!("DBus: ensure_local_by_ino called for ino: {}", ino);
+        use tokio::fs;
+        use std::path::PathBuf;
+        let fm = self.app_state.file_manager();
+        if let Some(existing) = fm.get_local_path_if_file_exists(ino) {
+            return Ok(existing.to_string_lossy().to_string());
+        }
+
+        let repo = self.app_state.persistency().drive_item_with_fuse_repository();
+        let item = repo
+            .get_drive_item_with_fuse_by_virtual_ino(ino)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to query item: {}", e)))?
+            .ok_or_else(|| zbus::fdo::Error::Failed("Item not found".to_string()))?;
+        if item.is_folder() {
+            return Err(zbus::fdo::Error::Failed("Requested inode is a folder".into()));
+        }
+        let item = self.app_state
+        .onedrive().get_item_by_id(&item.drive_item.id)
+        .await
+        .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to get item by id: {}", e)))?;
+
+        let download_url = item
+            .download_url
+            .ok_or_else(|| {
+                error!("Missing download URL for item: {}", &item.id);
+                zbus::fdo::Error::Failed("Missing download URL".into())
+            })?;
+        let id = item.id.to_string();
+        let filename = item.name.clone().unwrap_or(id.clone());
+        let dl = self
+            .app_state
+            .onedrive()
+            .download_file(download_url.as_str(), &id, filename.as_str())
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to download file: {}", e)))?;
+
+        let target_path = fm.get_local_dir().join(ino.to_string());
+        fm.save_downloaded_file_r(&dl, &target_path)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to save file: {}", e)))?;
+
+        Ok(target_path.to_string_lossy().to_string())
     }
 
     async fn full_reset(&self) -> zbus::fdo::Result<()> {

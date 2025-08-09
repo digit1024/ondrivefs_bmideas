@@ -333,6 +333,44 @@ impl DriveItemWithFuseRepository {
         Ok(items)
     }
 
+    /// Get media items (images/videos) with optional date filter and pagination, newest first
+    pub async fn get_media_items_paginated(
+        &self,
+        start_date: Option<&str>,
+        end_date: Option<&str>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<DriveItemWithFuse>> {
+        let mut base = String::from(
+            r#"SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
+                       mime_type, download_url, is_deleted, parent_id, parent_path, 
+                       parent_ino, virtual_path,  file_source, sync_status
+                FROM drive_items_with_fuse 
+                WHERE is_deleted = 0 AND is_folder = 0 AND (
+                    name like '%.jpg' OR name like '%.png' OR name like '%.mp4' OR name like '%.mov' OR name like '%.heic'
+                )"#,
+        );
+        if start_date.is_some() {
+            base.push_str(" AND created_date IS NOT NULL AND created_date >= ?");
+        }
+        if end_date.is_some() {
+            base.push_str(" AND created_date IS NOT NULL AND created_date <= ?");
+        }
+        base.push_str(" ORDER BY COALESCE( created_date , last_modified) DESC LIMIT ? OFFSET ?");
+
+        let mut query = sqlx::query(&base);
+        if let Some(s) = start_date { query = query.bind(s); }
+        if let Some(e) = end_date { query = query.bind(e); }
+        query = query.bind(limit as i64).bind(offset as i64);
+
+        let rows = query.fetch_all(&self.pool).await?;
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(self.row_to_drive_item_with_fuse(row).await?);
+        }
+        Ok(items)
+    }
+
     /// Get the next available inode number (for debugging/testing)
     pub async fn get_next_inode(&self) -> Result<u64> {
         let row = sqlx::query("SELECT MAX(virtual_ino) as max_ino FROM drive_items_with_fuse")

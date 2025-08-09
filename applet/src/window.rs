@@ -43,7 +43,7 @@ pub enum Message {
 
     Surface(cosmic::surface::Action),
     FetchStatus,
-    StatusSignal(DaemonStatus),
+    //StatusSignal(DaemonStatus),
     StatusLoaded(Result<DaemonStatus, String>),
 }
 
@@ -152,10 +152,7 @@ impl cosmic::Application for Window {
                 cosmic::task::message(cosmic::Action::Cosmic(cosmic::app::Action::Surface(a)))
             }
 
-            Message::StatusSignal(status) => {
-                self.daemon_status = Some(status);
-                Task::none()
-            }
+       
 
             Message::StatusLoaded(result) => {
                 match result {
