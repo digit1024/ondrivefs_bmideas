@@ -145,13 +145,13 @@ impl cosmic::Application for AppModel {
         nav.insert()
             .text("Gallery")
             .data::<PageId>(PageId::Gallery)
-            .icon(icon::from_name("image-x-generic-symbolic"));
+            .icon(icon::from_name("image-x-generic-symbolic"))
+            .activate();
 
         nav.insert()
             .text("Status")
             .data::<PageId>(PageId::Status)
-            .icon(icon::from_name("applications-system-symbolic"))
-            .activate();
+            .icon(icon::from_name("applications-system-symbolic"));
 
         nav.insert()
             .text("Folders")
@@ -198,7 +198,7 @@ impl cosmic::Application for AppModel {
             gallery_page: pages::gallery_page::Page::new(),
         };
 
-        // Create startup commands: set window title and fetch initial status/queues
+        // Create startup commands: set window title and fetch initial data for pages
         let title_command = app.update_title();
         let fetch_status_command = cosmic::task::future(async move {
             info!("App: Initializing StatusPage with fetch command");
@@ -211,6 +211,9 @@ impl cosmic::Application for AppModel {
         let fetch_folders_command = cosmic::task::future(async move {
             Message::FoldersPage(folders_page::Message::FetchFolders)
         });
+        let fetch_gallery_command = cosmic::task::future(async move {
+            Message::GalleryPage(gallery_page::Message::FetchPage)
+        });
 
         (
             app,
@@ -219,6 +222,7 @@ impl cosmic::Application for AppModel {
                 fetch_status_command,
                 fetch_queues_command,
                 fetch_folders_command,
+                fetch_gallery_command,
             ]),
         )
     }
