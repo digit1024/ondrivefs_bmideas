@@ -11,6 +11,7 @@ use cosmic::Element;
 use onedrive_sync_lib::dbus::types::DaemonStatus;
 
 use crate::dbus_client::with_dbus_client;
+use crate::dbus_client::DbusClient;
 
 const ID: &str = "com.github.com.bmideas.onedrive-sync.applet";
 const ICON_TRUE: &[u8] = include_bytes!("../../resources/programfiles/icons/ok.png");
@@ -21,6 +22,7 @@ pub struct Window {
     popup: Option<Id>,
 
     daemon_status: Option<DaemonStatus>,
+    subscribed: bool,
 }
 
 impl Default for Window {
@@ -30,6 +32,7 @@ impl Default for Window {
             popup: None,
 
             daemon_status: None,
+            subscribed: false,
         }
     }
 }
@@ -40,6 +43,7 @@ pub enum Message {
 
     Surface(cosmic::surface::Action),
     FetchStatus,
+    StatusSignal(DaemonStatus),
     StatusLoaded(Result<DaemonStatus, String>),
 }
 
@@ -116,6 +120,20 @@ impl cosmic::Application for Window {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::FetchStatus => {
+                // One-time subscribe to status signal
+                if !self.subscribed {
+                    self.subscribed = true;
+                    let subscribe = async move {
+                        if let Ok(client) = DbusClient::new().await {
+                            let _ = client
+                                .subscribe_daemon_status(|_status| async move {
+                                    // In this minimal applet, we keep polling fallback.
+                                })
+                                .await;
+                        }
+                    };
+                    let _ = Task::perform(subscribe, |_| cosmic::Action::<Message>::None);
+                }
                 let fetch_status =
                     with_dbus_client(|client| async move { client.get_daemon_status().await });
                 Task::perform(fetch_status, |result| match result {
@@ -134,6 +152,11 @@ impl cosmic::Application for Window {
                 cosmic::task::message(cosmic::Action::Cosmic(cosmic::app::Action::Surface(a)))
             }
 
+            Message::StatusSignal(status) => {
+                self.daemon_status = Some(status);
+                Task::none()
+            }
+
             Message::StatusLoaded(result) => {
                 match result {
                     Ok(status) => {
@@ -148,7 +171,8 @@ impl cosmic::Application for Window {
         }
     }
     fn subscription(&self) -> Subscription<Message> {
-        time::every(Duration::from_secs(5)).map(|_| Message::FetchStatus)
+        // Keep a modest poll as fallback
+        time::every(Duration::from_secs(15)).map(|_| Message::FetchStatus)
     }
 
     fn view(&self) -> Element<Message> {
