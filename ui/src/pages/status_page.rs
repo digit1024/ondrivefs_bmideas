@@ -18,6 +18,7 @@ pub enum Message {
     Refresh,
     AutoRefresh,
     FullReset,
+    ToggleSyncPause,
 }
 
 pub struct Page {
@@ -60,6 +61,7 @@ impl Page {
             column().push(header).push(
                 row()
                     .push(button::standard("Refresh").on_press(Message::Refresh))
+                    .push(button::standard("Pause/Resume Sync").on_press(Message::ToggleSyncPause))
                     .push(button::destructive("Full Reset").on_press(Message::FullReset))
                     .width(Length::Fill),
             ),
@@ -328,6 +330,35 @@ impl Page {
                 };
 
                 cosmic::task::future(fetch_status).map(|result| {
+                    cosmic::Action::App(crate::app::Message::StatusPage(Message::StatusLoaded(
+                        result,
+                    )))
+                })
+            }
+
+            Message::ToggleSyncPause => {
+                info!("StatusPage: Toggle sync pause requested");
+                self.loading = true;
+                self.error = None;
+
+                let toggle_pause = async move {
+                    match DbusClient::new().await {
+                        Ok(client) => match client.toggle_sync_pause().await {
+                            Ok(is_paused) => {
+                                info!("StatusPage: Sync pause toggled: {}", if is_paused { "paused" } else { "resumed" });
+                                // After toggling, fetch the updated status
+                                match client.get_daemon_status().await {
+                                    Ok(status) => Ok(status),
+                                    Err(e) => Err(format!("Failed to get daemon status after toggle: {}", e)),
+                                }
+                            },
+                            Err(e) => Err(format!("Failed to toggle sync pause: {}", e)),
+                        },
+                        Err(e) => Err(format!("Failed to connect to daemon: {}", e)),
+                    }
+                };
+
+                cosmic::task::future(toggle_pause).map(|result| {
                     cosmic::Action::App(crate::app::Message::StatusPage(Message::StatusLoaded(
                         result,
                     )))

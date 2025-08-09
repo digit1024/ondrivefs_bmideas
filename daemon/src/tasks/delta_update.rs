@@ -353,6 +353,14 @@ impl SyncCycle {
 
     /// Run the complete sync cycle
     pub async fn run(&self) -> Result<()> {
+        // Check if sync is paused
+        let settings = self.app_state.config().settings.read().await;
+        if settings.sync_paused {
+            info!("⏸️ Sync is paused, skipping sync cycle");
+            return Ok(());
+        }
+        drop(settings); // Release the read lock
+
         info!("🔄 Starting two-way sync cycle");
 
         // Get delta changes from OneDrive

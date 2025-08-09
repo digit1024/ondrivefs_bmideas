@@ -145,35 +145,7 @@ impl UserDecision {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum ValidationError {
-    TreeInvalid(String),     // Parent folder doesn't exist
-    NameCollision(String),   // File with same name exists
-    ContentConflict(String), // File modified in both places
-}
 
-impl ValidationError {
-    pub fn human_readable(&self) -> String {
-        match self {
-            ValidationError::TreeInvalid(details) => {
-                format!("Parent folder was deleted or moved: {}", details)
-            }
-            ValidationError::NameCollision(details) => {
-                format!("A file with the same name already exists: {}", details)
-            }
-            ValidationError::ContentConflict(details) => {
-                format!("File was modified both locally and remotely: {}", details)
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum ValidationResult {
-    Valid,
-    Invalid(Vec<ValidationError>),
-    Resolved(crate::sync::conflict_resolution::ConflictResolution),
-}
 
 #[derive(Debug, Clone)]
 pub struct ProcessingItem {
@@ -1009,7 +981,7 @@ impl ProcessingItemRepository {
                    change_type, change_operation, conflict_resolution, validation_errors, user_decision
             FROM processing_items 
             WHERE drive_item_id = ? AND change_type = ? AND status IN ('new', 'validated', 'conflicted', 'error')
-            AND ( parent_path  NOT LIKE '/root/.%' OR (name ='root' and parent_path is null))
+            AND ( COALESCE(parent_path, '') NOT LIKE '/root/.%' OR (COALESCE(name, '') ='root' and COALESCE(parent_path, '') = ''))
             ORDER BY id ASC LIMIT 1
             "#,
         )
@@ -1105,6 +1077,26 @@ impl ProcessingItemRepository {
             "Updated processing item {} with new drive data for squashing",
             db_id
         );
+        Ok(())
+    }
+
+    pub async fn hause_keeping(&self) -> Result<()> {
+        sqlx::query("DELETE FROM processing_items WHERE status = 'done' ")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("Delete from processing_items WHERE parent_path LIKE '/drive/root:/root/.%' and drive_item_id LIKE 'local_%'")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("update processing_items set change_operation = 'delete' WHERE parent_path LIKE '/drive/root:/root/.%' ")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("Delete  from drive_items_with_fuse  where virtual_path like '/root/.Trash-1000/%' and onedrive_id like 'local_%'")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("delete from sync_state where id != (select max (id) from sync_state)")
+            .execute(&self.pool)
+            .await?;
+
         Ok(())
     }
 }

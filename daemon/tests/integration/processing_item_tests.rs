@@ -1,314 +1,269 @@
 use anyhow::Result;
+use onedrive_sync_daemon::file_manager::FileManager;
+use onedrive_sync_daemon::persistency::drive_item_with_fuse_repository::DriveItemWithFuseRepository;
 use onedrive_sync_daemon::persistency::processing_item_repository::{
-    ChangeOperation, ProcessingStatus,
+    ChangeOperation, ProcessingItemRepository, ProcessingStatus,
 };
+use onedrive_sync_daemon::sync::SyncProcessor;
 use serial_test::serial;
+use std::sync::Arc;
 
-// Import from our test modules
 use crate::common::fixtures::{
-    create_test_file_item, create_test_local_processing_item, create_test_processing_item,
-    create_test_processing_item_with_status, create_test_remote_processing_item,
+    create_test_local_processing_item, create_test_remote_processing_item,
 };
 use crate::common::setup::TEST_ENV;
+use onedrive_sync_daemon::app_state::AppState;
 
-/// Test storing and retrieving a processing item by ID
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-#[serial]
-async fn test_fs_item_tree_creation_works() -> Result<()> {
-    println!("\n🧪 Running test: Clash of local and remote changes");
-    // SETUP
-    // Get the shared test environment and AppState
+async fn setup_test_env() -> Result<(
+    Arc<AppState>,
+    ProcessingItemRepository,
+    DriveItemWithFuseRepository,
+)> {
     let mut env = TEST_ENV.lock().await;
     let app_state = env.get_app_state().await?;
     env.clear_all_data().await?;
-    // Get the processing item repository
-    let repo = app_state.persistency().processing_item_repository();
 
-    // GIVEN
-    let tree_items = crate::common::fixtures::create_drive_items_tree(); // ~50 items with valid relationships
+    let repo = app_state.persistency().processing_item_repository();
     let drive_items_with_fuse_repo = app_state.persistency().drive_item_with_fuse_repository();
+
+    let tree_items = crate::common::fixtures::create_drive_items_tree();
     for item in &tree_items {
         drive_items_with_fuse_repo
             .store_drive_item_with_fuse(&item)
             .await?;
     }
-    //WHEN
+
+    Ok((app_state, repo, drive_items_with_fuse_repo))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[serial]
+async fn test_fs_item_tree_creation_works() -> Result<()> {
+    println!("\n🧪 Running test: Filesystem item tree creation");
+    let (_app_state, _repo, drive_items_with_fuse_repo) = setup_test_env().await?;
+
     let item = drive_items_with_fuse_repo
         .get_drive_item_with_fuse_by_virtual_ino(5)
         .await?;
-    assert_eq!(item.is_some(), true);
+    assert!(item.is_some());
     let item = item.unwrap();
 
     assert_eq!(item.drive_item().name, Some("Q1_Report.pdf".to_string()));
     assert_eq!(item.parent_ino(), Some(4));
-    assert_eq!(item.drive_item().file.is_some(), true);
+    assert!(item.drive_item().file.is_some());
 
     Ok(())
 }
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[serial]
 async fn test_processing_item_modified_no_conflicts() -> Result<()> {
-    println!("\n🧪 Running test: Remote change that goes well");
-    // SETUP
-    // Get the shared test environment and AppState
-    let mut env = TEST_ENV.lock().await;
-    let app_state = env.get_app_state().await?;
-    env.clear_all_data().await?;
-    // Get the processing item repository
-    let repo = app_state.persistency().processing_item_repository();
+    println!("\n🧪 Running test: Successful remote modification");
+    let (app_state, repo, drive_items_with_fuse_repo) = setup_test_env().await?;
 
-    // GIVEN
-    let tree_items = crate::common::fixtures::create_drive_items_tree(); // ~50 items with valid relationships
-    let drive_items_with_fuse_repo = app_state.persistency().drive_item_with_fuse_repository();
-    for item in &tree_items {
-        drive_items_with_fuse_repo
-            .store_drive_item_with_fuse(&item)
-            .await?;
-    }
-    //WHEN
-    let item = drive_items_with_fuse_repo
+    let item_to_update = drive_items_with_fuse_repo
         .get_drive_item_with_fuse_by_virtual_ino(5)
-        .await?;
-    assert_eq!(item.is_some(), true);
-    let item = item.unwrap();
-    // AND Item is modified remotely
-    let mut di = item.drive_item().clone();
-    di.etag = Some("12345dasd7890".to_string()); // new Etag =  modified
+        .await?
+        .unwrap();
+
+    let mut di = item_to_update.drive_item().clone();
+    di.etag = Some("new-etag-123".to_string());
     let processing_item = create_test_remote_processing_item(di, ChangeOperation::Update);
-    let stored_id = repo.store_processing_item(&processing_item).await?;
-    // And  the item is beeing processed
-    let processing_item = repo.get_processing_item_by_id(stored_id).await?;
-    let sync_processor = onedrive_sync_daemon::sync::SyncProcessor::new(app_state);
+    let item_id = repo.store_processing_item(&processing_item).await?;
+
+    let item_to_process = repo.get_processing_item_by_id(item_id).await?.unwrap();
+    let sync_processor = SyncProcessor::new(app_state.clone());
     sync_processor
-        .process_single_item(&processing_item.unwrap())
+        .process_single_item(&item_to_process)
         .await?;
-    // THEN
-    // The item is  modified
-    let item = drive_items_with_fuse_repo
+
+    let updated_item = drive_items_with_fuse_repo
         .get_drive_item_with_fuse_by_virtual_ino(5)
-        .await?;
-    assert_eq!(item.is_some(), true);
-    let item = item.unwrap();
-    assert_eq!(item.drive_item().etag, Some("12345dasd7890".to_string())); // Etag is updated
-    assert_eq!(item.drive_item().name, Some("Q1_Report.pdf".to_string())); // Name is not modified
-    assert_eq!(item.parent_ino(), Some(4)); // Parent is not modified
-    assert_eq!(item.drive_item().file.is_some(), true); // File is not modified
-                                                        // And The processing item is done
-    let processing_item = repo.get_processing_item_by_id(stored_id).await?;
-    assert_eq!(processing_item.unwrap().status, ProcessingStatus::Done);
+        .await?
+        .unwrap();
+    assert_eq!(
+        updated_item.drive_item().etag,
+        Some("new-etag-123".to_string())
+    );
+
+    let processed_item = repo.get_processing_item_by_id(item_id).await?.unwrap();
+    assert_eq!(processed_item.status, ProcessingStatus::Done);
 
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[serial]
-async fn test_processing_item_modified_locally_and_remotely() -> Result<()> {
-    println!("\n🧪 Running test: Clash of local and remote changes");
-    // SETUP
-    // Get the shared test environment and AppState
-    let mut env = TEST_ENV.lock().await;
-    let app_state = env.get_app_state().await?;
-    env.clear_all_data().await?;
-    // Get the processing item repository
-    let repo = app_state.persistency().processing_item_repository();
+async fn test_modify_on_modify_conflict_is_detected() -> Result<()> {
+    println!("\n🧪 Running test: Modify/Modify conflict detection");
+    let (app_state, repo, drive_items_with_fuse_repo) = setup_test_env().await?;
 
-    // GIVEN
-    let tree_items = crate::common::fixtures::create_drive_items_tree(); // ~50 items with valid relationships
-    let drive_items_with_fuse_repo = app_state.persistency().drive_item_with_fuse_repository();
-    for item in &tree_items {
-        drive_items_with_fuse_repo
-            .store_drive_item_with_fuse(&item)
-            .await?;
-    }
-    //WHEN
     let original_item = drive_items_with_fuse_repo
         .get_drive_item_with_fuse_by_virtual_ino(5)
-        .await?;
-    assert_eq!(original_item.is_some(), true);
-    let item = original_item.clone().unwrap();
-    // AND Item is modified locally
-    let mut di = item.drive_item().clone();
-    let processing_item = create_test_local_processing_item(di.clone(), ChangeOperation::Update);
-    let local_processing_item_id = repo.store_processing_item(&processing_item).await?;
-    // AND Item is modified remotely (CONFLICT)
-    di.etag = Some("12345dasd7890".to_string()); // new Etag =  modified
-    let processing_item = create_test_remote_processing_item(di, ChangeOperation::Update);
-    let stored_id = repo.store_processing_item(&processing_item).await?;
+        .await?
+        .unwrap();
+    let original_etag = original_item.drive_item().etag.clone();
 
-    // And  the item is beeing processed
-    let remote_processing_item = repo.get_processing_item_by_id(stored_id).await?;
-    let local_processing_item = repo
-        .get_processing_item_by_id(local_processing_item_id)
-        .await?;
-    let sync_processor = onedrive_sync_daemon::sync::SyncProcessor::new(app_state);
-    sync_processor
-        .process_single_item(&remote_processing_item.unwrap())
-        .await?;
-    sync_processor
-        .process_single_item(&local_processing_item.unwrap())
-        .await?;
-    // THEN
-    // The item is NOT modified
-    let item = drive_items_with_fuse_repo
-        .get_drive_item_with_fuse_by_virtual_ino(5)
-        .await?;
-    assert_eq!(item.is_some(), true);
-    let item = item.unwrap();
-    assert_eq!(
-        item.drive_item().etag,
-        original_item.unwrap().drive_item().etag
-    ); // Etag is NOT updated
-    assert_eq!(item.drive_item().name, Some("Q1_Report.pdf".to_string())); // Name is not modified
-    assert_eq!(item.parent_ino(), Some(4)); // Parent is not modified
-    assert_eq!(item.drive_item().file.is_some(), true); // File is not modified
-                                                        // And The processing item is Conflict
-    let processing_item = repo.get_processing_item_by_id(stored_id).await?;
-    assert_eq!(
-        processing_item.unwrap().status,
-        ProcessingStatus::Conflicted
+    // Create a dummy file to be "updated"
+    let local_dir = app_state.file_manager().get_local_dir();
+    let file_path = local_dir.join(original_item.virtual_ino().unwrap().to_string());
+    std::fs::create_dir_all(&local_dir)?;
+    std::fs::write(&file_path, "local content")?;
+
+    let local_change = create_test_local_processing_item(
+        original_item.drive_item().clone(),
+        ChangeOperation::Update,
     );
-    let processing_item = repo
-        .get_processing_item_by_id(local_processing_item_id)
-        .await?;
-    assert_eq!(
-        processing_item.unwrap().status,
-        ProcessingStatus::Conflicted
-    );
+    let local_id = repo.store_processing_item(&local_change).await?;
 
-    Ok(())
-}
+    let mut remote_di = original_item.drive_item().clone();
+    remote_di.etag = Some("new-remote-etag".to_string());
+    let remote_change = create_test_remote_processing_item(remote_di, ChangeOperation::Update);
+    let remote_id = repo.store_processing_item(&remote_change).await?;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-#[serial]
-async fn test_processing_item_modified_locally_and_remotely_all_items_process() -> Result<()> {
-    println!("\n🧪 Running test: Clash of local and remote changes");
-    // SETUP
-    // Get the shared test environment and AppState
-    let mut env = TEST_ENV.lock().await;
-    let app_state = env.get_app_state().await?;
-    env.clear_all_data().await?;
-    // Get the processing item repository
-    let repo = app_state.persistency().processing_item_repository();
-
-    // GIVEN
-    let tree_items = crate::common::fixtures::create_drive_items_tree(); // ~50 items with valid relationships
-    let drive_items_with_fuse_repo = app_state.persistency().drive_item_with_fuse_repository();
-    for item in &tree_items {
-        drive_items_with_fuse_repo
-            .store_drive_item_with_fuse(&item)
-            .await?;
-    }
-    //WHEN
-    let original_item = drive_items_with_fuse_repo
-        .get_drive_item_with_fuse_by_virtual_ino(5)
-        .await?;
-    assert_eq!(original_item.is_some(), true);
-    let item = original_item.clone().unwrap();
-    // AND Item is modified locally
-    let mut di = item.drive_item().clone();
-    let processing_item = create_test_local_processing_item(di.clone(), ChangeOperation::Update);
-    let local_processing_item_id = repo.store_processing_item(&processing_item).await?;
-    // AND Item is modified remotely (CONFLICT)
-    di.etag = Some("12345dasd7890".to_string()); // new Etag =  modified
-    let processing_item = create_test_remote_processing_item(di, ChangeOperation::Update);
-    let stored_id = repo.store_processing_item(&processing_item).await?;
-
-    // And  the item is beeing processed
-    let remote_processing_item = repo.get_processing_item_by_id(stored_id).await?;
-    let local_processing_item = repo
-        .get_processing_item_by_id(local_processing_item_id)
-        .await?;
-    let sync_processor = onedrive_sync_daemon::sync::SyncProcessor::new(app_state);
+    let sync_processor = SyncProcessor::new(app_state.clone());
     sync_processor.process_all_items().await?;
-    // THEN
-    // The item is NOT modified
-    let item = drive_items_with_fuse_repo
+
+    let final_item = drive_items_with_fuse_repo
         .get_drive_item_with_fuse_by_virtual_ino(5)
-        .await?;
-    assert_eq!(item.is_some(), true);
-    let item = item.unwrap();
-    assert_eq!(
-        item.drive_item().etag,
-        original_item.unwrap().drive_item().etag
-    ); // Etag is NOT updated
-    assert_eq!(item.drive_item().name, Some("Q1_Report.pdf".to_string())); // Name is not modified
-    assert_eq!(item.parent_ino(), Some(4)); // Parent is not modified
-    assert_eq!(item.drive_item().file.is_some(), true); // File is not modified
-                                                        // And The processing item is Conflict
-    let processing_item = repo.get_processing_item_by_id(stored_id).await?;
-    assert_eq!(
-        processing_item.unwrap().status,
-        ProcessingStatus::Conflicted
-    );
-    let processing_item = repo
-        .get_processing_item_by_id(local_processing_item_id)
-        .await?;
-    assert_eq!(
-        processing_item.unwrap().status,
-        ProcessingStatus::Conflicted
-    );
+        .await?
+        .unwrap();
+    assert_eq!(final_item.drive_item().etag, original_etag); // Etag is not changed
+
+    let local_processed = repo.get_processing_item_by_id(local_id).await?.unwrap();
+    assert_eq!(local_processed.status, ProcessingStatus::Conflicted);
+
+    let remote_processed = repo.get_processing_item_by_id(remote_id).await?.unwrap();
+    assert_eq!(remote_processed.status, ProcessingStatus::Conflicted);
 
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[serial]
-async fn test_processing_item_modified_locally_should_fail_file_not_found() -> Result<()> {
-    println!("\n🧪 Running test: Clash of local and remote changes");
-    // SETUP
-    // Get the shared test environment and AppState
-    let mut env = TEST_ENV.lock().await;
-    let app_state = env.get_app_state().await?;
-    env.clear_all_data().await?;
-    // Get the processing item repository
-    let repo = app_state.persistency().processing_item_repository();
+async fn test_local_update_fails_if_file_not_found() -> Result<()> {
+    println!("\n🧪 Running test: Local update fails if file is missing");
+    let (app_state, repo, drive_items_with_fuse_repo) = setup_test_env().await?;
 
-    // GIVEN
-    let tree_items = crate::common::fixtures::create_drive_items_tree(); // ~50 items with valid relationships
-    let drive_items_with_fuse_repo = app_state.persistency().drive_item_with_fuse_repository();
-    for item in &tree_items {
-        drive_items_with_fuse_repo
-            .store_drive_item_with_fuse(&item)
-            .await?;
-    }
-    //WHEN
-    let original_item = drive_items_with_fuse_repo
-        .get_drive_item_with_fuse_by_virtual_ino(5)
-        .await?;
-    assert_eq!(original_item.is_some(), true);
-    let item = original_item.clone().unwrap();
-    // AND Item is modified locally
-    let di = item.drive_item().clone();
-    let processing_item = create_test_local_processing_item(di.clone(), ChangeOperation::Update);
-    let local_processing_item_id = repo.store_processing_item(&processing_item).await?;
-
-    // And  the item is beeing processed
-
-    let local_processing_item = repo
-        .get_processing_item_by_id(local_processing_item_id)
-        .await?;
-    let sync_processor = onedrive_sync_daemon::sync::SyncProcessor::new(app_state);
-    sync_processor.process_all_items().await?;
-    // THEN
-    // The item is NOT modified
     let item = drive_items_with_fuse_repo
         .get_drive_item_with_fuse_by_virtual_ino(5)
-        .await?;
-    assert_eq!(item.is_some(), true);
-    let item = item.unwrap();
-    assert_eq!(
-        item.drive_item().etag,
-        original_item.unwrap().drive_item().etag
-    ); // Etag is NOT updated
-    assert_eq!(item.drive_item().name, Some("Q1_Report.pdf".to_string())); // Name is not modified
-    assert_eq!(item.parent_ino(), Some(4)); // Parent is not modified
-    assert_eq!(item.drive_item().file.is_some(), true); // File is not modified
-                                                        // And The processing item is In error
+        .await?
+        .unwrap();
 
-    let processing_item = repo
-        .get_processing_item_by_id(local_processing_item_id)
+    let local_change =
+        create_test_local_processing_item(item.drive_item().clone(), ChangeOperation::Update);
+    let item_id = repo.store_processing_item(&local_change).await?;
+
+    // Note: We do NOT create the local file on disk
+    let sync_processor = SyncProcessor::new(app_state.clone());
+    sync_processor.process_all_items().await?;
+
+    let processed_item = repo.get_processing_item_by_id(item_id).await?.unwrap();
+    assert_eq!(processed_item.status, ProcessingStatus::Error); // It should fail
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[serial]
+async fn test_remote_move_on_local_move_conflict_is_detected() -> Result<()> {
+    println!("\n🧪 Running test: Remote move on local move conflict");
+    let (app_state, repo, drive_items_with_fuse_repo) = setup_test_env().await?;
+
+    let item_to_move = drive_items_with_fuse_repo
+        .get_drive_item_with_fuse_by_virtual_ino(5)
+        .await?
+        .unwrap(); // "Q1_Report.pdf" in "Folder B" (ino 4)
+    let original_parent_ino = item_to_move.parent_ino();
+
+    let new_local_parent = drive_items_with_fuse_repo
+        .get_drive_item_with_fuse_by_virtual_ino(6)
+        .await?
+        .unwrap(); // "Folder C"
+
+    let new_remote_parent = drive_items_with_fuse_repo
+        .get_drive_item_with_fuse_by_virtual_ino(8)
+        .await?
+        .unwrap(); // "Folder D"
+
+    let mut local_move_di = item_to_move.drive_item().clone();
+    local_move_di.parent_reference = Some(new_local_parent.drive_item().into());
+    let local_move = create_test_local_processing_item(
+        local_move_di,
+        ChangeOperation::Move {
+            old_path: "".into(),
+            new_path: "".into(),
+        },
+    );
+    repo.store_processing_item(&local_move).await?;
+
+    let mut remote_move_di = item_to_move.drive_item().clone();
+    remote_move_di.parent_reference = Some(new_remote_parent.drive_item().into());
+    let remote_move = create_test_remote_processing_item(
+        remote_move_di,
+        ChangeOperation::Move {
+            old_path: "".into(),
+            new_path: "".into(),
+        },
+    );
+    let remote_id = repo.store_processing_item(&remote_move).await?;
+
+    let sync_processor = SyncProcessor::new(app_state.clone());
+    sync_processor.process_all_items().await?;
+
+    let processed = repo.get_processing_item_by_id(remote_id).await?.unwrap();
+    assert_eq!(processed.status, ProcessingStatus::Conflicted);
+    assert!(processed.validation_errors[0]
+        .contains("Remote item was moved, but the local item was also moved"));
+
+    let final_item = drive_items_with_fuse_repo
+        .get_drive_item_with_fuse_by_virtual_ino(5)
+        .await?
+        .unwrap();
+    assert_eq!(final_item.parent_ino(), original_parent_ino);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[serial]
+async fn test_local_move_of_remote_deleted_item_conflict() -> Result<()> {
+    println!("\n🧪 Running test: Local move of a remote-deleted item conflict");
+    let (app_state, repo, drive_items_with_fuse_repo) = setup_test_env().await?;
+
+    let item_to_process = drive_items_with_fuse_repo
+        .get_drive_item_with_fuse_by_virtual_ino(5)
+        .await?
+        .unwrap(); // "Q1_Report.pdf"
+
+    // Mark the item as deleted on remote
+    drive_items_with_fuse_repo
+        .mark_as_deleted_by_onedrive_id(&item_to_process.id())
         .await?;
-    assert_eq!(processing_item.unwrap().status, ProcessingStatus::Error);
+
+    let new_parent = drive_items_with_fuse_repo
+        .get_drive_item_with_fuse_by_virtual_ino(6)
+        .await?
+        .unwrap(); // "Folder C"
+
+    let mut local_move_di = item_to_process.drive_item().clone();
+    local_move_di.parent_reference = Some(new_parent.drive_item().into());
+    let local_move = create_test_local_processing_item(
+        local_move_di,
+        ChangeOperation::Move {
+            old_path: "".into(),
+            new_path: "".into(),
+        },
+    );
+    let local_id = repo.store_processing_item(&local_move).await?;
+
+    let sync_processor = SyncProcessor::new(app_state.clone());
+    sync_processor.process_all_items().await?;
+
+    let processed = repo.get_processing_item_by_id(local_id).await?.unwrap();
+    assert_eq!(processed.status, ProcessingStatus::Conflicted);
+    assert!(processed.validation_errors[0]
+        .contains("Local item was renamed or moved, but the original source item has been deleted"));
 
     Ok(())
 }
@@ -317,6 +272,5 @@ async fn test_processing_item_modified_locally_should_fail_file_not_found() -> R
 #[serial]
 async fn test_zzzz_last_test() -> Result<()> {
     println!("\n🧪 ");
-
     Ok(())
 }

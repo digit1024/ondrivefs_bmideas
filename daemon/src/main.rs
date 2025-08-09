@@ -343,6 +343,7 @@ async fn main() -> Result<()> {
                         MountOption::DefaultPermissions,
                         MountOption::NoAtime,
                         MountOption::CUSTOM("case_insensitive".to_string()),
+                        
                     ],
                 );
                 if let Err(e) = result {
