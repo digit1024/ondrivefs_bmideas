@@ -72,9 +72,9 @@ impl Page {
                     let handle = ImageHandle::from_path(path.clone());
                     let img = image_widget(handle)
                         .width(Length::Fixed(150.0))
-                        .height(Length::Fixed(150.0))
-                        .on_press(Message::OpenItem(item.ino));
-                    img.into()
+                        .height(Length::Fixed(150.0));
+                    let clickable = button::custom(img).on_press(Message::OpenItem(item.ino));
+                    clickable.into()
                 } else {
                     // Placeholder while loading thumbnail
                     container(text::body("Loading thumb...")).width(Length::Fixed(150.0)).height(Length::Fixed(150.0)).into()
