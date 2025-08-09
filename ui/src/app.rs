@@ -16,12 +16,13 @@ use std::collections::HashMap;
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
 enum PageId {
     #[default]
+    Gallery,
     Status,
     Folders,
     Queues,
     Conflicts,
     Logs,
-    Gallery,
+
 }
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub enum ContextPage {
@@ -174,10 +175,7 @@ impl cosmic::Application for AppModel {
 
 
 
-        // nav.insert()
-        //     .text("Settings")
-        //     //.data::<Page>(Page::Settings)
-        //     .icon(icon::from_name("applications-science-symbolic"));
+
 
         // Construct the app model with the runtime's core.
         let mut app = AppModel {
@@ -269,7 +267,7 @@ impl cosmic::Application for AppModel {
 
     /// Describes the interface based on the current state of the application model.
     fn view(&self) -> Element<Self::Message> {
-        let page = self.nav.active_data::<PageId>().unwrap_or(&PageId::Status);
+        let page = self.nav.active_data::<PageId>().unwrap_or(&PageId::Gallery);
 
         let content = match page {
             PageId::Status => self.status_page.view().map(Message::StatusPage),

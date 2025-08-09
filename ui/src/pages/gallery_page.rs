@@ -1,5 +1,5 @@
 use crate::dbus_client::with_dbus_client;
-use cosmic::iced::{time, Length, Subscription};
+use cosmic::iced::{time, Alignment, ContentFit, Length, Subscription};
 use cosmic::widget::{button, column, container, row, scrollable, text, text_input, image as image_widget};
 use cosmic::iced::widget::image::Handle as ImageHandle;
 use onedrive_sync_lib::dbus::types::MediaItem;
@@ -70,31 +70,34 @@ impl Page {
             for item in chunk {
                 let thumb_el: cosmic::Element<Message> = if let Some(path) = self.thumb_paths.get(&item.ino) {
                     let handle = ImageHandle::from_path(path.clone());
-                    let img = image_widget(handle)
-                        .width(Length::Fixed(150.0))
-                        .height(Length::Fixed(150.0));
-                    let clickable = button::custom(img).on_press(Message::OpenItem(item.ino));
-                    clickable.into()
+                    
+                    let img = image_widget(handle);
+           
+                    let clickable = button::custom(img).class(cosmic::style::Button::Image).on_press(Message::OpenItem(item.ino));
+                    let image_container = container(clickable).center_x(176.0).center_y(176.0);
+                    image_container.into()
                 } else {
                     // Placeholder while loading thumbnail
-                    container(text::body("Loading thumb...")).width(Length::Fixed(150.0)).height(Length::Fixed(150.0)).into()
+                    container(text::body("Loading thumb...")).width(Length::Fixed(176.0)).height(Length::Fixed(176.0)).into()
                 };
                 let card = container(
                     column()
                         .spacing(spacing)
+                        .align_x(Alignment::Center)
+                        .height(Length::Fixed(176.0))
                         .push(thumb_el)
                         .push(text::body(item.name.clone()).size(12))
                 )
                 .class(cosmic::style::Container::Card)
                 .padding(8)
-                .width(Length::Fixed(170.0));
+                .width(Length::Fixed(196.0));
                 roww = roww.push(card);
             }
             grid = grid.push(roww);
         }
 
         let list = scrollable(container(grid).width(Length::Fill)).height(Length::Fill);
-
+        
         let status = if self.loading {
             container(text::body("Loading...")).width(Length::Fill)
         } else {

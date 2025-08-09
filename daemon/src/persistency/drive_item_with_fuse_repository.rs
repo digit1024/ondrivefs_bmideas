@@ -347,7 +347,7 @@ impl DriveItemWithFuseRepository {
                        parent_ino, virtual_path,  file_source, sync_status
                 FROM drive_items_with_fuse 
                 WHERE is_deleted = 0 AND is_folder = 0 AND (
-                    mime_type LIKE 'image/%' OR mime_type LIKE 'video/%'
+                    name like '%.jpg' OR name like '%.png' OR name like '%.mp4' OR name like '%.mov' OR name like '%.heic'
                 )"#,
         );
         if start_date.is_some() {
@@ -356,7 +356,7 @@ impl DriveItemWithFuseRepository {
         if end_date.is_some() {
             base.push_str(" AND created_date IS NOT NULL AND created_date <= ?");
         }
-        base.push_str(" ORDER BY COALESCE(last_modified, created_date) DESC LIMIT ? OFFSET ?");
+        base.push_str(" ORDER BY COALESCE( created_date , last_modified) DESC LIMIT ? OFFSET ?");
 
         let mut query = sqlx::query(&base);
         if let Some(s) = start_date { query = query.bind(s); }
