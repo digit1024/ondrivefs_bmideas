@@ -301,14 +301,21 @@ impl ServiceImpl {
             .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to list media: {}", e)))?;
         let mapped: Vec<MediaItem> = items
             .into_iter()
-            .map(|it| MediaItem {
-                onedrive_id: it.drive_item.id.clone(),
-                ino: it.fuse_metadata.virtual_ino.unwrap_or(0),
-                name: it.drive_item.name.unwrap_or_default(),
-                virtual_path: it.fuse_metadata.virtual_path.unwrap_or_default(),
-                mime_type: it.mime_type().unwrap_or("").to_string(),
-                created_date: it.drive_item.created_date.clone().unwrap_or_default(),
-                last_modified: it.drive_item.last_modified.clone().unwrap_or_default(),
+            .map(|it| {
+                let name = it.drive_item.name.clone().unwrap_or_default();
+                let virtual_path = it.fuse_metadata.virtual_path.clone().unwrap_or_default();
+                let mime = it.mime_type().unwrap_or("").to_string();
+                let created = it.drive_item.created_date.clone().unwrap_or_default();
+                let modified = it.drive_item.last_modified.clone().unwrap_or_default();
+                MediaItem {
+                    onedrive_id: it.drive_item.id.clone(),
+                    ino: it.fuse_metadata.virtual_ino.unwrap_or(0),
+                    name,
+                    virtual_path,
+                    mime_type: mime,
+                    created_date: created,
+                    last_modified: modified,
+                }
             })
             .collect();
         Ok(mapped)

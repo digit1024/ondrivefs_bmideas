@@ -1,6 +1,6 @@
-use crate::dbus_client::{with_dbus_client, DbusClient};
-use cosmic::iced::{time, Alignment, Length, Subscription};
-use cosmic::widget::{self, button, column, container, row, scrollable, text, text_input};
+use crate::dbus_client::with_dbus_client;
+use cosmic::iced::{time, Length, Subscription};
+use cosmic::widget::{button, column, container, row, scrollable, text, text_input, image as image_widget};
 use cosmic::iced::widget::image;
 use log::info;
 use onedrive_sync_lib::dbus::types::MediaItem;
@@ -69,7 +69,7 @@ impl Page {
             for item in chunk {
                 let thumb_el = if let Some(path) = self.thumb_paths.get(&item.ino) {
                     let handle = image::Handle::from_path(path.clone());
-                    image(handle)
+                    image_widget(handle)
                         .width(Length::Fixed(150.0))
                         .height(Length::Fixed(150.0))
                         .into()
