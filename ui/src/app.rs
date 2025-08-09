@@ -9,7 +9,7 @@ use cosmic::iced::{Length, Subscription};
 use cosmic::prelude::*;
 use cosmic::widget::{self, icon, menu, nav_bar};
 
-use crate::pages::{self, about_element, conflicts_page, folders_page, queues_page, status_page};
+use crate::pages::{self, about_element, conflicts_page, folders_page, queues_page, status_page, gallery_page};
 use log::info;
 use std::collections::HashMap;
 
@@ -21,6 +21,7 @@ enum PageId {
     Queues,
     Conflicts,
     Logs,
+    Gallery,
 }
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub enum ContextPage {
@@ -56,6 +57,7 @@ pub struct AppModel {
     queues_page: pages::queues_page::Page,
     conflicts_page: pages::conflicts_page::ConflictsPage,
     logs_page: pages::logs_page::Page,
+    gallery_page: pages::gallery_page::Page,
 }
 
 /// Messages emitted by the application and its widgets.
@@ -70,6 +72,7 @@ pub enum Message {
     ConflictsPage(conflicts_page::Message),
     AboutElement(about_element::Message),
     LogsPage(pages::logs_page::Message),
+    GalleryPage(gallery_page::Message),
 }
 // impl From<status_page::Message> for Message {
 //     fn from(message: status_page::Message) -> Self {
@@ -104,6 +107,9 @@ impl From<pages::logs_page::Message> for Message {
     fn from(message: pages::logs_page::Message) -> Self {
         Self::LogsPage(message)
     }
+}
+impl From<gallery_page::Message> for Message {
+    fn from(message: gallery_page::Message) -> Self { Self::GalleryPage(message) }
 }
 
 /// Create a COSMIC application from the app model
@@ -163,6 +169,11 @@ impl cosmic::Application for AppModel {
             .icon(icon::from_name("text-x-generic-symbolic"));
 
         nav.insert()
+            .text("Gallery")
+            .data::<PageId>(PageId::Gallery)
+            .icon(icon::from_name("image-x-generic-symbolic"));
+
+        nav.insert()
             .text("Settings")
             //.data::<Page>(Page::Settings)
             .icon(icon::from_name("applications-science-symbolic"));
@@ -185,6 +196,7 @@ impl cosmic::Application for AppModel {
             queues_page: pages::queues_page::Page::new(),
             conflicts_page: pages::conflicts_page::ConflictsPage::new(),
             logs_page: pages::logs_page::Page::new(),
+            gallery_page: pages::gallery_page::Page::new(),
         };
 
         // Create startup commands: set window title and fetch initial status/queues
@@ -216,6 +228,7 @@ impl cosmic::Application for AppModel {
         match self.nav.active_data::<PageId>() {
             Some(PageId::Status) => self.status_page.subscription().map(Message::StatusPage),
             Some(PageId::Queues) => self.queues_page.subscription().map(Message::QueuesPage),
+            Some(PageId::Gallery) => self.gallery_page.subscription().map(Message::GalleryPage),
             _ => Subscription::none(),
         }
     }
@@ -263,6 +276,7 @@ impl cosmic::Application for AppModel {
             PageId::Queues => self.queues_page.view().map(Message::QueuesPage),
             PageId::Conflicts => self.conflicts_page.view().map(Message::ConflictsPage),
             PageId::Logs => self.logs_page.view().map(Message::LogsPage),
+            PageId::Gallery => self.gallery_page.view().map(Message::GalleryPage),
         };
 
         widget::container(content)
@@ -304,6 +318,7 @@ impl cosmic::Application for AppModel {
                 Task::none()
             }
             Message::LogsPage(logs_message) => self.logs_page.update(logs_message),
+            Message::GalleryPage(gallery_message) => self.gallery_page.update(gallery_message),
         }
     }
 
@@ -319,6 +334,8 @@ impl cosmic::Application for AppModel {
             tasks.push(cosmic::task::future(async move {
                 Message::ConflictsPage(conflicts_page::Message::Reload)
             }));
+        } else if self.nav.active_data::<PageId>() == Some(&PageId::Gallery) {
+            tasks.push(cosmic::task::future(async move { Message::GalleryPage(gallery_page::Message::FetchPage) }));
         }
         Task::batch(tasks)
     }

@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use log::info;
-use onedrive_sync_lib::dbus::types::{ConflictItem, DaemonStatus, SyncQueueItem, UserChoice, UserProfile};
+use onedrive_sync_lib::dbus::types::{ConflictItem, DaemonStatus, SyncQueueItem, UserChoice, UserProfile, MediaItem};
 use zbus::connection::Builder;
 use zbus::Proxy;
 // use zbus::proxy::SignalStream;
@@ -182,6 +182,30 @@ impl DbusClient {
             items.len()
         );
         Ok(items)
+    }
+
+    /// List media items (images/videos) newest first with pagination and optional date filters
+    pub async fn list_media(&self, offset: u32, limit: u32, start_date: Option<String>, end_date: Option<String>) -> Result<Vec<MediaItem>> {
+        info!("Fetching media list from daemon: offset={}, limit={}", offset, limit);
+        let proxy = self.get_proxy().await?;
+        let items = proxy
+            .call_method("ListMedia", &(offset, limit, start_date, end_date))
+            .await?
+            .body()
+            .deserialize::<Vec<MediaItem>>()?;
+        Ok(items)
+    }
+
+    /// Ensure a thumbnail exists and return its path
+    pub async fn fetch_thumbnail(&self, ino: u64) -> Result<String> {
+        info!("Fetching thumbnail for ino {}", ino);
+        let proxy = self.get_proxy().await?;
+        let path = proxy
+            .call_method("FetchThumbnail", &(ino,))
+            .await?
+            .body()
+            .deserialize::<String>()?;
+        Ok(path)
     }
 
     #[allow(dead_code)]
