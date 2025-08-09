@@ -1,8 +1,7 @@
 use crate::dbus_client::with_dbus_client;
 use cosmic::iced::{time, Length, Subscription};
 use cosmic::widget::{button, column, container, row, scrollable, text, text_input, image as image_widget};
-use cosmic::iced::widget::image;
-use log::info;
+use cosmic::iced::widget::image::Handle as ImageHandle;
 use onedrive_sync_lib::dbus::types::MediaItem;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -67,12 +66,14 @@ impl Page {
         for chunk in self.items.chunks(5) {
             let mut roww = row().spacing(spacing);
             for item in chunk {
-                let thumb_el = if let Some(path) = self.thumb_paths.get(&item.ino) {
-                    let handle = image::Handle::from_path(path.clone());
+                let thumb_el: cosmic::Element<Message> = if let Some(path) = self.thumb_paths.get(&item.ino) {
+                    let handle = ImageHandle::from_path(path.clone());
                     image_widget(handle)
                         .width(Length::Fixed(150.0))
                         .height(Length::Fixed(150.0))
+                        
                         .into()
+                
                 } else {
                     // Placeholder while loading thumbnail
                     container(text::body("Loading thumb...")).width(Length::Fixed(150.0)).height(Length::Fixed(150.0)).into()

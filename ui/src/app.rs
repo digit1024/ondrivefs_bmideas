@@ -141,6 +141,10 @@ impl cosmic::Application for AppModel {
     ) -> (Self, Task<cosmic::Action<Self::Message>>) {
         // Create a nav bar with three page items.
         let mut nav = nav_bar::Model::default();
+        nav.insert()
+            .text("Gallery")
+            .data::<PageId>(PageId::Gallery)
+            .icon(icon::from_name("image-x-generic-symbolic"));
 
         nav.insert()
             .text("Status")
@@ -168,15 +172,12 @@ impl cosmic::Application for AppModel {
             .data::<PageId>(PageId::Logs)
             .icon(icon::from_name("text-x-generic-symbolic"));
 
-        nav.insert()
-            .text("Gallery")
-            .data::<PageId>(PageId::Gallery)
-            .icon(icon::from_name("image-x-generic-symbolic"));
 
-        nav.insert()
-            .text("Settings")
-            //.data::<Page>(Page::Settings)
-            .icon(icon::from_name("applications-science-symbolic"));
+
+        // nav.insert()
+        //     .text("Settings")
+        //     //.data::<Page>(Page::Settings)
+        //     .icon(icon::from_name("applications-science-symbolic"));
 
         // Construct the app model with the runtime's core.
         let mut app = AppModel {
@@ -190,7 +191,7 @@ impl cosmic::Application for AppModel {
                     Err((_errors, config)) => config,
                 })
                 .unwrap_or_default(),
-            active_page: PageId::Status,
+            active_page: PageId::Gallery,
             status_page: pages::status_page::Page::new(),
             folders_page: pages::folders_page::Page::new(),
             queues_page: pages::queues_page::Page::new(),
