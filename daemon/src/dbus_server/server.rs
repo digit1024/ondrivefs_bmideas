@@ -350,6 +350,44 @@ impl ServiceImpl {
         Ok(path.to_string_lossy().to_string())
     }
 
+    /// Ensure file is downloaded locally at local/{ino}; return absolute path
+    async fn ensure_local_by_ino(&self, ino: u64) -> zbus::fdo::Result<String> {
+        use tokio::fs;
+        use std::path::PathBuf;
+        let fm = self.app_state.file_manager();
+        if let Some(existing) = fm.get_local_path_if_file_exists(ino) {
+            return Ok(existing.to_string_lossy().to_string());
+        }
+
+        let repo = self.app_state.persistency().drive_item_with_fuse_repository();
+        let item = repo
+            .get_drive_item_with_fuse_by_virtual_ino(ino)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to query item: {}", e)))?
+            .ok_or_else(|| zbus::fdo::Error::Failed("Item not found".to_string()))?;
+        if item.is_folder() {
+            return Err(zbus::fdo::Error::Failed("Requested inode is a folder".into()));
+        }
+        let download_url = item
+            .download_url()
+            .ok_or_else(|| zbus::fdo::Error::Failed("Missing download URL".into()))?;
+        let id = item.id().to_string();
+        let filename = item.name().unwrap_or(&id);
+        let dl = self
+            .app_state
+            .onedrive()
+            .download_file(download_url, &id, filename)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to download file: {}", e)))?;
+
+        let target_path = fm.get_local_dir().join(ino.to_string());
+        fm.save_downloaded_file_r(&dl, &target_path)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to save file: {}", e)))?;
+
+        Ok(target_path.to_string_lossy().to_string())
+    }
+
     async fn full_reset(&self) -> zbus::fdo::Result<()> {
         use log::info;
         use std::fs;

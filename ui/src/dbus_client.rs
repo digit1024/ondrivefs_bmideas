@@ -208,6 +208,18 @@ impl DbusClient {
         Ok(path)
     }
 
+    /// Ensure a file exists locally at local/{ino} and return its path
+    pub async fn ensure_local_by_ino(&self, ino: u64) -> Result<String> {
+        info!("Ensuring local file for ino {}", ino);
+        let proxy = self.get_proxy().await?;
+        let path = proxy
+            .call_method("EnsureLocalByIno", &(ino,))
+            .await?
+            .body()
+            .deserialize::<String>()?;
+        Ok(path)
+    }
+
     #[allow(dead_code)]
     /// Perform a full reset of the daemon
     pub async fn full_reset(&self) -> Result<()> {

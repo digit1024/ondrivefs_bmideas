@@ -17,6 +17,8 @@ pub enum Message {
     AutoRefresh,
     ThumbRequested(u64),
     ThumbLoaded(u64, Result<String, String>),
+    OpenItem(u64),
+    Opened(Result<String, String>),
 }
 
 pub struct Page {
@@ -68,12 +70,11 @@ impl Page {
             for item in chunk {
                 let thumb_el: cosmic::Element<Message> = if let Some(path) = self.thumb_paths.get(&item.ino) {
                     let handle = ImageHandle::from_path(path.clone());
-                    image_widget(handle)
+                    let img = image_widget(handle)
                         .width(Length::Fixed(150.0))
                         .height(Length::Fixed(150.0))
-                        
-                        .into()
-                
+                        .on_press(Message::OpenItem(item.ino));
+                    img.into()
                 } else {
                     // Placeholder while loading thumbnail
                     container(text::body("Loading thumb...")).width(Length::Fixed(150.0)).height(Length::Fixed(150.0)).into()
@@ -181,6 +182,19 @@ impl Page {
             Message::ThumbLoaded(ino, result) => {
                 if let Ok(path) = result {
                     self.thumb_paths.insert(ino, path);
+                }
+                cosmic::Task::none()
+            }
+            Message::OpenItem(ino) => {
+                let fut = with_dbus_client(move |client| async move { client.ensure_local_by_ino(ino).await });
+                cosmic::task::future(fut).map(|result| {
+                    cosmic::Action::App(crate::app::Message::GalleryPage(Message::Opened(result)))
+                })
+            }
+            Message::Opened(result) => {
+                if let Ok(path) = result {
+                    // Attempt to open with system default app
+                    let _ = open::that_detached(path);
                 }
                 cosmic::Task::none()
             }
