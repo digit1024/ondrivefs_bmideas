@@ -65,17 +65,12 @@ impl DbusServerManager {
             .build()
             .await?;
 
-        // Spawn periodic status signal emitter
+        // Spawn periodic status signal emitter (change-detected every 10s)
         let app_state_clone = self.app_state.clone();
         let connection_clone = connection.clone();
         tokio::spawn(async move {
-            loop {
-                let status = compute_status(&app_state_clone).await;
-                if let Ok(emitter) = SignalEmitter::new(&connection_clone, "/org/freedesktop/OneDriveSync") {
-                    let _ = server::ServiceImpl::emit_daemon_status_changed(&emitter, status).await;
-                }
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-            }
+            let task = crate::tasks::status_broadcast::StatusBroadcastTask::new(app_state_clone, connection_clone);
+            task.run().await;
         });
 
         self.connection = Some(connection);

@@ -6,10 +6,29 @@ use onedrive_sync_lib::dbus::types::{ConflictItem, DaemonStatus, SyncQueueItem, 
 use zbus::connection::Builder;
 use zbus::Proxy;
 // use zbus::proxy::SignalStream;
+use once_cell::sync::Lazy;
+use tokio::sync::{broadcast::{self, Receiver, Sender}, RwLock};
 
 const DBUS_SERVICE: &str = "org.freedesktop.OneDriveSync";
 const DBUS_PATH: &str = "/org/freedesktop/OneDriveSync";
 const DBUS_INTERFACE: &str = "org.freedesktop.OneDriveSync";
+
+// Global broadcast channel for daemon status updates
+pub static DAEMON_STATUS_TX: Lazy<Sender<DaemonStatus>> = Lazy::new(|| {
+    let (tx, _rx) = broadcast::channel::<DaemonStatus>(64);
+    tx
+});
+
+pub fn subscribe_status_receiver() -> Receiver<DaemonStatus> {
+    DAEMON_STATUS_TX.subscribe()
+}
+
+static LATEST_STATUS: Lazy<RwLock<Option<DaemonStatus>>> = Lazy::new(|| RwLock::new(None));
+
+pub async fn take_latest_status() -> Option<DaemonStatus> {
+    let mut guard = LATEST_STATUS.write().await;
+    guard.take()
+}
 
 pub async fn with_dbus_client<CallFn, CallFuture, Output, CallError>(
     call: CallFn,
@@ -46,7 +65,28 @@ impl DbusClient {
         Ok(Self { connection })
     }
 
-    // ... existing methods ...
+    /// Subscribe to daemon_status_changed signals
+    pub async fn subscribe_daemon_status<F, Fut>(&self, mut on_status: F) -> Result<()>
+    where
+        F: FnMut(DaemonStatus) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let proxy = self.get_proxy().await?;
+        let mut stream = proxy.receive_signal("DaemonStatusChanged").await?;
+        tokio::spawn(async move {
+            use futures_util::StreamExt;
+            while let Some(msg) = stream.next().await {
+                if let Ok(status) = msg.body().deserialize::<DaemonStatus>() {
+                    let _ = DAEMON_STATUS_TX.send(status.clone());
+                    if let Ok(mut guard) = LATEST_STATUS.try_write() {
+                        *guard = Some(status.clone());
+                    }
+                    on_status(status).await;
+                }
+            }
+        });
+        Ok(())
+    }
 
     pub async fn get_conflicts(&self) -> Result<Vec<ConflictItem>> {
         info!("Fetching conflicts from daemon");

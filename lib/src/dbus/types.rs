@@ -1,14 +1,14 @@
 use serde::{Deserialize, Serialize};
 use zbus::zvariant::Type;
 
-#[derive(Debug, Clone, Deserialize, Serialize, Type)]
+#[derive(Debug, Clone, Deserialize, Serialize, Type, PartialEq, Eq)]
 pub enum SyncStatus {
     Running,
     Paused,
     Error,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Type)]
+#[derive(Debug, Clone, Deserialize, Serialize, Type, PartialEq, Eq)]
 pub struct DaemonStatus {
     pub is_authenticated: bool,
     pub is_connected: bool,

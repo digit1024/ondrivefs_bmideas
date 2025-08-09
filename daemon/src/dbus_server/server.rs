@@ -27,6 +27,13 @@ impl ServiceImpl {
 
 #[interface(name = "org.freedesktop.OneDriveSync")]
 impl ServiceImpl {
+    #[zbus(signal)]
+    pub async fn daemon_status_changed(
+        _emitter: &SignalEmitter<'_>,
+        _status: DaemonStatus,
+    ) -> zbus::Result<()> {
+        Ok(())
+    }
     
 
     async fn get_conflicts(&self) -> zbus::fdo::Result<Vec<ConflictItem>> {
@@ -463,9 +470,4 @@ impl ServiceImpl {
     }
 }
 
-/// Helper to emit status-changed signal from outside this module
-pub async fn emit_daemon_status(connection: &zbus::Connection, status: DaemonStatus) {
-    if let Ok(emitter) = SignalEmitter::new(connection, "/org/freedesktop/OneDriveSync") {
-        let _ = ServiceImpl::daemon_status_changed(&emitter, status).await;
-    }
-}
+

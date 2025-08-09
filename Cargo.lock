@@ -4386,6 +4386,7 @@ dependencies = [
  "i18n-embed-fl",
  "libcosmic",
  "log",
+ "once_cell",
  "onedrive-sync-lib",
  "open",
  "rust-embed",

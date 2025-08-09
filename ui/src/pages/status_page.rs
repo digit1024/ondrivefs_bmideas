@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::dbus_client::{with_dbus_client, DbusClient};
+use crate::dbus_client::{with_dbus_client, DbusClient, take_latest_status};
 use cosmic::iced::alignment::Horizontal;
 use cosmic::iced::{time, Alignment, Length, Subscription};
 use cosmic::widget::{self, button, column, container, row, text};
@@ -13,6 +13,7 @@ const ICON_FALSE: &[u8] = include_bytes!("../../../resources/programfiles/icons/
 #[derive(Debug, Clone)]
 pub enum Message {
     FetchStatus,
+    StatusSignal(DaemonStatus),
     StatusLoaded(Result<DaemonStatus, String>),
     ProfileLoaded(Result<UserProfile, String>),
     Refresh,
@@ -41,8 +42,8 @@ impl Page {
         }
     }
     pub fn subscription(&self) -> Subscription<Message> {
-        // Periodic refresh for fallback
-        time::every(Duration::from_secs(30)).map(|_| Message::AutoRefresh)
+        // Periodic refresh for fallback and to flush latest signal
+        time::every(Duration::from_secs(5)).map(|_| Message::AutoRefresh)
     }
 
     pub fn view(&self) -> cosmic::Element<Message> {
@@ -205,8 +206,7 @@ impl Page {
                         let _ = with_dbus_client(|client| async move {
                             let _ = client
                                 .subscribe_daemon_status(|status| async move {
-                                    // This callback cannot directly send a Message; use polling fallback
-                                    let _ = status; // no-op
+                                    let _ = status; // broadcast handled inside client
                                 })
                                 .await;
                             Ok::<(), String>(())
@@ -215,6 +215,17 @@ impl Page {
                     };
                     let _t: cosmic::Task<cosmic::Action<crate::app::Message>> = cosmic::task::future(subscribe_task).map(|_: ()| cosmic::Action::None);
                 }
+                // Try to flush latest status from broadcast first (no DBus call)
+                let flush_latest = cosmic::task::future(async move { take_latest_status().await }).map(
+                    |maybe_status| {
+                        if let Some(status) = maybe_status {
+                            cosmic::Action::App(crate::app::Message::StatusPage(Message::StatusSignal(status)))
+                        } else {
+                            cosmic::Action::None
+                        }
+                    },
+                );
+
                 let fetch_status =
                     with_dbus_client(|client| async move { client.get_daemon_status().await });
                 let fetch_profile =
@@ -230,7 +241,7 @@ impl Page {
                         result,
                     )))
                 });
-                cosmic::task::batch(vec![a, b])
+                cosmic::task::batch(vec![flush_latest, a, b])
             }
             Message::FullReset => {
                 info!("StatusPage: Full reset requested");
