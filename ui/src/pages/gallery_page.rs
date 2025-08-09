@@ -2,6 +2,7 @@ use crate::dbus_client::with_dbus_client;
 use cosmic::iced::{time, Alignment, ContentFit, Length, Subscription};
 use cosmic::widget::{button, column, container, row, scrollable, text, text_input, image as image_widget};
 use cosmic::iced::widget::image::Handle as ImageHandle;
+use log::info;
 use onedrive_sync_lib::dbus::types::MediaItem;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -19,6 +20,7 @@ pub enum Message {
     ThumbLoaded(u64, Result<String, String>),
     OpenItem(u64),
     Opened(Result<String, String>),
+    Noop,
 }
 
 pub struct Page {
@@ -96,8 +98,19 @@ impl Page {
             grid = grid.push(roww);
         }
 
-        let list = scrollable(container(grid).width(Length::Fill)).height(Length::Fill);
-        
+        let list = scrollable(container(grid).width(Length::Fill)).height(Length::Fill).on_scroll(|vp| {
+            let abs = vp.absolute_offset();                // px
+            let bounds = vp.bounds();                      // viewport
+            let content = vp.content_bounds();             // full content
+    
+            let remaining_y_px = (content.height - (abs.y + bounds.height)).max(0.0);
+    
+            if remaining_y_px <= 20.0 && !self.loading {
+                Message::LoadMore
+            } else {
+                Message::Noop
+            }
+        });
         let status = if self.loading {
             container(text::body("Loading...")).width(Length::Fill)
         } else {
@@ -123,6 +136,7 @@ impl Page {
                 // no-op or soft refresh current page
                 cosmic::Task::none()
             }
+            Message::Noop => cosmic::Task::none(),
             Message::FetchPage => {
                 self.loading = true;
                 self.error = None;
