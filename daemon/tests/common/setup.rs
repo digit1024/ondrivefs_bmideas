@@ -122,25 +122,29 @@ impl TestEnv {
 
     /// Get or create an AppState instance with mock OneDrive client
     pub async fn get_app_state_with_mock(&mut self) -> Result<Arc<AppState>> {
+        // Create default mock client and use the custom method
+        let mock_client = MockOneDriveClient::new();
+        self.get_app_state_with_custom_mock(mock_client).await
+    }
+
+    /// Get or create an AppState instance with a custom configured mock OneDrive client
+    pub async fn get_app_state_with_custom_mock(&mut self, mock_client: MockOneDriveClient) -> Result<Arc<AppState>> {
         // Set environment variables for ProjectConfig
         std::env::set_var("XDG_DATA_HOME", &self.data_dir);
         std::env::set_var("XDG_CONFIG_HOME", &self.config_dir);
         std::env::set_var("XDG_CACHE_HOME", &self.cache_dir);
 
-        println!("🚀 Initializing AppState with mock OneDrive client for tests...");
+        println!("🚀 Initializing AppState with custom mock OneDrive client for tests...");
 
-        // Create mock OneDrive client
-        let mock_client = Arc::new(MockOneDriveClient::new()) as Arc<dyn OneDriveClientTrait>;
+        // Use the provided mock client
+        let mock_client = Arc::new(mock_client) as Arc<dyn OneDriveClientTrait>;
 
         // Create AppState with mock client
         let app_state = AppState::with_onedrive_client(mock_client)
             .await
             .context("Failed to create AppState with mock")?;
 
-        // Setup logging for tests
-        setup_logging(&self.data_dir)
-            .await
-            .context("Failed to setup logging")?;
+
 
         // Initialize database schema
         app_state
@@ -202,7 +206,12 @@ impl TestEnv {
                 .clear_all_items()
                 .await?;
 
-            // You can add more repository clears here as needed
+            // Clear drive items with fuse data (crucial for test isolation!)
+            app_state
+                .persistency()
+                .drive_item_with_fuse_repository()
+                .clear_all_items()
+                .await?;
 
             println!("🧹 Cleared all test data");
         }

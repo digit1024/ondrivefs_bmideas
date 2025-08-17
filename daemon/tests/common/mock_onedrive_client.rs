@@ -68,6 +68,7 @@ impl Default for MockResponses {
 }
 
 /// Mock implementation of OneDriveClientTrait for testing
+#[derive(Clone)]
 pub struct MockOneDriveClient {
     responses: Arc<Mutex<MockResponses>>,
     call_counter: Arc<Mutex<HashMap<String, usize>>>,

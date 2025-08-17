@@ -780,4 +780,14 @@ impl DriveItemWithFuseRepository {
             fuse_metadata,
         })
     }
+
+    /// Clear all drive items (for testing purposes)
+    pub async fn clear_all_items(&self) -> Result<()> {
+        sqlx::query("DELETE FROM drive_items_with_fuse")
+            .execute(&self.pool)
+            .await?;
+
+        debug!("Cleared all drive items with fuse");
+        Ok(())
+    }
 }
