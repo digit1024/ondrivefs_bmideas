@@ -17,11 +17,18 @@ use anyhow::{Context, Result};
 use log::info;
 use sqlx::{Pool, Sqlite};
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 /// Database manager for OneDrive sync operations
 pub struct PersistencyManager {
     pool: Pool<Sqlite>,
     db_path: PathBuf,
+    // Singleton repository instances
+    processing_item_repo: OnceLock<processing_item_repository::ProcessingItemRepository>,
+    sync_state_repo: OnceLock<sync_state_repository::SyncStateRepository>,
+    drive_item_with_fuse_repo: OnceLock<drive_item_with_fuse_repository::DriveItemWithFuseRepository>,
+    download_queue_repo: OnceLock<download_queue_repository::DownloadQueueRepository>,
+    user_profile_repo: OnceLock<profile_repository::ProfileRepository>,
 }
 
 impl PersistencyManager {
@@ -50,7 +57,15 @@ impl PersistencyManager {
             db_path.display()
         );
 
-        Ok(Self { pool, db_path })
+        Ok(Self { 
+            pool, 
+            db_path,
+            processing_item_repo: OnceLock::new(),
+            sync_state_repo: OnceLock::new(),
+            drive_item_with_fuse_repo: OnceLock::new(),
+            download_queue_repo: OnceLock::new(),
+            user_profile_repo: OnceLock::new(),
+        })
     }
 
     /// Get the database connection pool
@@ -270,31 +285,43 @@ impl PersistencyManager {
         Ok(())
     }
 
-    /// Get the processing item repository
+    /// Get the processing item repository (singleton)
     pub fn processing_item_repository(
         &self,
     ) -> processing_item_repository::ProcessingItemRepository {
-        processing_item_repository::ProcessingItemRepository::new(self.pool.clone())
-    }
-    pub fn sync_state_repository(&self) -> sync_state_repository::SyncStateRepository {
-        sync_state_repository::SyncStateRepository::new(self.pool.clone())
+        self.processing_item_repo.get_or_init(|| {
+            processing_item_repository::ProcessingItemRepository::new(self.pool.clone())
+        }).clone()
     }
 
-    /// Get the drive item with fuse repository
+    /// Get the sync state repository (singleton)  
+    pub fn sync_state_repository(&self) -> sync_state_repository::SyncStateRepository {
+        self.sync_state_repo.get_or_init(|| {
+            sync_state_repository::SyncStateRepository::new(self.pool.clone())
+        }).clone()
+    }
+
+    /// Get the drive item with fuse repository (singleton)
     pub fn drive_item_with_fuse_repository(
         &self,
     ) -> drive_item_with_fuse_repository::DriveItemWithFuseRepository {
-        drive_item_with_fuse_repository::DriveItemWithFuseRepository::new(self.pool.clone())
+        self.drive_item_with_fuse_repo.get_or_init(|| {
+            drive_item_with_fuse_repository::DriveItemWithFuseRepository::new(self.pool.clone())
+        }).clone()
     }
 
-    /// Get the download queue repository
+    /// Get the download queue repository (singleton)
     pub fn download_queue_repository(&self) -> download_queue_repository::DownloadQueueRepository {
-        download_queue_repository::DownloadQueueRepository::new(self.pool.clone())
+        self.download_queue_repo.get_or_init(|| {
+            download_queue_repository::DownloadQueueRepository::new(self.pool.clone())
+        }).clone()
     }
 
-    /// Get the user profile repository
+    /// Get the user profile repository (singleton)
     pub fn user_profile_repository(&self) -> profile_repository::ProfileRepository {
-        profile_repository::ProfileRepository::new(self.pool.clone())
+        self.user_profile_repo.get_or_init(|| {
+            profile_repository::ProfileRepository::new(self.pool.clone())
+        }).clone()
     }
 }
 

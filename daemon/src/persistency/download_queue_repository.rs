@@ -5,6 +5,7 @@ use sqlx::{Pool, Row, Sqlite};
 use std::path::PathBuf;
 
 /// Database operations for download queue
+#[derive(Clone)]
 pub struct DownloadQueueRepository {
     pool: Pool<Sqlite>,
 }

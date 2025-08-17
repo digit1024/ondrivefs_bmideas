@@ -237,6 +237,7 @@ impl ProcessingItem {
     }
 }
 
+#[derive(Clone)]
 pub struct ProcessingItemRepository {
     pool: Pool<Sqlite>,
 }

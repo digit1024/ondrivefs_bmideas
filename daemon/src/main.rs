@@ -143,7 +143,7 @@ impl AppSetup {
     async fn setup_user_profile(&self) -> Result<()> {
         info!("👤 Setting up user profile...");
 
-        let profile_repo = ProfileRepository::new(self.app_state.persistency().pool().clone());
+        let profile_repo = self.app_state.persistency().user_profile_repository();
 
         // Try to get existing profile
         match profile_repo.get_profile().await {
@@ -313,7 +313,7 @@ async fn main() -> Result<()> {
 
     // Prepare FUSE filesystem
     let pool = app.app_state.persistency().pool().clone();
-    let download_queue_repo = DownloadQueueRepository::new(pool.clone());
+    let download_queue_repo = app.app_state.persistency().download_queue_repository();
     let fuse_fs = OneDriveFuse::new(
         pool.clone(),
         download_queue_repo,
@@ -482,8 +482,8 @@ async fn handle_file_path(file_path: &str) -> Result<()> {
 
             // Get DriveItemWithFuse from database using virtual path
             let pool = app.app_state.persistency().pool().clone();
-            let drive_item_with_fuse_repo = crate::persistency::drive_item_with_fuse_repository::DriveItemWithFuseRepository::new(pool.clone());
-            let download_queue_repo = DownloadQueueRepository::new(pool);
+            let drive_item_with_fuse_repo = app.app_state.persistency().drive_item_with_fuse_repository();
+            let download_queue_repo = app.app_state.persistency().download_queue_repository();
 
             // Try to find the item by virtual path first, then by OneDrive ID
             let item = if let Ok(Some(item)) = drive_item_with_fuse_repo
@@ -576,12 +576,8 @@ async fn handle_virtual_file(file_path: &str, app: &AppSetup) -> Result<()> {
     info!("🔍 Looking for virtual path: {}", virtual_path);
 
     // Get database repositories
-    let pool = app.app_state.persistency().pool().clone();
-    let drive_item_with_fuse_repo =
-        crate::persistency::drive_item_with_fuse_repository::DriveItemWithFuseRepository::new(
-            pool.clone(),
-        );
-    let download_queue_repo = DownloadQueueRepository::new(pool);
+    let drive_item_with_fuse_repo = app.app_state.persistency().drive_item_with_fuse_repository();
+    let download_queue_repo = app.app_state.persistency().download_queue_repository();
 
     // Try to find the item by virtual path (much more efficient than loading all items)
     let item = drive_item_with_fuse_repo

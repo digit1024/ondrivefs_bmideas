@@ -3,6 +3,7 @@ use log::info;
 use sqlx::{Pool, Row, Sqlite};
 
 /// Database operations for sync state
+#[derive(Clone)]
 pub struct SyncStateRepository {
     pool: Pool<Sqlite>,
 }

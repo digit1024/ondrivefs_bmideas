@@ -6,6 +6,7 @@ use sqlx::{Pool, Row, Sqlite};
 use std::path::PathBuf;
 
 /// Database operations for drive items with Fuse metadata
+#[derive(Clone)]
 pub struct DriveItemWithFuseRepository {
     pool: Pool<Sqlite>,
 }

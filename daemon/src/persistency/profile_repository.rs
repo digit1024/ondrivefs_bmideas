@@ -5,6 +5,7 @@ use log::info;
 use sqlx::{Pool, Row, Sqlite};
 
 /// Database operations for user profile
+#[derive(Clone)]
 pub struct ProfileRepository {
     pool: Pool<Sqlite>,
 }

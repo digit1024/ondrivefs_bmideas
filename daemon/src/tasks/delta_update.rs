@@ -65,7 +65,7 @@ impl SyncCycle {
 
     /// Retrieve delta changes from OneDrive API with pagination handling
     pub async fn get_delta_changes(&self) -> Result<Vec<DriveItem>> {
-        let sync_state_repo = SyncStateRepository::new(self.app_state.persistency().pool().clone());
+        let sync_state_repo = self.app_state.persistency().sync_state_repository();
 
         let sync_state = sync_state_repo.get_latest_sync_state().await?;
         let delta_token = sync_state
@@ -179,8 +179,7 @@ impl SyncCycle {
 
     /// Process download queue
     async fn process_download_queue(&self) -> Result<()> {
-        let download_queue_repo =
-            DownloadQueueRepository::new(self.app_state.persistency().pool().clone());
+        let download_queue_repo = self.app_state.persistency().download_queue_repository();
         let pending_downloads = download_queue_repo.get_pending_downloads().await?;
 
         info!(
@@ -196,9 +195,7 @@ impl SyncCycle {
                         .await?;
                     info!("✅ Download completed: {}", drive_item_id);
 
-                    let drive_item_with_fuse_repo = DriveItemWithFuseRepository::new(
-                        self.app_state.persistency().pool().clone(),
-                    );
+                    let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
                     let name = drive_item_with_fuse_repo
                         .get_drive_item_with_fuse(&drive_item_id)
                         .await?
@@ -224,9 +221,7 @@ impl SyncCycle {
                             .await;
                     }
                     // Get the inode for this file
-                    let drive_item_with_fuse_repo = DriveItemWithFuseRepository::new(
-                        self.app_state.persistency().pool().clone(),
-                    );
+                    let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
                     if let Ok(Some(item)) = drive_item_with_fuse_repo
                         .get_drive_item_with_fuse(&drive_item_id)
                         .await
@@ -277,8 +272,7 @@ impl SyncCycle {
             let data_len = download_result.file_data.len();
 
             // Get the inode for this file to determine local path
-            let drive_item_with_fuse_repo =
-                DriveItemWithFuseRepository::new(self.app_state.persistency().pool().clone());
+            let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
             let actual_local_path = if let Ok(Some(item)) = drive_item_with_fuse_repo
                 .get_drive_item_with_fuse(drive_item_id)
                 .await
