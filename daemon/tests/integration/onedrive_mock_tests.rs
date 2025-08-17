@@ -1,6 +1,6 @@
 use anyhow::Result;
-use onedrive_sync_daemon::onedrive_service::onedrive_client::mock::MockOneDriveClient;
 use onedrive_sync_daemon::onedrive_service::onedrive_client::OneDriveClientTrait;
+use crate::common::mock_onedrive_client::MockOneDriveClient;
 
 #[tokio::test]
 async fn test_mock_onedrive_client_success() -> Result<()> {

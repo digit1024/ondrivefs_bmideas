@@ -69,5 +69,4 @@ tokio-test = "0.4"
 
 [features]
 default = []
-integration-tests = []
-test-utils = [] 
+integration-tests = [] 

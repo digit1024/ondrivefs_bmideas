@@ -25,7 +25,7 @@ pub struct DeltaResponse {
     pub items: Option<Vec<DriveItem>>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct DeltaResponseApi {
     #[serde(default)]
     pub value: Vec<DriveItem>,

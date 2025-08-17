@@ -3,12 +3,13 @@ use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
 use onedrive_sync_daemon::app_state::AppState;
 use onedrive_sync_daemon::log_appender::setup_logging;
-use onedrive_sync_daemon::onedrive_service::onedrive_client::mock::MockOneDriveClient;
 use onedrive_sync_daemon::onedrive_service::onedrive_client::OneDriveClientTrait;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::sync::Mutex;
+
+use crate::common::mock_onedrive_client::MockOneDriveClient;
 
 /// Global test environment that persists across all tests
 pub static TEST_ENV: Lazy<Arc<Mutex<TestEnv>>> = Lazy::new(|| {
@@ -102,9 +103,7 @@ impl TestEnv {
         let app_state = AppState::new().await.context("Failed to create AppState")?;
 
         // Setup logging for tests
-        setup_logging(&self.data_dir)
-            .await
-            .context("Failed to setup logging")?;
+  
 
         // Initialize database schema
         app_state
