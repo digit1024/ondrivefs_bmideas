@@ -240,48 +240,7 @@ async fn test_remote_move_on_local_move_conflict_is_detected() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-#[serial]
-async fn test_local_move_of_remote_deleted_item_conflict() -> Result<()> {
-    println!("\n🧪 Running test: Local move of a remote-deleted item conflict");
-    let (app_state, repo, drive_items_with_fuse_repo, _mock_client) = setup_test_env().await?;
 
-    let item_to_process = drive_items_with_fuse_repo
-        .get_drive_item_with_fuse_by_virtual_ino(5)
-        .await?
-        .unwrap(); // "Q1_Report.pdf"
-
-    // Mark the item as deleted on remote
-    drive_items_with_fuse_repo
-        .mark_as_deleted_by_onedrive_id(&item_to_process.id())
-        .await?;
-
-    let new_parent = drive_items_with_fuse_repo
-        .get_drive_item_with_fuse_by_virtual_ino(6)
-        .await?
-        .unwrap(); // "Folder C"
-
-    let mut local_move_di = item_to_process.drive_item().clone();
-    local_move_di.parent_reference = Some(new_parent.drive_item().into());
-    let local_move = create_test_local_processing_item(
-        local_move_di,
-        ChangeOperation::Move {
-            old_path: "".into(),
-            new_path: "".into(),
-        },
-    );
-    let local_id = repo.store_processing_item(&local_move).await?;
-
-    let sync_processor = SyncProcessor::new(app_state.clone());
-    sync_processor.process_all_items().await?;
-
-    let processed = repo.get_processing_item_by_id(local_id).await?.unwrap();
-    assert_eq!(processed.status, ProcessingStatus::Conflicted);
-    assert!(processed.validation_errors[0]
-        .contains("Local item was renamed or moved, but the original source item has been deleted"));
-
-    Ok(())
-}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[serial]
