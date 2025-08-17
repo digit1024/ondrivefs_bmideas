@@ -1,5 +1,5 @@
 //! Scheduler module for periodic task management
+pub mod simple_scheduler;
 
-pub mod periodic_scheduler;
 
-pub use periodic_scheduler::{PeriodicTask, TaskMetrics};
+pub use simple_scheduler::SimpleTaskManager;

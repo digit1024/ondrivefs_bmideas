@@ -20,20 +20,7 @@ impl StatusBroadcastTask {
             self.app_state.connectivity().check_connectivity().await,
             crate::connectivity::ConnectivityStatus::Online
         );
-        let sync_status = if let Some(metrics) = self
-            .app_state
-            .scheduler()
-            .get_task_metrics("sync_cycle")
-            .await
-        {
-            if metrics.is_running {
-                SyncStatus::Running
-            } else {
-                SyncStatus::Paused
-            }
-        } else {
-            SyncStatus::Paused
-        };
+        let sync_status = SyncStatus::Running; //TODO Restore it 
 
         let has_conflicts = self
             .app_state

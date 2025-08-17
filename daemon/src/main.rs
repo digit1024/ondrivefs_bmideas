@@ -386,29 +386,23 @@ async fn main() -> Result<()> {
         info!("✅ DBus server started successfully");
     }
 
-    // Start periodic sync scheduler with shutdown handling
-    let sync_cycle = SyncCycle::new(app.app_state.clone());
-    let mut scheduler = crate::scheduler::periodic_scheduler::PeriodicScheduler::new();
-    let sync_task = sync_cycle.get_task().await?;
-    scheduler.add_task(sync_task);
+    // Start simple task manager with shutdown handling
+    let mut task_manager = crate::scheduler::simple_scheduler::SimpleTaskManager::new();
+    
+    // Start sync task
+    task_manager.start_sync_task(app.app_state.clone()).await?;
 
-    let scheduler_shutdown_rx = shutdown_manager.subscribe();
-    let scheduler_handle = tokio::spawn(async move {
-        let mut shutdown_rx = scheduler_shutdown_rx;
-
-        // Start the scheduler
-        if let Err(e) = scheduler.start().await {
-            error!("Failed to start scheduler: {}", e);
-            return;
-        }
+    let task_manager_shutdown_rx = shutdown_manager.subscribe();
+    let task_manager_handle = tokio::spawn(async move {
+        let mut shutdown_rx = task_manager_shutdown_rx;
 
         // Wait for shutdown signal
         let _ = shutdown_rx.recv().await;
-        info!("🛑 Scheduler received shutdown signal");
+        info!("🛑 Task manager received shutdown signal");
 
-        // Stop the scheduler
-        scheduler.stop().await;
-        info!("✅ Scheduler shutdown complete");
+        // Stop the task manager
+        task_manager.shutdown().await;
+        info!("✅ Task manager shutdown complete");
     });
 
     // Start signal handling
@@ -451,7 +445,7 @@ async fn main() -> Result<()> {
 
     // Wait for all tasks to complete
     let _ = tokio::time::timeout(Duration::from_secs(30), async {
-        let _ = scheduler_handle.await;
+        let _ = task_manager_handle.await;
         let _ = signal_handle.await;
     })
     .await;

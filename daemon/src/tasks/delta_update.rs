@@ -13,7 +13,7 @@ use crate::{
         processing_item_repository::{ProcessingItem, ProcessingItemRepository},
         sync_state_repository::SyncStateRepository,
     },
-    scheduler::{PeriodicTask, TaskMetrics},
+    
 };
 
 use onedrive_sync_lib::notifications::{NotificationSender, NotificationUrgency};
@@ -61,37 +61,7 @@ impl SyncCycle {
         }
     }
 
-    /// Create a periodic task for this sync cycle
-    pub async fn get_task(&self) -> Result<PeriodicTask> {
-        let metrics = TaskMetrics::new(
-            DEFAULT_METRICS_WINDOW,
-            Duration::from_secs(DEFAULT_SLOW_THRESHOLD_SECS),
-        );
 
-        let app_state = self.app_state.clone();
-
-        let task = PeriodicTask {
-            name: "adaptive_sync".to_string(),
-            interval: Duration::from_secs(DEFAULT_SYNC_INTERVAL_SECS),
-            metrics,
-            task: Box::new(move || {
-                let app_state = app_state.clone();
-                Box::pin(async move {
-                    // Execute sync cycle with panic recovery
-                    let sync_cycle = SyncCycle::new(app_state);
-                    let result = sync_cycle.run().await;
-
-                    if let Err(ref e) = result {
-                        error!("Sync cycle failed: {}", e);
-                    }
-
-                    result
-                })
-            }),
-        };
-
-        Ok(task)
-    }
 
     /// Retrieve delta changes from OneDrive API with pagination handling
     pub async fn get_delta_changes(&self) -> Result<Vec<DriveItem>> {

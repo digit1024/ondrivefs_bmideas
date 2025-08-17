@@ -159,20 +159,7 @@ impl ServiceImpl {
         );
 
         // Get sync status from scheduler
-        let sync_status = if let Some(metrics) = self
-            .app_state
-            .scheduler()
-            .get_task_metrics("sync_cycle")
-            .await
-        {
-            if metrics.is_running {
-                SyncStatus::Running
-            } else {
-                SyncStatus::Paused
-            }
-        } else {
-            SyncStatus::Paused
-        };
+        let sync_status = SyncStatus::Running; //TODO Restore it 
 
         // Check for conflicts
         let has_conflicts = self

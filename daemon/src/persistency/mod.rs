@@ -40,7 +40,7 @@ impl PersistencyManager {
         let database_url = format!("sqlite:{}?mode=rwc", db_path.display());
 
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(100)
+            .max_connections(1)
             .connect(&database_url)
             .await
             .context("Failed to connect to database")?;

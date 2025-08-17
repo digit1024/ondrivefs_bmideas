@@ -7,7 +7,7 @@ use crate::{
     auth::onedrive_auth::OneDriveAuth, connectivity::ConnectivityChecker,
     file_manager::DefaultFileManager, message_broker::MessageBroker,
     onedrive_service::onedrive_client::{OneDriveClient, OneDriveClientTrait}, persistency::PersistencyManager,
-    scheduler::periodic_scheduler::PeriodicScheduler,
+    
 };
 
 /// Application state containing all shared components
@@ -26,8 +26,8 @@ pub struct AppState {
     /// File manager
     pub file_manager: Arc<DefaultFileManager>,
 
-    /// Scheduler for periodic tasks
-    pub scheduler: Arc<PeriodicScheduler>,
+    
+    
 }
 
 impl AppState {
@@ -58,7 +58,7 @@ impl AppState {
         let file_manager = Arc::new(DefaultFileManager::new(project_config_arc.clone()).await?);
 
         // Initialize scheduler
-        let scheduler = Arc::new(PeriodicScheduler::new());
+        
 
         Ok(Self {
             project_config: project_config_arc,
@@ -66,8 +66,8 @@ impl AppState {
             connectivity_checker: Arc::new(connectivity_checker),
             onedrive_client,
             auth: auth_arc,
-            file_manager,
-            scheduler,
+            file_manager
+            
         })
     }
 
@@ -102,7 +102,7 @@ impl AppState {
         let file_manager = Arc::new(DefaultFileManager::new(project_config_arc.clone()).await?);
 
         // Initialize scheduler
-        let scheduler = Arc::new(PeriodicScheduler::new());
+        
 
         Ok(Self {
             project_config: project_config_arc,
@@ -112,7 +112,7 @@ impl AppState {
             auth: auth_arc,
             file_manager,
 
-            scheduler,
+            
         })
     }
 
@@ -146,10 +146,7 @@ impl AppState {
         &self.file_manager
     }
 
-    /// Get a reference to the scheduler
-    pub fn scheduler(&self) -> &PeriodicScheduler {
-        &self.scheduler
-    }
+    
 }
 
 /// Factory function to create application state

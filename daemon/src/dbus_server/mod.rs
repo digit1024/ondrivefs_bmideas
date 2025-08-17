@@ -17,9 +17,7 @@ async fn compute_status(app_state: &Arc<AppState>) -> DaemonStatus {
         app_state.connectivity().check_connectivity().await,
         crate::connectivity::ConnectivityStatus::Online
     );
-    let sync_status = if let Some(metrics) = app_state.scheduler().get_task_metrics("sync_cycle").await {
-        if metrics.is_running { SyncStatus::Running } else { SyncStatus::Paused }
-    } else { SyncStatus::Paused };
+    let sync_status = SyncStatus::Paused ;//TODO Restore it 
     let has_conflicts = app_state
         .persistency()
         .processing_item_repository()
