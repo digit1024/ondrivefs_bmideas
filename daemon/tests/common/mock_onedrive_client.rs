@@ -15,10 +15,15 @@ pub struct MockResponses {
     pub drive_items: HashMap<String, DriveItem>,
     pub delta_collections: Vec<DeltaResponseApi>,
     pub upload_results: Vec<UploadResult>,
-    pub create_folder_results: Vec<CreateFolderResult>,
+    #[allow(dead_code)]
+    pub create_folder_results: Vec<CreateFolderResult>,     
+    #[allow(dead_code)]
     pub delete_results: Vec<DeleteResult>,
+    #[allow(dead_code)]
     pub download_results: HashMap<String, DownloadResult>,
+    #[allow(dead_code)]
     pub thumbnail_data: Vec<u8>,
+    #[allow(dead_code)]
     pub should_fail_operations: Vec<String>, // List of operation names that should fail
 }
 
@@ -121,12 +126,14 @@ impl MockOneDriveClient {
     }
 
     /// Set expected download result for a specific file
+    #[allow(dead_code)]
     pub fn set_expected_download_result(&self, file_id: String, result: DownloadResult) {
         let mut responses = self.responses.lock().unwrap();
         responses.download_results.insert(file_id, result);
     }
 
     /// Set expected delta changes response
+    #[allow(dead_code)]
     pub fn set_expected_delta_changes(&self, collection: DeltaResponseApi) {
         let mut responses = self.responses.lock().unwrap();
         responses.delta_collections.clear();
@@ -134,6 +141,7 @@ impl MockOneDriveClient {
     }
 
     /// Set expected create folder result
+    #[allow(dead_code)]
     pub fn set_expected_create_folder_result(&self, result: CreateFolderResult) {
         let mut responses = self.responses.lock().unwrap();
         responses.create_folder_results.clear();
@@ -141,6 +149,7 @@ impl MockOneDriveClient {
     }
 
     /// Set expected thumbnail data
+    #[allow(dead_code)]
     pub fn set_expected_thumbnail_data(&self, data: Vec<u8>) {
         let mut responses = self.responses.lock().unwrap();
         responses.thumbnail_data = data;

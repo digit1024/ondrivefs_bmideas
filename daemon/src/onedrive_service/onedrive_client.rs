@@ -17,7 +17,9 @@ use urlencoding;
 /// Trait defining the interface for OneDrive client operations
 #[async_trait]
 pub trait OneDriveClientTrait: Send + Sync {
+    
     // File upload operations
+    #[allow(dead_code)]
     async fn upload_large_file_to_parent(
         &self,
         file_data: &[u8],
@@ -25,30 +27,30 @@ pub trait OneDriveClientTrait: Send + Sync {
         parent_id: &str,
         config: Option<UploadSessionConfig>,
     ) -> Result<UploadResult>;
-
+    #[allow(dead_code)]
     async fn update_large_file(
         &self,
         file_data: &[u8],
         item_id: &str,
         config: Option<UploadSessionConfig>,
     ) -> Result<UploadResult>;
-
+    #[allow(dead_code)]
     async fn upload_file_smart(
         &self,
         file_data: &[u8],
         file_name: &str,
         parent_id: &str,
     ) -> Result<UploadResult>;
-
+    #[allow(dead_code)]
     async fn update_file_smart(&self, file_data: &[u8], item_id: &str) -> Result<UploadResult>;
-
+    #[allow(dead_code)]
     async fn resume_large_file_upload(
         &self,
         upload_url: &str,
         file_data: &[u8],
         config: Option<UploadSessionConfig>,
     ) -> Result<DriveItem>;
-
+    #[allow(dead_code)]
     async fn upload_new_file_to_parent(
         &self,
         file_data: &[u8],
@@ -70,6 +72,7 @@ pub trait OneDriveClientTrait: Send + Sync {
 
     // Download operations
     async fn download_thumbnail_medium(&self, item_id: &str) -> Result<Vec<u8>>;
+    #[allow(dead_code)]
     async fn download_file_with_options(
         &self,
         download_url: &str,
@@ -77,6 +80,7 @@ pub trait OneDriveClientTrait: Send + Sync {
         filename: &str,
         range: Option<(u64, u64)>,
     ) -> Result<DownloadResult>;
+    #[allow(dead_code)]
     async fn download_file(
         &self,
         download_url: &str,
@@ -88,6 +92,7 @@ pub trait OneDriveClientTrait: Send + Sync {
     async fn get_user_profile(&self) -> Result<UserProfile>;
 
     // Test operations
+    #[allow(dead_code)]
     async fn test_resumable_upload(&self) -> Result<()>;
 }
 

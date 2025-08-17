@@ -7,9 +7,11 @@ The authentication system implements OAuth2 with PKCE (Proof Key for Code Exchan
 ## OAuth2 Flow
 
 ### Authorization Flow
+
 **File**: `auth/onedrive_auth.rs`
 
 #### 1. PKCE Code Generation
+
 ```rust
 fn generate_pkce() -> (String, String) {
     let code_verifier: String = (0..PKCE_CODE_VERIFIER_LENGTH)
@@ -25,11 +27,13 @@ fn generate_pkce() -> (String, String) {
 ```
 
 **PKCE Parameters**:
+
 - **Code Verifier**: 128-character random string
 - **Code Challenge**: SHA256 hash of verifier (Base64URL encoded)
 - **Character Set**: A-Z, a-z, 0-9, -, ., _, ~
 
 #### 2. Authorization URL Construction
+
 ```rust
 fn build_auth_url(&self, code_challenge: &str) -> Result<Url> {
     let mut url = Url::parse(AUTH_URL)?;
@@ -47,6 +51,7 @@ fn build_auth_url(&self, code_challenge: &str) -> Result<Url> {
 ```
 
 **Authorization Parameters**:
+
 - **Client ID**: Azure application identifier
 - **Response Type**: `code` for authorization code flow
 - **Redirect URI**: `http://localhost:8080/callback`
@@ -55,6 +60,7 @@ fn build_auth_url(&self, code_challenge: &str) -> Result<Url> {
 - **Code Challenge Method**: `S256` (SHA256)
 
 #### 3. Local Server Setup
+
 ```rust
 pub async fn authorize(&self) -> Result<AuthConfig> {
     let (code_verifier, code_challenge) = Self::generate_pkce();
@@ -74,6 +80,7 @@ pub async fn authorize(&self) -> Result<AuthConfig> {
 ```
 
 **Local Server Configuration**:
+
 - **Address**: `127.0.0.1:8080`
 - **Callback Path**: `/callback`
 - **Timeout**: User interaction timeout
@@ -81,6 +88,7 @@ pub async fn authorize(&self) -> Result<AuthConfig> {
 ### Token Exchange
 
 #### 1. Authorization Code to Token
+
 ```rust
 async fn exchange_code_for_token(&self, auth_code: &str, code_verifier: &str) -> Result<TokenResponse> {
     let token_url = Url::parse(TOKEN_URL)?;
@@ -104,6 +112,7 @@ async fn exchange_code_for_token(&self, auth_code: &str, code_verifier: &str) ->
 ```
 
 **Token Request Parameters**:
+
 - **Client ID**: Azure application identifier
 - **Grant Type**: `authorization_code`
 - **Code**: Authorization code from callback
@@ -111,6 +120,7 @@ async fn exchange_code_for_token(&self, auth_code: &str, code_verifier: &str) ->
 - **Code Verifier**: Original PKCE verifier
 
 #### 2. Token Response Processing
+
 ```rust
 #[derive(Debug, Serialize, Deserialize)]
 struct TokenResponse {
@@ -124,6 +134,7 @@ struct TokenResponse {
 ## Token Management
 
 ### TokenStore
+
 **File**: `auth/token_store.rs`
 
 Secure token storage:
@@ -136,6 +147,7 @@ pub struct TokenStore {
 ```
 
 **Security Features**:
+
 - **Encrypted Storage**: AES-256 encryption for sensitive data
 - **Secure Key Derivation**: PBKDF2 key derivation
 - **File Permissions**: Restricted file access (600)
@@ -143,6 +155,7 @@ pub struct TokenStore {
 ### Token Refresh
 
 #### Automatic Refresh
+
 ```rust
 pub async fn get_valid_token(&self) -> Result<String> {
     let config = self.load_config().await?;
@@ -159,11 +172,13 @@ pub async fn get_valid_token(&self) -> Result<String> {
 ```
 
 **Refresh Logic**:
+
 - **Expiry Check**: Token expired
 - **Buffer Time**: Refresh 5 minutes before expiry
 - **Automatic Renewal**: Transparent to application
 
 #### Refresh Token Flow
+
 ```rust
 async fn refresh_token(&self, config: &AuthConfig) -> Result<AuthConfig> {
     let refresh_token = config.refresh_token
@@ -195,6 +210,7 @@ async fn refresh_token(&self, config: &AuthConfig) -> Result<AuthConfig> {
 ## Configuration
 
 ### OAuth2 Settings
+
 **File**: `auth/onedrive_auth.rs`
 
 ```rust
@@ -220,6 +236,7 @@ const TOKEN_REFRESH_BUFFER_SECS: u64 = 300; // 5 minutes
 ```
 
 ### Required Scopes
+
 - **User.Read**: Access to user profile information
 - **Files.ReadWrite**: Full file access (read/write/delete)
 - **openid**: OpenID Connect authentication
@@ -230,17 +247,20 @@ const TOKEN_REFRESH_BUFFER_SECS: u64 = 300; // 5 minutes
 ## Security Features
 
 ### PKCE Implementation
+
 - **Code Verifier**: Cryptographically secure random string
 - **Code Challenge**: SHA256 hash of verifier
 - **Challenge Method**: S256 (SHA256 with Base64URL encoding)
 
 ### Token Security
+
 - **Encrypted Storage**: AES-256 encryption for tokens
 - **Secure Key Derivation**: PBKDF2 with high iteration count
 - **File Permissions**: Restricted access (600)
 - **Memory Protection**: Secure memory handling
 
 ### Network Security
+
 - **HTTPS Only**: All OAuth endpoints use HTTPS
 - **Local Callback**: Callback only from localhost
 - **Token Validation**: Validate token format and expiry
@@ -248,18 +268,21 @@ const TOKEN_REFRESH_BUFFER_SECS: u64 = 300; // 5 minutes
 ## Error Handling
 
 ### Authentication Errors
+
 1. **User Cancellation**: User aborts authentication
 2. **Network Failures**: Connection issues during auth
 3. **Invalid Response**: Malformed OAuth response
 4. **Token Errors**: Invalid or expired tokens
 
 ### Recovery Mechanisms
+
 - **Automatic Retry**: Retry failed authentication
 - **Token Refresh**: Automatic token renewal
 - **User Notification**: Clear error messages
 - **Fallback Options**: Alternative authentication methods
 
 ### Error Logging
+
 ```rust
 match auth.load_tokens() {
     Ok(_) => {
@@ -282,6 +305,7 @@ match auth.load_tokens() {
 ## Integration Points
 
 ### OneDriveClient Integration
+
 **File**: `onedrive_service/onedrive_client.rs`
 
 ```rust
@@ -294,6 +318,7 @@ impl OneDriveClient {
 ```
 
 ### AppState Integration
+
 **File**: `app_state.rs`
 
 ```rust
@@ -320,6 +345,7 @@ impl AppState {
 ## User Experience
 
 ### Authentication Flow
+
 1. **Initial Launch**: Check for existing tokens
 2. **Token Missing**: Open browser for authentication
 3. **User Authentication**: Microsoft login page
@@ -330,6 +356,7 @@ impl AppState {
 8. **Ready**: Application ready for OneDrive access
 
 ### Re-authentication
+
 - **Token Expiry**: Automatic refresh when possible
 - **Refresh Failure**: Prompt user to re-authenticate
 - **Seamless Operation**: Minimal user interruption
@@ -337,12 +364,14 @@ impl AppState {
 ## Debugging & Troubleshooting
 
 ### Common Issues
+
 1. **Port Conflicts**: Port 8080 already in use
 2. **Firewall Blocking**: Local server blocked
 3. **Browser Issues**: Authentication page problems
 4. **Token Corruption**: Stored token issues
 
 ### Debug Tools
+
 ```bash
 # Enable authentication debug logging
 RUST_LOG=debug onedrive-daemon
@@ -355,6 +384,7 @@ curl http://localhost:8080/callback
 ```
 
 ### Log Analysis
+
 - **Authentication Flow**: Step-by-step logging
 - **Token Operations**: Token refresh and validation
 - **Error Details**: Comprehensive error information

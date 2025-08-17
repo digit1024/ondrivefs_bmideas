@@ -10,31 +10,7 @@ use zbus::connection;
 use zbus::object_server::SignalEmitter;
 use onedrive_sync_lib::dbus::types::DaemonStatus;
 
-async fn compute_status(app_state: &Arc<AppState>) -> DaemonStatus {
-    use onedrive_sync_lib::dbus::types::SyncStatus;
-    let is_authenticated = app_state.auth().get_valid_token().await.is_ok();
-    let is_connected = matches!(
-        app_state.connectivity().check_connectivity().await,
-        crate::connectivity::ConnectivityStatus::Online
-    );
-    let sync_status = SyncStatus::Paused ;//TODO Restore it 
-    let has_conflicts = app_state
-        .persistency()
-        .processing_item_repository()
-        .get_processing_items_by_status(
-            &crate::persistency::processing_item_repository::ProcessingStatus::Conflicted,
-        )
-        .await
-        .map(|items| !items.is_empty())
-        .unwrap_or(false);
-    let path_str = format!("{}/OneDrive", std::env::var("HOME").unwrap_or_default());
-    let p = std::path::Path::new(&path_str);
-    let mounts = std::fs::read_to_string("/proc/mounts").unwrap_or_default();
-    let is_mounted = mounts
-        .lines()
-        .any(|line| line.split_whitespace().nth(1) == Some(p.to_str().unwrap_or_default()));
-    DaemonStatus { is_authenticated, is_connected, sync_status, has_conflicts, is_mounted }
-}
+
 
 pub struct DbusServerManager {
     app_state: Arc<AppState>,

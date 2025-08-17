@@ -31,6 +31,7 @@ pub struct AppState {
 }
 
 impl AppState {
+    #[allow(dead_code)]
     /// Create a new application state with custom OneDrive client
     pub async fn with_onedrive_client(onedrive_client: Arc<dyn OneDriveClientTrait>) -> Result<Self> {
         // Initialize project configuration

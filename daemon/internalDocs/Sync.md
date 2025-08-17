@@ -7,6 +7,7 @@ The synchronization system provides bidirectional synchronization between OneDri
 ## Core Components
 
 ### SyncProcessor
+
 **File**: `sync/sync_processor.rs`
 
 Main synchronization orchestrator:
@@ -21,6 +22,7 @@ pub struct SyncProcessor {
 ```
 
 **Key Responsibilities**:
+
 - Process remote and local changes
 - Coordinate conflict resolution
 - Manage processing queue
@@ -29,9 +31,11 @@ pub struct SyncProcessor {
 ## Synchronization Process Flow
 
 ### 1. Change Detection
+
 **File**: `tasks/delta_update.rs`
 
 #### Remote Changes (OneDrive → Local)
+
 ```rust
 pub async fn get_delta_changes(&self) -> Result<Vec<DriveItem>> {
     let sync_state_repo = SyncStateRepository::new(self.app_state.persistency().pool().clone());
@@ -50,23 +54,28 @@ pub async fn get_delta_changes(&self) -> Result<Vec<DriveItem>> {
 ```
 
 **Change Types**:
+
 - **Create**: New file/folder created
 - **Update**: Existing item modified
 - **Delete**: Item removed
 - **Move**: Item relocated
 
 #### Local Changes (Local → OneDrive)
+
 **File**: `file_manager.rs`
 
 Detected through:
+
 - FUSE file operations
 - File system monitoring
 - Manual change detection
 
 ### 2. Processing Queue Management
+
 **File**: `persistency/processing_item_repository.rs`
 
 #### ProcessingItem States
+
 ```rust
 pub enum ProcessingStatus {
     New,           // Initial state
@@ -78,6 +87,7 @@ pub enum ProcessingStatus {
 ```
 
 #### Priority Processing
+
 **File**: `sync/sync_processor.rs`
 
 ```rust
@@ -117,13 +127,16 @@ pub async fn process_single_item(&self, item: &ProcessingItem) -> Result<()> {
 ```
 
 **Processing Order**:
+
 1. **Remote Changes**: OneDrive → Local (highest priority)
 2. **Local Changes**: Local → OneDrive (after remote completion)
 
 ### 3. Conflict Detection & Resolution
+
 **File**: `sync/sync_strategy.rs`
 
 #### Conflict Detection
+
 ```rust
 pub async fn detect_remote_conflicts(&self, item: &ProcessingItem) -> Result<Vec<RemoteConflict>> {
     let mut conflicts = Vec::new();
@@ -148,6 +161,7 @@ pub async fn detect_local_conflicts(&self, item: &ProcessingItem) -> Result<Vec<
 ```
 
 #### Conflict Types
+
 **File**: `sync/conflicts.rs`
 
 The system defines two separate conflict enums for different conflict scenarios:
@@ -177,9 +191,11 @@ pub enum LocalConflict {
 ```
 
 #### Resolution Strategy
+
 **File**: `sync/conflict_resolution.rs`
 
 **Auto-Resolution**:
+
 - **ModifyOnParentDelete** and **MoveToDeletedParent** conflicts are automatically resolved by restoring the parent from OneDrive
 - Parent restoration process:
   1. Fetch parent DriveItem from OneDrive by parent ID
@@ -188,6 +204,7 @@ pub enum LocalConflict {
   4. Continue with normal processing
 
 **Manual Resolution**:
+
 - User intervention required for all other conflicts
 - Conflict notification via DBus
 - Manual conflict resolution UI allows users to choose:
@@ -195,9 +212,11 @@ pub enum LocalConflict {
   - Use Remote: Use the OneDrive version
 
 ### 4. File Operations
+
 **File**: `file_manager.rs`
 
 #### Download Management
+
 ```rust
 pub async fn download_file(&self, item: &DriveItemWithFuse) -> Result<()> {
     // Add to download queue
@@ -214,6 +233,7 @@ pub async fn download_file(&self, item: &DriveItemWithFuse) -> Result<()> {
 ```
 
 #### Upload Management
+
 ```rust
 pub async fn upload_file(&self, local_path: &Path) -> Result<()> {
     // Create upload request
@@ -232,9 +252,11 @@ pub async fn upload_file(&self, local_path: &Path) -> Result<()> {
 ## Delta Synchronization
 
 ### Delta API Integration
+
 **File**: `tasks/delta_update.rs`
 
 #### Delta Link Management
+
 ```rust
 pub async fn update_delta_link(&self, delta_link: &str) -> Result<()> {
     let sync_state = SyncState {
@@ -248,11 +270,13 @@ pub async fn update_delta_link(&self, delta_link: &str) -> Result<()> {
 ```
 
 **Benefits**:
+
 - **Incremental Updates**: Only changed items processed
 - **Efficiency**: Reduced API calls and data transfer
 - **Consistency**: Maintains sync state across sessions
 
 ### Sync Cycle Execution
+
 **File**: `tasks/delta_update.rs`
 
 ```rust
@@ -277,16 +301,19 @@ pub async fn run(&self) -> Result<()> {
 ## Performance Optimizations
 
 ### Batch Processing
+
 - **Grouped Operations**: Process multiple items together
 - **Parallel Processing**: Concurrent item processing
 - **Queue Optimization**: Priority-based processing order
 
 ### Caching Strategy
+
 - **Metadata Caching**: Cache frequently accessed metadata
 - **Content Caching**: Cache file content for performance
 - **TTL-based Invalidation**: Automatic cache refresh
 
 ### Resource Management
+
 - **Connection Pooling**: Reuse HTTP connections
 - **Memory Management**: Efficient memory usage
 - **Background Processing**: Non-blocking operations
@@ -294,18 +321,21 @@ pub async fn run(&self) -> Result<()> {
 ## Error Handling & Recovery
 
 ### Error Categories
+
 1. **Network Errors**: Connection failures, timeouts
 2. **API Errors**: OneDrive API failures
 3. **File System Errors**: Permission, disk space issues
 4. **Data Errors**: Corruption, validation failures
 
 ### Recovery Mechanisms
+
 - **Automatic Retry**: Exponential backoff for transient errors
 - **Fallback Strategies**: Alternative approaches when primary fails
 - **Error Logging**: Comprehensive error tracking
 - **User Notification**: Error reporting via DBus
 
 ### Monitoring & Metrics
+
 **File**: `scheduler/periodic_scheduler.rs`
 
 ```rust
@@ -321,16 +351,19 @@ pub struct TaskMetrics {
 ## Integration Points
 
 ### Database Integration
+
 - **ProcessingItem**: Change tracking and status management
 - **DriveItemWithFuse**: Core data model
 - **SyncState**: Synchronization state persistence
 
 ### FUSE Integration
+
 - **File Operations**: Direct filesystem access
 - **Change Detection**: Real-time change monitoring
 - **Metadata Updates**: Filesystem metadata synchronization
 
 ### External Systems
+
 - **OneDrive API**: Cloud storage integration
 - **DBus**: System integration and notifications
 - **File Manager**: Local filesystem operations
@@ -338,16 +371,19 @@ pub struct TaskMetrics {
 ## Configuration
 
 ### Sync Intervals
+
 - **Default**: 30 seconds
 - **Configurable**: Via configuration file
 - **Adaptive**: Based on system load and activity
 
 ### Conflict Resolution
+
 - **Strategy**: Manual resolution only - all conflicts require user intervention
 - **User Choice**: Manual conflict resolution via DBus interface
 - **No Automatic Resolution**: Users must explicitly choose between local and remote versions
 
 ### Performance Tuning
+
 - **Batch Size**: Number of items processed per cycle
 - **Concurrency**: Parallel processing limits
 - **Cache TTL**: Cache invalidation timing

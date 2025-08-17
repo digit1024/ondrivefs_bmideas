@@ -783,6 +783,7 @@ impl DriveItemWithFuseRepository {
     }
 
     /// Clear all drive items (for testing purposes)
+    #[allow(dead_code)]
     pub async fn clear_all_items(&self) -> Result<()> {
         sqlx::query("DELETE FROM drive_items_with_fuse")
             .execute(&self.pool)
