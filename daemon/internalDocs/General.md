@@ -28,7 +28,7 @@ Database layer with SQLite backend:
 Synchronization engine:
 - **SyncProcessor**: Main sync orchestration
 - **SyncStrategy**: Conflict detection and resolution
-- **ConflictResolution**: Conflict handling strategies
+- **ConflictResolution**: Manual conflict handling
 
 ### 📁 **FUSE** (`fuse/`)
 Filesystem implementation:

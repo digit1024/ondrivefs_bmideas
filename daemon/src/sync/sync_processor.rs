@@ -81,7 +81,13 @@ impl SyncProcessor {
 
         match item.change_type {
             ChangeType::Remote => {
-                let conflicts = self.strategy.detect_remote_conflicts(item).await?;
+                let mut conflicts = self.strategy.detect_remote_conflicts(item).await?;
+                
+                // Try to auto-resolve conflicts before marking item as conflicted
+                if !conflicts.is_empty() {
+                    self.strategy.auto_resolve_remote_conflicts(item, &mut conflicts).await?;
+                }
+                
                 if conflicts.is_empty() {
                     self.processing_repo
                         .update_status_by_id(db_id, &ProcessingStatus::Validated)

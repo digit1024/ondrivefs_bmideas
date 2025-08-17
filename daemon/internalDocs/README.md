@@ -163,7 +163,7 @@ FUSE filesystem paths mapped to OneDrive hierarchy.
 Incremental synchronization using OneDrive delta API.
 
 ### Conflict Resolution
-Automatic and manual conflict handling strategies.
+Manual conflict handling requiring user intervention.
 
 ## Development Guidelines
 

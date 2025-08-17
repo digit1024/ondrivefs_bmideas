@@ -92,6 +92,28 @@ pub async fn process_all_items(&self) -> Result<()> {
         .get_unprocessed_items_by_change_type(&ChangeType::Local)
         .await?;
 }
+
+// Auto-resolution happens during conflict detection:
+pub async fn process_single_item(&self, item: &ProcessingItem) -> Result<()> {
+    match item.change_type {
+        ChangeType::Remote => {
+            let mut conflicts = self.strategy.detect_remote_conflicts(item).await?;
+            
+            // Try to auto-resolve conflicts before marking item as conflicted
+            if !conflicts.is_empty() {
+                self.strategy.auto_resolve_remote_conflicts(item, &mut conflicts).await?;
+            }
+            
+            if conflicts.is_empty() {
+                // Process item normally
+                self.process_remote_item(item).await?;
+            } else {
+                // Mark as conflicted for manual resolution
+                self.mark_as_conflicted(item, &conflicts).await?;
+            }
+        }
+    }
+}
 ```
 
 **Processing Order**:
@@ -103,49 +125,74 @@ pub async fn process_all_items(&self) -> Result<()> {
 
 #### Conflict Detection
 ```rust
-pub async fn detect_remote_conflicts(&self, item: &ProcessingItem) -> Result<Vec<Conflict>> {
+pub async fn detect_remote_conflicts(&self, item: &ProcessingItem) -> Result<Vec<RemoteConflict>> {
     let mut conflicts = Vec::new();
     
-    // Check for file system conflicts
-    if let Some(conflict) = self.check_filesystem_conflicts(item).await? {
-        conflicts.push(conflict);
+    // 1. Parent folder state - check if parent was deleted locally
+    if let Some(parent_ref) = &item.drive_item.parent_reference {
+        if parent_item.is_deleted() {
+            conflicts.push(RemoteConflict::ModifyOnParentDelete);
+        }
     }
     
-    // Check for data conflicts
-    if let Some(conflict) = self.check_data_conflicts(item).await? {
-        conflicts.push(conflict);
-    }
+    // 2. Name collision - check if item with same name exists locally
+    // 3. Content conflicts - check modification timestamps and etags
+    // 4. Move/rename conflicts - check destination paths
     
     Ok(conflicts)
+}
+
+pub async fn detect_local_conflicts(&self, item: &ProcessingItem) -> Result<Vec<LocalConflict>> {
+    // Similar logic for local → remote conflicts
 }
 ```
 
 #### Conflict Types
 **File**: `sync/conflicts.rs`
 
+The system defines two separate conflict enums for different conflict scenarios:
+
 ```rust
-pub enum ConflictType {
-    FileExists,        // File already exists locally
-    DirectoryExists,   // Directory already exists locally
-    PermissionDenied,  // Insufficient permissions
-    DiskFull,          // No disk space
-    NetworkError,      // Network connectivity issues
-    DataMismatch,      // Content differs between local and remote
+/// Remote conflicts (OneDrive → Local)
+pub enum RemoteConflict {
+    CreateOnCreate(String),        // Remote create, but local item exists with same name
+    ModifyOnModify(String, String), // Both remote and local modified (local etag, remote etag)
+    ModifyOnDelete,                // Remote modified, but local item deleted
+    ModifyOnParentDelete,          // Remote modified, but local parent folder deleted
+    DeleteOnModify,                // Remote deleted, but local item modified
+    RenameOrMoveOnExisting,        // Remote renamed/moved, but target name exists locally
+    MoveOnMove,                    // Remote moved, but local also moved to different location
+    MoveToDeletedParent,           // Remote moved, but destination parent deleted locally
+}
+
+/// Local conflicts (Local → OneDrive)
+pub enum LocalConflict {
+    CreateOnExisting,              // Local create, but remote item exists with same name
+    ModifyOnDeleted,               // Local modified, but remote item deleted
+    ModifyOnModified,              // Local modified, but remote also modified
+    DeleteOnModified,              // Local deleted, but remote item modified
+    RenameOrMoveToExisting,        // Local renamed/moved, but target exists on server
+    RenameOrMoveOfDeleted,         // Local renamed/moved, but source deleted from server
 }
 ```
 
-#### Resolution Strategies
+#### Resolution Strategy
 **File**: `sync/conflict_resolution.rs`
 
-**Automatic Resolution**:
-- **Remote Wins**: Use OneDrive version (default for remote changes)
-- **Local Wins**: Use local version (default for local changes)
-- **Merge**: Combine changes when possible
+**Auto-Resolution**:
+- **ModifyOnParentDelete** and **MoveToDeletedParent** conflicts are automatically resolved by restoring the parent from OneDrive
+- Parent restoration process:
+  1. Fetch parent DriveItem from OneDrive by parent ID
+  2. Mark DriveItemWithFuse as not deleted (restore or create)
+  3. Remove processing errors from parent items
+  4. Continue with normal processing
 
 **Manual Resolution**:
-- User intervention required
+- User intervention required for all other conflicts
 - Conflict notification via DBus
-- Manual conflict resolution UI
+- Manual conflict resolution UI allows users to choose:
+  - Keep Local: Use the local version
+  - Use Remote: Use the OneDrive version
 
 ### 4. File Operations
 **File**: `file_manager.rs`
@@ -296,9 +343,9 @@ pub struct TaskMetrics {
 - **Adaptive**: Based on system load and activity
 
 ### Conflict Resolution
-- **Default Strategy**: Remote wins for remote changes, local wins for local changes
-- **User Override**: Manual conflict resolution
-- **Policy Configuration**: Configurable resolution rules
+- **Strategy**: Manual resolution only - all conflicts require user intervention
+- **User Choice**: Manual conflict resolution via DBus interface
+- **No Automatic Resolution**: Users must explicitly choose between local and remote versions
 
 ### Performance Tuning
 - **Batch Size**: Number of items processed per cycle

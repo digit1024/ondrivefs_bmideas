@@ -96,9 +96,7 @@ impl Default for SyncConfig {
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub enum ConflictResolutionStrategy {
-    AlwaysRemote, // Always favor remote changes
-    AlwaysLocal,  // Always favor local changes
-    Manual,       // Wait for user decision
+    Manual, // Wait for user decision
 }
 
 impl Default for ConflictResolutionStrategy {

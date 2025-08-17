@@ -41,6 +41,7 @@ webbrowser = "1.0.5"
 tiny_http = "0.12"
 urlencoding = "2.1"
 env_logger = "0.10"
+async-trait = "0.1"
 
 # Database dependencies
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid"] }
@@ -68,4 +69,5 @@ tokio-test = "0.4"
 
 [features]
 default = []
-integration-tests = [] 
+integration-tests = []
+test-utils = [] 

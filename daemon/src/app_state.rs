@@ -6,7 +6,7 @@ use onedrive_sync_lib::config::ProjectConfig;
 use crate::{
     auth::onedrive_auth::OneDriveAuth, connectivity::ConnectivityChecker,
     file_manager::DefaultFileManager, message_broker::MessageBroker,
-    onedrive_service::onedrive_client::OneDriveClient, persistency::PersistencyManager,
+    onedrive_service::onedrive_client::{OneDriveClient, OneDriveClientTrait}, persistency::PersistencyManager,
     scheduler::periodic_scheduler::PeriodicScheduler,
 };
 
@@ -20,7 +20,7 @@ pub struct AppState {
     /// Network connectivity checker
     pub connectivity_checker: Arc<ConnectivityChecker>,
     /// OneDrive API client
-    pub onedrive_client: Arc<OneDriveClient>,
+    pub onedrive_client: Arc<dyn OneDriveClientTrait>,
     /// Authentication manager
     pub auth: Arc<OneDriveAuth>,
     /// File manager
@@ -31,6 +31,46 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Create a new application state with custom OneDrive client
+    pub async fn with_onedrive_client(onedrive_client: Arc<dyn OneDriveClientTrait>) -> Result<Self> {
+        // Initialize project configuration
+        let project_config = ProjectConfig::new()
+            .await
+            .context("Failed to create project configuration")?;
+        let project_config_arc = Arc::new(project_config);
+
+        // Initialize persistence manager
+        let persistency_manager =
+            PersistencyManager::new(project_config_arc.project_dirs.data_dir().to_path_buf())
+                .await
+                .context("Failed to create persistence manager")?;
+
+        // Initialize connectivity checker
+        let connectivity_checker = ConnectivityChecker::new();
+
+        // Initialize authentication
+        let auth = OneDriveAuth::new()
+            .await
+            .context("Failed to create authentication manager")?;
+        let auth_arc = Arc::new(auth);
+
+        // Initialize file manager
+        let file_manager = Arc::new(DefaultFileManager::new(project_config_arc.clone()).await?);
+
+        // Initialize scheduler
+        let scheduler = Arc::new(PeriodicScheduler::new());
+
+        Ok(Self {
+            project_config: project_config_arc,
+            persistency_manager: Arc::new(persistency_manager),
+            connectivity_checker: Arc::new(connectivity_checker),
+            onedrive_client,
+            auth: auth_arc,
+            file_manager,
+            scheduler,
+        })
+    }
+
     /// Create a new application state with all required components
     pub async fn new() -> Result<Self> {
         // Initialize project configuration
@@ -68,7 +108,7 @@ impl AppState {
             project_config: project_config_arc,
             persistency_manager: Arc::new(persistency_manager),
             connectivity_checker: Arc::new(connectivity_checker),
-            onedrive_client: Arc::new(onedrive_client),
+            onedrive_client: Arc::new(onedrive_client) as Arc<dyn OneDriveClientTrait>,
             auth: auth_arc,
             file_manager,
 
@@ -92,8 +132,8 @@ impl AppState {
     }
 
     /// Get a reference to the OneDrive client
-    pub fn onedrive(&self) -> &OneDriveClient {
-        &self.onedrive_client
+    pub fn onedrive(&self) -> &dyn OneDriveClientTrait {
+        &*self.onedrive_client
     }
 
     /// Get a reference to the authentication manager

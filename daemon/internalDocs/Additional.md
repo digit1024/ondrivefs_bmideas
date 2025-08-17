@@ -223,10 +223,10 @@ Used for component coordination:
 
 ### Strategy Pattern
 Used in synchronization:
-- **Pluggable Algorithms**: Different sync strategies
-- **Runtime Selection**: Choose strategy at runtime
-- **Extensibility**: Easy to add new strategies
-- **Testing**: Easy to test individual strategies
+- **Conflict Detection**: Single strategy for detecting conflicts
+- **Manual Resolution**: All conflicts require user intervention
+- **Consistent Behavior**: Predictable conflict handling
+- **User Control**: Users have full control over conflict resolution
 
 ## Configuration Management
 

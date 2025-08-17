@@ -3,6 +3,11 @@
 ## Overview
 
 The OneDrive API integration provides access to Microsoft Graph API for OneDrive operations, including file management, synchronization, and user profile access.
+it uses  API described her for Onedrive interactions:
+https://learn.microsoft.com/en-us/graph/api/resources/onedrive?view=graph-rest-1.0
+and this for profile:
+https://learn.microsoft.com/en-us/graph/api/user-get?view=graph-rest-1.0&tabs=http
+
 
 ## Core Components
 

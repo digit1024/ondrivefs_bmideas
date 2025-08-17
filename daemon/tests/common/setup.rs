@@ -3,6 +3,8 @@ use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
 use onedrive_sync_daemon::app_state::AppState;
 use onedrive_sync_daemon::log_appender::setup_logging;
+use onedrive_sync_daemon::onedrive_service::onedrive_client::mock::MockOneDriveClient;
+use onedrive_sync_daemon::onedrive_service::onedrive_client::OneDriveClientTrait;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -83,7 +85,7 @@ impl TestEnv {
         })
     }
 
-    /// Get or create the shared AppState instance
+    /// Get or create the shared AppState instance with real OneDrive client
     pub async fn get_app_state(&mut self) -> Result<Arc<AppState>> {
         if let Some(ref app_state) = self.app_state {
             return Ok(app_state.clone());
@@ -117,6 +119,40 @@ impl TestEnv {
         println!("✅ AppState initialized successfully");
 
         Ok(app_state)
+    }
+
+    /// Get or create an AppState instance with mock OneDrive client
+    pub async fn get_app_state_with_mock(&mut self) -> Result<Arc<AppState>> {
+        // Set environment variables for ProjectConfig
+        std::env::set_var("XDG_DATA_HOME", &self.data_dir);
+        std::env::set_var("XDG_CONFIG_HOME", &self.config_dir);
+        std::env::set_var("XDG_CACHE_HOME", &self.cache_dir);
+
+        println!("🚀 Initializing AppState with mock OneDrive client for tests...");
+
+        // Create mock OneDrive client
+        let mock_client = Arc::new(MockOneDriveClient::new()) as Arc<dyn OneDriveClientTrait>;
+
+        // Create AppState with mock client
+        let app_state = AppState::with_onedrive_client(mock_client)
+            .await
+            .context("Failed to create AppState with mock")?;
+
+        // Setup logging for tests
+        setup_logging(&self.data_dir)
+            .await
+            .context("Failed to setup logging")?;
+
+        // Initialize database schema
+        app_state
+            .persistency()
+            .init_database()
+            .await
+            .context("Failed to initialize database")?;
+
+        println!("✅ AppState with mock OneDrive client initialized successfully");
+
+        Ok(Arc::new(app_state))
     }
 
     /// Get the test database path
@@ -185,6 +221,16 @@ macro_rules! get_test_app_state {
     }};
 }
 
+/// Helper macro to get AppState with mock OneDrive client in tests
+#[macro_export]
+macro_rules! get_test_app_state_with_mock {
+    () => {{
+        use $crate::common::setup::TEST_ENV;
+        let mut env = TEST_ENV.lock().await;
+        env.get_app_state_with_mock().await
+    }};
+}
+
 /// Helper macro to setup test with AppState
 #[macro_export]
 macro_rules! setup_test {
@@ -197,5 +243,20 @@ macro_rules! setup_test {
         );
         drop(env);
         get_test_app_state!()
+    }};
+}
+
+/// Helper macro to setup test with mock AppState
+#[macro_export]
+macro_rules! setup_test_with_mock {
+    () => {{
+        use $crate::common::setup::TEST_ENV;
+        let env = TEST_ENV.lock().await;
+        println!(
+            "📍 Test using mock environment at: {}",
+            env.temp_dir_path().display()
+        );
+        drop(env);
+        get_test_app_state_with_mock!()
     }};
 }
