@@ -309,42 +309,44 @@ async fn test_remote_conflict_modify_on_delete() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-#[serial]
-async fn test_remote_conflict_modify_on_parent_delete() -> Result<()> {
-    println!("\n🧪 Remote Conflict: ModifyOnParentDelete");
-    let (app_state, repo, drive_items_with_fuse_repo, _mock_client) = setup_test_env().await?;
 
-    // Get a file and its parent folder
-    let file_item = drive_items_with_fuse_repo
-        .get_drive_item_with_fuse_by_virtual_ino(5) // File in Folder B (ino 4)
-        .await?
-        .unwrap();
+//The logic for this is changed - we shoudl recreate folders to limit a possibility of conflicts 
+// #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+// #[serial]
+// async fn test_remote_conflict_modify_on_parent_delete() -> Result<()> {
+//     println!("\n🧪 Remote Conflict: ModifyOnParentDelete");
+//     let (app_state, repo, drive_items_with_fuse_repo, _mock_client) = setup_test_env().await?;
 
-    let parent_folder = drive_items_with_fuse_repo
-        .get_drive_item_with_fuse_by_virtual_ino(4) // Folder B
-        .await?
-        .unwrap();
+//     // Get a file and its parent folder
+//     let file_item = drive_items_with_fuse_repo
+//         .get_drive_item_with_fuse_by_virtual_ino(5) // File in Folder B (ino 4)
+//         .await?
+//         .unwrap();
 
-    // Mark parent folder as deleted locally
-    drive_items_with_fuse_repo.mark_as_deleted_by_onedrive_id(parent_folder.id()).await?;
+//     let parent_folder = drive_items_with_fuse_repo
+//         .get_drive_item_with_fuse_by_virtual_ino(4) // Folder B
+//         .await?
+//         .unwrap();
 
-    // Create remote modification of the file
-    let remote_modified = create_modified_drive_item(file_item.drive_item(), "remote-etag-parent-del");
-    let remote_change = create_test_remote_processing_item(remote_modified, ChangeOperation::Update);
-    let remote_id = repo.store_processing_item(&remote_change).await?;
+//     // Mark parent folder as deleted locally
+//     drive_items_with_fuse_repo.mark_as_deleted_by_onedrive_id(parent_folder.id()).await?;
 
-    let sync_processor = SyncProcessor::new(app_state.clone());
-    process_and_verify_conflict(
-        &repo,
-        &sync_processor,
-        remote_id,
-        ProcessingStatus::Conflicted,
-        Some("Remote item was modified, but its local parent folder was deleted"),
-    ).await?;
+//     // Create remote modification of the file
+//     let remote_modified = create_modified_drive_item(file_item.drive_item(), "remote-etag-parent-del");
+//     let remote_change = create_test_remote_processing_item(remote_modified, ChangeOperation::Update);
+//     let remote_id = repo.store_processing_item(&remote_change).await?;
 
-    Ok(())
-}
+//     let sync_processor = SyncProcessor::new(app_state.clone());
+//     process_and_verify_conflict(
+//         &repo,
+//         &sync_processor,
+//         remote_id,
+//         ProcessingStatus::Conflicted,
+//         Some("Remote item was modified, but its local parent folder was deleted"),
+//     ).await?;
+
+//     Ok(())
+// }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[serial]
@@ -470,44 +472,46 @@ async fn test_remote_conflict_move_on_move() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-#[serial]
-async fn test_remote_conflict_move_to_deleted_parent() -> Result<()> {
-    println!("\n🧪 Remote Conflict: MoveToDeletedParent");
-    let (app_state, repo, drive_items_with_fuse_repo, _mock_client) = setup_test_env().await?;
 
-    let item_to_move = drive_items_with_fuse_repo
-        .get_drive_item_with_fuse_by_virtual_ino(5)
-        .await?
-        .unwrap();
+//The logic for this is changed - we shoudl recreate folders to limit a possibility of conflicts 
+// #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+// #[serial]
+// async fn test_remote_conflict_move_to_deleted_parent() -> Result<()> {
+//     println!("\n🧪 Remote Conflict: MoveToDeletedParent");
+//     let (app_state, repo, drive_items_with_fuse_repo, _mock_client) = setup_test_env().await?;
 
-    let target_folder = drive_items_with_fuse_repo
-        .get_drive_item_with_fuse_by_virtual_ino(6)
-        .await?
-        .unwrap();
+//     let item_to_move = drive_items_with_fuse_repo
+//         .get_drive_item_with_fuse_by_virtual_ino(5)
+//         .await?
+//         .unwrap();
 
-    // Mark target folder as deleted locally
-    drive_items_with_fuse_repo.mark_as_deleted_by_onedrive_id(target_folder.id()).await?;
+//     let target_folder = drive_items_with_fuse_repo
+//         .get_drive_item_with_fuse_by_virtual_ino(6)
+//         .await?
+//         .unwrap();
 
-    // Create remote move to the deleted folder
-    let remote_moved = create_moved_drive_item(item_to_move.drive_item(), target_folder.id());
-    let remote_change = create_test_remote_processing_item(
-        remote_moved,
-        ChangeOperation::Move ,
-    );
-    let remote_id = repo.store_processing_item(&remote_change).await?;
+//     // Mark target folder as deleted locally
+//     drive_items_with_fuse_repo.mark_as_deleted_by_onedrive_id(target_folder.id()).await?;
 
-    let sync_processor = SyncProcessor::new(app_state.clone());
-    process_and_verify_conflict(
-        &repo,
-        &sync_processor,
-        remote_id,
-        ProcessingStatus::Conflicted,
-        Some("Remote item was moved, but the destination parent folder has been deleted locally"),
-    ).await?;
+//     // Create remote move to the deleted folder
+//     let remote_moved = create_moved_drive_item(item_to_move.drive_item(), target_folder.id());
+//     let remote_change = create_test_remote_processing_item(
+//         remote_moved,
+//         ChangeOperation::Move ,
+//     );
+//     let remote_id = repo.store_processing_item(&remote_change).await?;
 
-    Ok(())
-}
+//     let sync_processor = SyncProcessor::new(app_state.clone());
+//     process_and_verify_conflict(
+//         &repo,
+//         &sync_processor,
+//         remote_id,
+//         ProcessingStatus::Conflicted,
+//         Some("Remote item was moved, but the destination parent folder has been deleted locally"),
+//     ).await?;
+
+//     Ok(())
+// }
 
 // ====================================================================================
 // 🌀 LOCAL CONFLICT TESTS - Testing all LocalConflict scenarios  
@@ -757,6 +761,7 @@ async fn test_local_update_fails_if_file_not_found() -> Result<()> {
     let item_id = repo.store_processing_item(&local_change).await?;
 
     // Note: We do NOT create the local file on disk
+    remove_local_file(&app_state, 5).await?;
     let sync_processor = SyncProcessor::new(app_state.clone());
     process_and_verify_conflict(
         &repo,

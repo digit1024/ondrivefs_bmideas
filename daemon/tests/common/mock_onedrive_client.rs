@@ -248,7 +248,7 @@ impl OneDriveClientTrait for MockOneDriveClient {
         _file_name: &str,
         _parent_id: &str,
     ) -> Result<UploadResult> {
-        if self.should_fail_operation("operation") {
+        if self.should_fail_operation("upload_file") {
             Err(anyhow!("Mock smart upload failure"))
         } else {
             Ok(UploadResult {
@@ -261,7 +261,7 @@ impl OneDriveClientTrait for MockOneDriveClient {
     }
 
     async fn update_file_smart(&self, _file_data: &[u8], _item_id: &str) -> Result<UploadResult> {
-        if self.should_fail_operation("operation") {
+        if self.should_fail_operation("upload_file") {
             Err(anyhow!("Mock smart update failure"))
         } else {
             Ok(UploadResult {
@@ -279,7 +279,7 @@ impl OneDriveClientTrait for MockOneDriveClient {
         _file_data: &[u8],
         _config: Option<UploadSessionConfig>,
     ) -> Result<DriveItem> {
-        if self.should_fail_operation("operation") {
+        if self.should_fail_operation("upload_file") {
             Err(anyhow!("Mock resume upload failure"))
         } else {
             Ok(DriveItem {
@@ -306,7 +306,7 @@ impl OneDriveClientTrait for MockOneDriveClient {
         _file_name: &str,
         _parent_id: &str,
     ) -> Result<UploadResult> {
-        if self.should_fail_operation("operation") {
+        if self.should_fail_operation("upload_file") {
             Err(anyhow!("Mock new upload failure"))
         } else {
             Ok(UploadResult {
@@ -319,7 +319,7 @@ impl OneDriveClientTrait for MockOneDriveClient {
     }
 
     async fn upload_updated_file(&self, _file_data: &[u8], _item_id: &str) -> Result<UploadResult> {
-        if self.should_fail_operation("operation") {
+        if self.should_fail_operation("upload_file") {
             Err(anyhow!("Mock update upload failure"))
         } else {
             Ok(UploadResult {
@@ -357,7 +357,7 @@ impl OneDriveClientTrait for MockOneDriveClient {
     }
 
     async fn delete_item(&self, path: &str) -> Result<DeleteResult> {
-        if self.should_fail_operation("operation") {
+        if self.should_fail_operation("delete") {
             Err(anyhow!("Mock delete failure"))
         } else {
             Ok(DeleteResult {
@@ -369,7 +369,7 @@ impl OneDriveClientTrait for MockOneDriveClient {
     }
 
     async fn create_folder(&self, _parent_path: &str, folder_name: &str) -> Result<CreateFolderResult> {
-        if self.should_fail_operation("operation") {
+        if self.should_fail_operation("create_folder") {
             Err(anyhow!("Mock create folder failure"))
         } else {
             Ok(CreateFolderResult {
@@ -381,7 +381,7 @@ impl OneDriveClientTrait for MockOneDriveClient {
     }
 
     async fn move_item(&self, item_id: &str, _new_parent_id: &str) -> Result<DriveItem> {
-        if self.should_fail_operation("operation") {
+        if self.should_fail_operation("move_item") {
             Err(anyhow!("Mock move failure"))
         } else {
             Ok(DriveItem {
@@ -403,7 +403,7 @@ impl OneDriveClientTrait for MockOneDriveClient {
     }
 
     async fn rename_item(&self, item_id: &str, new_name: &str) -> Result<DriveItem> {
-        if self.should_fail_operation("operation") {
+        if self.should_fail_operation("rename_item") {
             Err(anyhow!("Mock rename failure"))
         } else {
             Ok(DriveItem {
@@ -440,7 +440,7 @@ impl OneDriveClientTrait for MockOneDriveClient {
     }
 
     async fn download_thumbnail_medium(&self, _item_id: &str) -> Result<Vec<u8>> {
-        if self.should_fail_operation("operation") {
+        if self.should_fail_operation("download_file") {
             Err(anyhow!("Mock thumbnail download failure"))
         } else {
             Ok(vec![0, 1, 2, 3, 4]) // Mock thumbnail data
@@ -454,7 +454,7 @@ impl OneDriveClientTrait for MockOneDriveClient {
         filename: &str,
         _range: Option<(u64, u64)>,
     ) -> Result<DownloadResult> {
-        if self.should_fail_operation("operation") {
+        if self.should_fail_operation("download_file") {
             Err(anyhow!("Mock download failure"))
         } else {
             Ok(DownloadResult {
@@ -500,7 +500,7 @@ impl OneDriveClientTrait for MockOneDriveClient {
     }
 
     async fn test_resumable_upload(&self) -> Result<()> {
-        if self.should_fail_operation("operation") {
+        if self.should_fail_operation("upload_file") {
             Err(anyhow!("Mock test resumable upload failure"))
         } else {
             Ok(())
