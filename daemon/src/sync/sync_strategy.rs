@@ -92,6 +92,15 @@ impl SyncStrategy {
                 (ChangeOperation::Delete, ChangeOperation::Update { .. }) => {
                     conflicts.push(RemoteConflict::DeleteOnModify);
                 }
+                (ChangeOperation::Delete, ChangeOperation::Move) => {
+                    conflicts.push(RemoteConflict::DeleteOnModify);
+                }
+                (ChangeOperation::Delete, ChangeOperation::Rename) => {
+                    conflicts.push(RemoteConflict::DeleteOnModify);
+                }
+                (ChangeOperation::Delete, ChangeOperation::Create) => {
+                    conflicts.push(RemoteConflict::DeleteOnModify);
+                }
                 (ChangeOperation::Move { .. }, ChangeOperation::Move { .. }) => {
                     if item.drive_item.parent_reference != local_change.drive_item.parent_reference {
                         conflicts.push(RemoteConflict::MoveOnMove);
