@@ -109,18 +109,18 @@ impl SyncProcessor {
             }
             ChangeType::Local => {
                 // Before processing a local change, check if a remote change for the same item is already conflicted
-                if let Ok(Some(remote_item)) = self.processing_repo.get_pending_processing_item_by_drive_item_id_and_change_type(&item.drive_item.id, &ChangeType::Remote).await {
-                    if remote_item.status == ProcessingStatus::Conflicted {
-                        self.processing_repo
-                            .update_status_by_id(db_id, &ProcessingStatus::Conflicted)
-                            .await?;
-                        warn!(
-                            "Local change for item {} conflicts with a prior remote change. Both are marked as conflicted.",
-                            item.drive_item.id
-                        );
-                        return Ok(());
-                    }
-                }
+                // if let Ok(Some(remote_item)) = self.processing_repo.get_pending_processing_item_by_drive_item_id_and_change_type(&item.drive_item.id, &ChangeType::Remote).await {
+                //     if remote_item.status == ProcessingStatus::Conflicted {
+                //         self.processing_repo
+                //             .update_status_by_id(db_id, &ProcessingStatus::Conflicted)
+                //             .await?;
+                //         warn!(
+                //             "Local change for item {} conflicts with a prior remote change. Both are marked as conflicted.",
+                //             item.drive_item.id
+                //         );
+                //         return Ok(());
+                //     }
+                // }
 
                 let conflicts = self.strategy.detect_local_conflicts(item).await?;
                 if conflicts.is_empty() {

@@ -75,8 +75,8 @@ pub enum ChangeOperation {
     Create,
     Update,
     Delete,
-    Move { old_path: String, new_path: String },
-    Rename { old_name: String, new_name: String },
+    Move , 
+    Rename , 
     NoChange,
 }
 
@@ -97,14 +97,8 @@ impl ChangeOperation {
             "create" => Some(ChangeOperation::Create),
             "update" => Some(ChangeOperation::Update),
             "delete" => Some(ChangeOperation::Delete),
-            "move" => Some(ChangeOperation::Move {
-                old_path: String::new(),
-                new_path: String::new(),
-            }),
-            "rename" => Some(ChangeOperation::Rename {
-                old_name: String::new(),
-                new_name: String::new(),
-            }),
+            "move" => Some(ChangeOperation::Move ),
+            "rename" => Some(ChangeOperation::Rename ),
             "no_change" => Some(ChangeOperation::NoChange),
             _ => None,
         }
@@ -515,7 +509,7 @@ impl ProcessingItemRepository {
                    status, error_message, last_status_update, retry_count, priority,
                    change_type, change_operation, conflict_resolution, validation_errors, user_decision
             FROM processing_items 
-            WHERE change_type = ? AND status IN ('new', 'validated', 'error')
+            WHERE change_type = ? AND status IN ('new', 'validated', 'error', 'conflicted'  )
             AND ( parent_path  NOT LIKE '/root/.%' OR (name ='root' and parent_path is null))
             and (change_type = 'remote' or last_status_update < datetime('now', '-5 seconds') ) -- this is to avoid processing the same item multiple times
             ORDER BY id ASC LIMIT 1

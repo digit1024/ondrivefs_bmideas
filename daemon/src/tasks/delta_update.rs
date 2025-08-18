@@ -384,14 +384,7 @@ impl SyncCycle {
                 if item.deleted.is_some() {
                     crate::persistency::processing_item_repository::ChangeOperation::Delete
                 } else if self.parent_id_changed(&existing.drive_item, item) {
-                    crate::persistency::processing_item_repository::ChangeOperation::Move {
-                        old_path: existing.virtual_path().unwrap_or_default().to_string(),
-                        new_path: item
-                            .parent_reference
-                            .as_ref()
-                            .and_then(|p| p.path.clone())
-                            .unwrap_or_default(),
-                    }
+                    crate::persistency::processing_item_repository::ChangeOperation::Move 
                 } else if self.some_attribute_changed(&existing.drive_item, item) {
                     crate::persistency::processing_item_repository::ChangeOperation::Update
                 } else {

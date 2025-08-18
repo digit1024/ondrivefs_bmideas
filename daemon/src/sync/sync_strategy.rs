@@ -137,6 +137,7 @@ impl SyncStrategy {
                     }
                 }
             }
+            
             ChangeOperation::Rename { .. } | ChangeOperation::Move { .. } => {
                 if let Some(remote) = remote_item {
                     if remote.change_operation == ChangeOperation::Delete {
