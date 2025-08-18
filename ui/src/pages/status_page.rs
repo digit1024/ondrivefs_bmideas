@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use crate::dbus_client::{with_dbus_client, DbusClient, take_latest_status};
-use cosmic::iced::alignment::Horizontal;
 use cosmic::iced::{time, Alignment, Length, Subscription};
 use cosmic::widget::{self, button, column, container, row, text};
 use log::{error, info};
@@ -47,145 +46,191 @@ impl Page {
     }
 
     pub fn view(&self) -> cosmic::Element<Message> {
-        let spacing = cosmic::theme::active().cosmic().spacing.space_l;
-        let content = column()
-            .spacing(spacing)
-            .width(Length::Fill)
-            .height(Length::Fill);
+        let spacing = cosmic::theme::active().cosmic().spacing;
+        
+        // Main content with proper spacing
+        let mut content = column()
+            .spacing(spacing.space_l)
+            .padding([spacing.space_none, spacing.space_l])
+            .max_width(1000.0)
+            .width(Length::Fill);
 
-        // Header: Welcome message or fallback
+        // Page header with welcome message
         let header = if let Some(profile) = &self.user_profile {
-            text::title2(format!("Welcome {} in OneDrive Client", profile.given_name)).size(24)
+            column()
+                .spacing(spacing.space_xs)
+                .push(text::title1(format!("Welcome {}", profile.given_name)))
+                .push(text::body("OneDrive Client Status"))
         } else {
-            text::title2("OneDrive Sync Status").size(24)
+            column()
+                .spacing(spacing.space_xs)
+                .push(text::title1("OneDrive Client"))
+                .push(text::body("Sync Status Dashboard"))
         };
 
-        // Refresh button aligned right
-        let refresh_row = row().width(Length::Fill).push(
-            column().push(header).push(
+        // Action buttons row with better styling
+        let action_buttons = row()
+            .spacing(spacing.space_s)
+            .push(button::standard("Refresh").on_press(Message::Refresh))
+            .push(button::standard("Pause/Resume Sync").on_press(Message::ToggleSyncPause))
+            .push(button::destructive("Full Reset").on_press(Message::FullReset));
+
+        // Header section with title and actions
+        let header_section = row()
+            .spacing(spacing.space_l)
+            .align_y(cosmic::iced::Alignment::Center)
+            .push(header)
+            .push(
+                container(action_buttons)
+                    .align_x(cosmic::iced::alignment::Horizontal::Right)
+                    .width(Length::Fill)
+            );
+
+        content = content.push(header_section);
+
+        // Loading and error states
+        if self.loading {
+            let loading_card = container(
                 row()
-                    .push(button::standard("Refresh").on_press(Message::Refresh))
-                    .push(button::standard("Pause/Resume Sync").on_press(Message::ToggleSyncPause))
-                    .push(button::destructive("Full Reset").on_press(Message::FullReset))
-                    .width(Length::Fill),
-            ),
-        );
-
-        // Status and profile as cards
-        let status_card = container(self.create_status_section())
+                    .spacing(spacing.space_s)
+                    .align_y(cosmic::iced::Alignment::Center)
+                    .push(text::body("Loading status..."))
+            )
             .class(cosmic::style::Container::Card)
-            .padding(16)
+            .padding(spacing.space_l)
             .width(Length::Fill);
+            
+            content = content.push(loading_card);
+        }
 
-        let profile_card = container(self.create_profile_section())
+        if let Some(error) = &self.error {
+            let error_card = container(
+                column()
+                    .spacing(spacing.space_s)
+                    .push(text::title4("Error"))
+                    .push(text::body(error))
+            )
             .class(cosmic::style::Container::Card)
-            .padding(16)
+            .padding(spacing.space_l)
             .width(Length::Fill);
+            
+            content = content.push(error_card);
+        }
 
-        // Loading indicator
-        let loading_indicator = if self.loading {
-            container(text::body("Loading status...").size(16))
-                .padding(8)
-                .width(Length::Fill)
-        } else {
-            container(column()).width(Length::Fill)
-        };
+        // Main content cards in a responsive grid
+        let cards_row = row()
+            .spacing(spacing.space_l)
+            .push(
+                container(self.create_profile_section())
+                    .class(cosmic::style::Container::Card)
+                    .padding(spacing.space_l)
+                    .width(Length::FillPortion(1))
+            )
+            .push(
+                container(self.create_status_section())
+                    .class(cosmic::style::Container::Card)
+                    .padding(spacing.space_l)
+                    .width(Length::FillPortion(1))
+            );
 
-        // Error display
-        let error_display = if let Some(error) = &self.error {
-            container(text::body(format!("Error: {}", error)).size(14))
-                .padding(8)
-                .width(Length::Fill)
-        } else {
-            container(column()).width(Length::Fill)
-        };
-
-        content
-            .push(refresh_row)
-            .push(loading_indicator)
-            .push(error_display)
-            .push(profile_card)
-            .push(status_card)
+        container(content.push(cards_row))
+            .center_x(Length::Fill)
+            .height(Length::Fill)
             .into()
     }
 
     fn create_status_section(&self) -> cosmic::Element<Message> {
-        let spacing = cosmic::theme::active().cosmic().spacing.space_m;
+        let spacing = cosmic::theme::active().cosmic().spacing;
 
-        let title = text::title3("Daemon Status").size(18);
+        let title = text::title3("Daemon Status");
 
         let status_content = if let Some(status) = &self.daemon_status {
             column()
-                .spacing(spacing)
+                .spacing(spacing.space_s)
                 .push(self.create_status_row("Authentication", status.is_authenticated))
+                .push(widget::divider::horizontal::default())
                 .push(self.create_status_row("Connection", status.is_connected))
+                .push(widget::divider::horizontal::default())
                 .push(self.create_status_row("Conflicts", !status.has_conflicts))
+                .push(widget::divider::horizontal::default())
                 .push(self.create_status_row("Mounted", status.is_mounted))
         } else {
             column()
-                .spacing(spacing)
-                .push(text::body("No status data available").size(14))
+                .spacing(spacing.space_s)
+                .push(text::body("No status data available"))
+                .into()
         };
 
         column()
-            .spacing(spacing)
+            .spacing(spacing.space_m)
             .push(title)
             .push(status_content)
             .into()
     }
 
     fn create_profile_section(&self) -> cosmic::Element<Message> {
-        let spacing = cosmic::theme::active().cosmic().spacing.space_m;
+        let spacing = cosmic::theme::active().cosmic().spacing;
 
-        let title = text::title3("User Profile").size(18);
+        let title = text::title3("User Profile");
 
         let profile_content = if let Some(profile) = &self.user_profile {
             column()
-                .spacing(spacing)
-                .align_x(Horizontal::Left)
+                .spacing(spacing.space_s)
                 .push(self.create_profile_row("Name", &profile.display_name))
+                .push(widget::divider::horizontal::default())
                 .push(self.create_profile_row("Email", &profile.mail))
         } else {
             column()
-                .spacing(spacing)
-                .push(text::body("No profile data available").size(14))
+                .spacing(spacing.space_s)
+                .push(text::body("No profile data available"))
+                .into()
         };
 
         column()
-            .spacing(spacing)
+            .spacing(spacing.space_m)
             .push(title)
             .push(profile_content)
             .into()
     }
 
-    fn create_status_row(&self, label: &str, value: bool) -> cosmic::Element<Message> {
+    fn create_status_row<'a>(&self, label: &'a str, value: bool) -> cosmic::Element<'a, Message> {
+        let spacing = cosmic::theme::active().cosmic().spacing;
         let icon_data = if value { ICON_TRUE } else { ICON_FALSE };
-
         let icon = widget::icon::from_raster_bytes(icon_data).icon();
 
+        // Status badge for better visual feedback
+        let status_text = if value { "Active" } else { "Inactive" };
+
         row()
-            .spacing(cosmic::theme::active().cosmic().spacing.space_s)
+            .spacing(spacing.space_s)
             .align_y(Alignment::Center)
-            .height(Length::Fixed(32.0))
+            .padding([spacing.space_xs, spacing.space_none])
             .push(
-                text::body(label.to_string())
-                    .size(14)
-                    .width(Length::Fixed(120.0)),
+                text::body(label)
+                    .width(Length::Fixed(120.0))
             )
-            .push(icon.height(Length::Fixed(32.0)).width(Length::Fixed(32.0)))
+            .push(
+                row()
+                    .spacing(spacing.space_xs)
+                    .align_y(Alignment::Center)
+                    .push(icon.height(Length::Fixed(20.0)).width(Length::Fixed(20.0)))
+                    .push(text::caption(status_text))
+            )
             .into()
     }
 
-    fn create_profile_row(&self, label: &str, value: &str) -> cosmic::Element<Message> {
+    fn create_profile_row<'a>(&self, label: &'a str, value: &'a str) -> cosmic::Element<'a, Message> {
+        let spacing = cosmic::theme::active().cosmic().spacing;
+        
         row()
-            .spacing(cosmic::theme::active().cosmic().spacing.space_s)
+            .spacing(spacing.space_s)
             .align_y(Alignment::Center)
+            .padding([spacing.space_xs, spacing.space_none])
             .push(
-                text::body(label.to_string())
-                    .size(14)
-                    .width(Length::Fixed(120.0)),
+                text::body(label)
+                    .width(Length::Fixed(120.0))
             )
-            .push(text::body(value.to_string()).size(14))
+            .push(text::body(value))
             .into()
     }
 

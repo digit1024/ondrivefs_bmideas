@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::dbus_client::DbusClient;
-use cosmic::iced::{time, Alignment, Length, Subscription};
+use cosmic::iced::{time, Length, Subscription};
 use cosmic::widget::segmented_button::SingleSelect;
 use cosmic::widget::{button, column, container, row, segmented_button, segmented_control, text};
 use log::info;
@@ -48,55 +48,86 @@ impl Page {
     }
 
     pub fn view(&self) -> cosmic::Element<Message> {
-        let spacing = cosmic::theme::active().cosmic().spacing.space_m;
-        let content = column()
-            .spacing(spacing)
-            .width(Length::Fill)
-            .height(Length::Fill);
+        let spacing = cosmic::theme::active().cosmic().spacing;
 
-        let header = text::title2("Download & Upload Queues").size(24);
-        let refresh_row = row().width(Length::Fill).push(
-            container(button::standard("Refresh").on_press(Message::Refresh))
-                .align_x(Alignment::End)
-                .width(Length::Fill),
-        );
+        // Main content with proper spacing and max width
+        let mut content = column()
+            .spacing(spacing.space_l)
+            .padding([spacing.space_none, spacing.space_l])
+            .max_width(1000.0)
+            .width(Length::Fill);
 
-        let loading_indicator = if self.loading {
-            container(text::body("Loading queues...").size(16))
-                .padding(8)
-                .width(Length::Fill)
-        } else {
-            container(column()).width(Length::Fill)
-        };
+        // Page header
+        let header_section = column()
+            .spacing(spacing.space_s)
+            .push(text::title1("Download & Upload Queues"))
+            .push(text::body("Monitor active transfers and queue status"));
 
-        let error_display = if let Some(error) = &self.error {
-            container(text::body(format!("Error: {}", error)).size(14))
-                .padding(8)
-                .width(Length::Fill)
-        } else {
-            container(column()).width(Length::Fill)
-        };
+        // Refresh button
+        let action_buttons = row()
+            .spacing(spacing.space_s)
+            .push(button::standard("Refresh").on_press(Message::Refresh));
+
+        // Header with actions
+        let header_row = row()
+            .spacing(spacing.space_l)
+            .align_y(cosmic::iced::Alignment::Center)
+            .push(header_section)
+            .push(
+                container(action_buttons)
+                    .align_x(cosmic::iced::alignment::Horizontal::Right)
+                    .width(Length::Fill)
+            );
+
+        content = content.push(header_row);
+
+        // Loading and error states as cards
+        if self.loading {
+            let loading_card = container(
+                row()
+                    .spacing(spacing.space_s)
+                    .align_y(cosmic::iced::Alignment::Center)
+                    .push(text::body("Loading queues..."))
+            )
+            .class(cosmic::style::Container::Card)
+            .padding(spacing.space_l)
+            .width(Length::Fill);
+            
+            content = content.push(loading_card);
+        }
+
+        if let Some(error) = &self.error {
+            let error_card = container(
+                column()
+                    .spacing(spacing.space_s)
+                    .push(text::title4("Error"))
+                    .push(text::body(error))
+            )
+            .class(cosmic::style::Container::Card)
+            .padding(spacing.space_l)
+            .width(Length::Fill);
+            
+            content = content.push(error_card);
+        }
+
+        // Queue selection tabs
+        let queue_selector = container(self.horizontal_selection())
+            .padding([spacing.space_none, spacing.space_s])
+            .width(Length::Fill);
+
+        content = content.push(queue_selector);
+
+        // Queue content based on selection  
         let selected_queue = self.selected_queue.clone();
-
-        let queues_row = if selected_queue == "Download" {
-            row().push(
-                container(self.queue_column("Download Queue", &self.download_queue))
-                    .class(cosmic::theme::Container::Card),
-            )
+        let queue_content = if selected_queue == "Download" {
+            self.create_enhanced_queue_card("Download Queue", &self.download_queue)
         } else {
-            row().push(
-                container(self.queue_column("Upload Queue", &self.upload_queue))
-                    .class(cosmic::theme::Container::Card),
-            )
+            self.create_enhanced_queue_card("Upload Queue", &self.upload_queue)
         };
 
-        content
-            .push(header)
-            .push(refresh_row)
-            .push(loading_indicator)
-            .push(error_display)
-            .push(self.horizontal_selection())
-            .push(queues_row)
+        container(content.push(queue_content))
+            .center_x(Length::Fill)
+            .height(Length::Fill)
             .into()
     }
     fn horizontal_selection<'a>(&'a self) -> cosmic::Element<'a, Message> {
@@ -105,12 +136,88 @@ impl Page {
             .into()
     }
 
+    fn create_enhanced_queue_card<'a>(
+        &self,
+        title: &'a str,
+        queue: &'a Vec<SyncQueueItem>,
+    ) -> cosmic::Element<'a, Message> {
+        let spacing = cosmic::theme::active().cosmic().spacing;
+        container(
+            column()
+                .spacing(spacing.space_m)
+                .push(
+                    row()
+                        .spacing(spacing.space_s)
+                        .align_y(cosmic::iced::Alignment::Center)
+                        .push(text::title3(title))
+                        .push(
+                            container(
+                                text::caption(format!("{} items", queue.len()))
+                            )
+                            .padding([spacing.space_xs, spacing.space_s])
+                            .class(cosmic::style::Container::Card)
+                        )
+                )
+                .push(cosmic::widget::divider::horizontal::default())
+                .push(
+                    if queue.is_empty() {
+                        column()
+                            .spacing(spacing.space_m)
+                            .align_x(cosmic::iced::Alignment::Center)
+                            .push(text::body("No items in queue"))
+                            .push(text::caption("Files will appear here when being transferred"))
+                            .padding(spacing.space_xl)
+                    } else {
+                        column()
+                            .extend(queue.iter().enumerate().map(|(index, item)| {
+                                self.create_queue_item(item, index)
+                            }))
+                            .padding(spacing.space_s)
+                            .spacing(spacing.space_s)
+                    }
+                )
+        )
+        .class(cosmic::style::Container::Card)
+        .padding(spacing.space_l)
+        .width(Length::Fill)
+        .into()
+    }
+
+    fn create_queue_item<'a>(
+        &self, 
+        item: &'a SyncQueueItem, 
+        index: usize,
+    ) -> cosmic::Element<'a, Message> {
+        let spacing = cosmic::theme::active().cosmic().spacing;
+        container(
+            row()
+                .spacing(spacing.space_s)
+                .align_y(cosmic::iced::Alignment::Center)
+                .push(
+                    container(text::caption(format!("{}", index + 1)))
+                        .padding([spacing.space_xs, spacing.space_s])
+                        .class(cosmic::style::Container::Card)
+                        .width(Length::Fixed(40.0))
+                )
+                .push(
+                    column()
+                        .spacing(spacing.space_xs)
+                        .push(text::body(&item.name))
+                        .push(text::caption(&item.path))
+                        .width(Length::Fill)
+                )
+        )
+        .padding([spacing.space_s, spacing.space_xs])
+        .width(Length::Fill)
+        .into()
+    }
+
+    #[allow(dead_code)]
     fn queue_column<'a>(
         &self,
         title: &'a str,
         queue: &'a Vec<SyncQueueItem>,
     ) -> cosmic::Element<'a, Message> {
-        //let collumn = cosmic::widget::text::title3(title).size(18);
         let spacing = cosmic::theme::active().cosmic().spacing.space_m;
 
         let mut columnheader = column()
@@ -118,35 +225,31 @@ impl Page {
             .width(Length::Fill)
             .padding(spacing);
 
-        columnheader = columnheader.push(text::title3(title).size(18));
-
+        columnheader = columnheader.push(text::title3(title));
         columnheader = columnheader.push(cosmic::widget::divider::horizontal::default());
-        let mut column = column()
+        
+        let mut content_column = column()
             .spacing(spacing)
             .width(Length::Fill)
             .padding(spacing);
+            
         if queue.is_empty() {
-            column = column.push(text::body("(empty)").size(14));
+            content_column = content_column.push(text::body("(empty)"));
         } else {
-            //let mut c = 0;
             for item in queue {
-                column = column.push(text::body(format!("{}/{}", item.path, item.name)).size(14));
-                //if c> 10 {break};
-                //c += 1;
+                content_column = content_column.push(text::body(format!("{}/{}", item.path, item.name)));
             }
         }
-        let scrolable = cosmic::widget::scrollable::vertical(column);
-        let container_col = cosmic::widget::column::column()
+        
+        let scrollable = cosmic::widget::scrollable::vertical(content_column);
+        
+        cosmic::widget::column::column()
             .spacing(spacing)
             .width(Length::Fill)
             .padding(spacing)
             .push(columnheader)
-            .push(scrolable)
-            .into();
-        container_col
-
-        //container(column).width(Length::Fill).into()
-        //column.into()
+            .push(scrollable)
+            .into()
     }
 
     pub fn update(

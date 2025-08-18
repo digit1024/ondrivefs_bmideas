@@ -32,67 +32,138 @@ impl Page {
     }
 
     pub fn view(&self) -> cosmic::Element<Message> {
-        let spacing = cosmic::theme::active().cosmic().spacing.space_l;
-        let content = column()
-            .spacing(spacing)
-            .width(Length::Fill)
-            .height(Length::Fill);
+        let spacing = cosmic::theme::active().cosmic().spacing;
 
-        let header = text::title2("Folders Management").size(24);
-        let info = text::body(
-            "Manage which OneDrive folders are synchronized. Add or remove folders below.",
-        )
-        .size(16);
+        // Main content with proper spacing and max width
+        let mut content = column()
+            .spacing(spacing.space_l)
+            .padding([spacing.space_none, spacing.space_l])
+            .max_width(800.0)
+            .width(Length::Fill);
 
-        let add_row = row()
-            .spacing(spacing)
+        // Page header with description
+        let header_section = column()
+            .spacing(spacing.space_s)
+            .push(text::title1("Folders Management"))
+            .push(text::body("Manage which OneDrive folders are synchronized. Add or remove folders below."));
+
+        // Action buttons row
+        let action_buttons = row()
+            .spacing(spacing.space_s)
+            .push(button::standard("Get Folders").on_press(Message::FetchFolders));
+
+        // Header with actions
+        let header_row = row()
+            .spacing(spacing.space_l)
+            .align_y(cosmic::iced::Alignment::Center)
+            .push(header_section)
             .push(
-                text_input::inline_input("Folder name", &self.new_folder)
-                    .on_input(Message::FolderNameChanged)
-                    .width(Length::Fixed(200.0)),
-            )
-            .push(button::standard("Add").on_press(Message::AddFolder));
+                container(action_buttons)
+                    .align_x(cosmic::iced::alignment::Horizontal::Right)
+                    .width(Length::Fill)
+            );
 
-        let folder_list = column()
-            .spacing(spacing)
-            .push(text::title3("Folders").size(18))
-            .extend(self.folders.iter().map(|folder| {
+        content = content.push(header_row);
+
+        // Loading and error states as cards
+        if self.loading {
+            let loading_card = container(
                 row()
-                    .spacing(spacing)
-                    .push(text::body(folder).size(14).width(Length::Fixed(200.0)))
-                    .push(
-                        button::destructive("Delete")
-                            .on_press(Message::DeleteFolder(folder.clone())),
-                    )
-                    .into()
-            }));
+                    .spacing(spacing.space_s)
+                    .align_y(cosmic::iced::Alignment::Center)
+                    .push(text::body("Loading folders..."))
+            )
+            .class(cosmic::style::Container::Card)
+            .padding(spacing.space_l)
+            .width(Length::Fill);
+            
+            content = content.push(loading_card);
+        }
 
-        let loading_indicator = if self.loading {
-            container(text::body("Loading folders...").size(16))
-                .padding(8)
-                .width(Length::Fill)
-        } else {
-            container(column()).width(Length::Fill)
-        };
+        if let Some(error) = &self.error {
+            let error_card = container(
+                column()
+                    .spacing(spacing.space_s)
+                    .push(text::title4("Error"))
+                    .push(text::body(error))
+            )
+            .class(cosmic::style::Container::Card)
+            .padding(spacing.space_l)
+            .width(Length::Fill);
+            
+            content = content.push(error_card);
+        }
 
-        let error_display = if let Some(error) = &self.error {
-            container(text::body(format!("Error: {}", error)).size(14))
-                .padding(8)
-                .width(Length::Fill)
-        } else {
-            container(column()).width(Length::Fill)
-        };
-        let get_button = button::standard("Get Folders").on_press(Message::FetchFolders);
+        // Add folder form as a card
+        let add_folder_card = container(
+            column()
+                .spacing(spacing.space_m)
+                .push(text::title3("Add New Folder"))
+                .push(
+                    row()
+                        .spacing(spacing.space_s)
+                        .align_y(cosmic::iced::Alignment::Center)
+                        .push(
+                            text_input::inline_input("Folder name", &self.new_folder)
+                                .on_input(Message::FolderNameChanged)
+                                .width(Length::Fill)
+                        )
+                        .push(button::suggested("Add").on_press(Message::AddFolder))
+                )
+        )
+        .class(cosmic::style::Container::Card)
+        .padding(spacing.space_l)
+        .width(Length::Fill);
 
-        content
-            .push(header)
-            .push(info)
-            .push(get_button)
-            .push(loading_indicator)
-            .push(error_display)
-            .push(add_row)
-            .push(folder_list)
-            .into()
+        // Folders list as a card
+        let folders_card = container(
+            column()
+                .spacing(spacing.space_m)
+                .push(text::title3("Synchronized Folders"))
+                .push(cosmic::widget::divider::horizontal::default())
+                .extend(
+                    if self.folders.is_empty() {
+                        vec![container(
+                            text::body("No folders configured")
+                        )
+                        .padding(spacing.space_l)
+                        .center_x(Length::Fill)
+                        .width(Length::Fill)
+                        .into()]
+                    } else {
+                        self.folders.iter().map(|folder| {
+                            container(
+                                row()
+                                    .spacing(spacing.space_s)
+                                    .align_y(cosmic::iced::Alignment::Center)
+                                    .push(
+                                        text::body(folder)
+                                            .width(Length::Fill)
+                                    )
+                                    .push(
+                                        button::destructive("Delete")
+                                            .on_press(Message::DeleteFolder(folder.clone()))
+                                    )
+                            )
+                            .padding([spacing.space_s, spacing.space_none])
+                            .width(Length::Fill)
+                            .into()
+                        }).collect()
+                    }
+                )
+        )
+        .class(cosmic::style::Container::Card)
+        .padding(spacing.space_l)
+        .width(Length::Fill);
+
+        container(
+            content
+                .push(add_folder_card)
+                .push(folders_card)
+        )
+        .center_x(Length::Fill)
+        .height(Length::Fill)
+        .into()
     }
 
     pub fn update(
