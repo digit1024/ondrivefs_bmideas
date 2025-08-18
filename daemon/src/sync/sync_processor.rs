@@ -191,6 +191,33 @@ impl SyncProcessor {
         let db_id = item
             .id
             .ok_or_else(|| anyhow::anyhow!("ProcessingItem has no database ID"))?;
+
+        // Skip delete operations - if parent is deleted remotely, item would be too
+        if item.change_operation == ChangeOperation::Delete {
+            processing_repo
+                .update_status_by_id(db_id, &ProcessingStatus::Processing)
+                .await?;
+            self.handle_local_delete(item).await?;
+            processing_repo
+                .update_status_by_id(db_id, &ProcessingStatus::Done)
+                .await?;
+            return Ok(());
+        }
+
+        // Check if parent was deleted remotely
+        if let Some(parent_ref) = &item.drive_item.parent_reference {
+            if self.is_parent_deleted_remotely(&parent_ref.id).await? {
+                info!("🔄 Parent deleted remotely, recreating folder structure for: {}", 
+                      item.drive_item.name.as_deref().unwrap_or("unnamed"));
+                
+                // Recreate folder structure using FUSE-style operations
+                self.recreate_parent_chain_and_reorder_item(item).await?;
+                
+                // Skip processing current item - new items will be processed in correct order
+                return Ok(());
+            }
+        }
+
         processing_repo
             .update_status_by_id(db_id, &ProcessingStatus::Processing)
             .await?;
@@ -1345,5 +1372,228 @@ impl SyncProcessor {
                 Err(anyhow::anyhow!("Failed to move file: {}", e))
             }
         }
+    }
+
+    // Parent Chain Recreation Methods
+
+    /// Check if parent was deleted remotely
+    async fn is_parent_deleted_remotely(&self, parent_id: &str) -> Result<bool> {
+        if let Ok(Some(local_parent)) = self.drive_item_with_fuse_repo
+            .get_drive_item_with_fuse(parent_id)
+            .await 
+        {
+            Ok(local_parent.is_deleted())
+        } else {
+            Ok(true)  // Parent doesn't exist locally = deleted
+        }
+    }
+
+    /// Recreate parent chain and reorder processing item
+    async fn recreate_parent_chain_and_reorder_item(&self, item: &ProcessingItem) -> Result<()> {
+        // 1. Recursively recreate missing parent folders using FUSE-style operations
+        let new_parent_ino = self.recreate_parent_chain_with_fuse_pattern(
+            &item.drive_item.parent_reference.as_ref().unwrap().id
+        ).await?;
+        
+        // 2. Update current item with new parent
+        self.update_item_parent_and_reorder(item, new_parent_ino).await?;
+        
+        Ok(())
+    }
+
+    /// Recursively recreate parent chain using FUSE-style database operations
+    fn recreate_parent_chain_with_fuse_pattern<'a>(&'a self, deleted_parent_id: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u64>> + Send + 'a>> {
+        Box::pin(async move {
+            // Get the deleted parent from local DB
+            let deleted_parent = self.drive_item_with_fuse_repo
+                .get_drive_item_with_fuse(deleted_parent_id)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("Deleted parent not found in local DB: {}", deleted_parent_id))?;
+            
+            // Determine parent inode for this folder
+            let parent_ino = if let Some(grandparent_ref) = &deleted_parent.drive_item.parent_reference {
+                // Check if grandparent also needs recreation
+                if self.is_parent_deleted_remotely(&grandparent_ref.id).await? {
+                    // Recursively recreate grandparent first
+                    self.recreate_parent_chain_with_fuse_pattern(&grandparent_ref.id).await?
+                } else {
+                    // Grandparent exists, get its inode
+                    self.drive_item_with_fuse_repo
+                        .get_drive_item_with_fuse(&grandparent_ref.id)
+                        .await?
+                        .unwrap()
+                        .virtual_ino()
+                        .unwrap()
+                }
+            } else {
+                // No grandparent = root folder
+                1 // Root inode
+            };
+            
+            // Create new folder using FUSE-style database operation
+            let folder_name = deleted_parent.drive_item.name.as_deref().unwrap_or("unnamed");
+            let new_ino = self.create_folder_with_fuse_pattern(parent_ino, folder_name).await?;
+            
+            info!("📁 Created folder in chain: {} -> inode {}", folder_name, new_ino);
+            
+            Ok(new_ino)
+        })
+    }
+
+    /// Apply local folder creation (mimics FUSE apply_local_change_to_db_repository)
+    async fn apply_local_folder_creation(&self, parent_ino: u64, name: &str) -> Result<u64> {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        use std::time::SystemTime;
+
+        // Generate temporary ID
+        let mut hasher = DefaultHasher::new();
+        SystemTime::now().hash(&mut hasher);
+        let temporary_id = format!("local_{:x}", hasher.finish());
+
+        // Get parent item to extract parent_id and parent_path
+        let parent_item = self.drive_item_with_fuse_repo
+            .get_drive_item_with_fuse_by_virtual_ino(parent_ino)
+            .await?;
+        let parent_id = parent_item.as_ref().map(|p| p.id().to_string());
+        let parent_path = parent_item
+            .as_ref()
+            .and_then(|p| p.virtual_path())
+            .map(|p| format!("/drive/root:{}", p.to_string()));
+
+        // Create a new DriveItem for the local folder
+        let drive_item = crate::onedrive_service::onedrive_models::DriveItem {
+            id: temporary_id.clone(),
+            name: Some(name.to_string()),
+            etag: None,
+            last_modified: Some(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()),
+            created_date: Some(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()),
+            size: Some(0),
+            folder: Some(crate::onedrive_service::onedrive_models::FolderFacet { child_count: 0 }),
+            file: None,
+            download_url: None,
+            deleted: None,
+            parent_reference: parent_id.as_ref().map(|id| {
+                crate::onedrive_service::onedrive_models::ParentReference {
+                    id: id.clone(),
+                    path: parent_path.clone(),
+                }
+            }),
+        };
+
+        let mut item_with_fuse = self.drive_item_with_fuse_repo
+            .create_from_drive_item(drive_item.clone());
+        item_with_fuse.set_parent_ino(parent_ino);
+        item_with_fuse.set_file_source(crate::persistency::types::FileSource::Local);
+        item_with_fuse.set_sync_status("local_change".to_string());
+
+        // Store the item and get the inode
+        let inode = self.drive_item_with_fuse_repo
+            .store_drive_item_with_fuse(&item_with_fuse)
+            .await?;
+
+        debug!(
+            "📝 Applied local folder creation: parent_ino={}, name={}, ino={}",
+            parent_ino, name, inode
+        );
+
+        Ok(inode)
+    }
+
+    /// Create folder using FUSE-style database operations
+    async fn create_folder_with_fuse_pattern(&self, parent_ino: u64, name: &str) -> Result<u64> {
+        // Step 1: Create the folder directly using the same logic as FUSE apply_local_change_to_db_repository
+        let new_ino = self.apply_local_folder_creation(parent_ino, name).await?;
+        
+        // Step 2: Get the created item
+        let created_item = self.drive_item_with_fuse_repo
+            .get_drive_item_with_fuse_by_virtual_ino(new_ino)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Failed to get created folder"))?;
+        
+        // Step 3: create_processing_item_for_handle (like FUSE mkdir)
+        self.create_processing_item_for_folder(&created_item).await?;
+        
+        debug!("📁 Created folder using FUSE pattern: {} -> inode {}", name, new_ino);
+        
+        Ok(new_ino)
+    }
+
+    /// Create processing item for folder (following FUSE pattern)
+    async fn create_processing_item_for_folder(&self, item: &crate::persistency::types::DriveItemWithFuse) -> Result<()> {
+        let onedrive_id = &item.drive_item().id;
+        
+        // Use same logic as FUSE file_handles.rs create_processing_item_for_handle()
+        let operation = if onedrive_id.starts_with("local_") {
+            crate::persistency::processing_item_repository::ChangeOperation::Create  // New folder with temporary ID
+        } else {
+            crate::persistency::processing_item_repository::ChangeOperation::Update  // Existing folder
+        };
+        
+        let processing_item = crate::persistency::processing_item_repository::ProcessingItem::new_local(
+            item.drive_item().clone(), 
+            operation
+        );
+        
+        // Store processing item (will get higher ID for correct order)
+        let _id = self.processing_repo.store_processing_item(&processing_item).await?;
+        
+        debug!("📋 Created ProcessingItem for folder: {} (DB ID: {})", 
+               item.drive_item().name.as_deref().unwrap_or("unnamed"), _id);
+        
+        Ok(())
+    }
+
+    /// Update item parent and reorder processing item
+    async fn update_item_parent_and_reorder(&self, item: &ProcessingItem, new_parent_ino: u64) -> Result<()> {
+        // Get the new parent's OneDrive ID
+        let new_parent_item = self.drive_item_with_fuse_repo
+            .get_drive_item_with_fuse_by_virtual_ino(new_parent_ino)
+            .await?
+            .unwrap();
+        let new_parent_onedrive_id = new_parent_item.drive_item().id.clone();
+        
+        // Update DriveItem parent reference
+        let mut updated_drive_item = item.drive_item.clone();
+        if let Some(parent_ref) = updated_drive_item.parent_reference.as_mut() {
+            parent_ref.id = new_parent_onedrive_id;
+            // Update parent path from new parent
+            parent_ref.path = new_parent_item.virtual_path()
+                .map(|p| format!("/drive/root:{}", p));
+        }
+
+        // Update DriveItemWithFuse if it exists (for Update operations)
+        // For Create operations, the item might not exist yet in the database
+        if let Ok(Some(mut updated_fuse_item)) = self.drive_item_with_fuse_repo
+            .get_drive_item_with_fuse(&item.drive_item.id)
+            .await 
+        {
+            // Update parent inode
+            updated_fuse_item.set_parent_ino(new_parent_ino);
+            
+            // Store updated DriveItemWithFuse
+            updated_fuse_item.drive_item = updated_drive_item.clone();
+            self.drive_item_with_fuse_repo
+                .store_drive_item_with_fuse(&updated_fuse_item)
+                .await?;
+        }
+        
+        // Delete current processing item
+        if let Some(current_id) = item.id {
+            self.processing_repo.delete_processing_item_by_id(current_id).await?;
+        }
+        
+        // Create new processing item with updated data (gets higher ID)
+        let new_processing_item = crate::persistency::processing_item_repository::ProcessingItem::new_local(
+            updated_drive_item,
+            item.change_operation.clone()
+        );
+        
+        let _new_id = self.processing_repo.store_processing_item(&new_processing_item).await?;
+        
+        info!("🔄 Reordered processing item: {} -> new order", 
+              item.drive_item.name.as_deref().unwrap_or("unnamed"));
+        
+        Ok(())
     }
 }

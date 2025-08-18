@@ -889,6 +889,452 @@ async fn test_mock_api_failure_scenarios() -> Result<()> {
     Ok(())
 }
 
+// ====================================================================================
+// 🔄 PARENT CHAIN RECREATION TESTS - Testing automatic parent folder recreation
+// ====================================================================================
+
+/// Mark a folder as deleted remotely (simulate remote deletion)
+async fn mark_folder_as_deleted(
+    drive_items_repo: &DriveItemWithFuseRepository,
+    virtual_ino: u64,
+) -> Result<()> {
+    let mut item = drive_items_repo
+        .get_drive_item_with_fuse_by_virtual_ino(virtual_ino)
+        .await?
+        .unwrap();
+    
+    // Mark as deleted (simulate remote deletion sync)
+    item.drive_item.deleted = Some(onedrive_sync_daemon::onedrive_service::onedrive_models::DeletedFacet {
+        state: "deleted".to_string(),
+    });
+    item.set_file_source(onedrive_sync_daemon::persistency::types::FileSource::Remote);
+    item.set_sync_status("synced".to_string());
+    
+    drive_items_repo.store_drive_item_with_fuse(&item).await?;
+    Ok(())
+}
+
+/// Count processing items by change operation
+async fn count_processing_items_by_operation(
+    repo: &ProcessingItemRepository,
+    operation: ChangeOperation,
+) -> Result<usize> {
+    let all_items = repo.get_all_processing_items().await?;
+    Ok(all_items.iter()
+        .filter(|item| item.change_operation == operation)
+        .count())
+}
+
+/// Get processing items ordered by ID
+async fn get_processing_items_ordered(
+    repo: &ProcessingItemRepository,
+) -> Result<Vec<onedrive_sync_daemon::persistency::processing_item_repository::ProcessingItem>> {
+    let mut items = repo.get_all_processing_items().await?;
+    items.sort_by_key(|item| item.id.unwrap_or(0));
+    Ok(items)
+}
+
+/// Verify processing item order matches expected pattern
+fn verify_processing_order(
+    items: &[onedrive_sync_daemon::persistency::processing_item_repository::ProcessingItem],
+    expected_pattern: &[ChangeOperation],
+) -> Result<()> {
+    assert_eq!(items.len(), expected_pattern.len(),
+        "Expected {} items, got {}. Items: {:?}", 
+        expected_pattern.len(), items.len(),
+        items.iter().map(|i| (&i.drive_item.name, &i.change_operation)).collect::<Vec<_>>()
+    );
+    
+    for (item, expected_op) in items.iter().zip(expected_pattern.iter()) {
+        assert_eq!(item.change_operation, *expected_op,
+            "Expected operation {:?} for item '{}', got {:?}",
+            expected_op, item.drive_item.name.as_deref().unwrap_or("unnamed"), item.change_operation
+        );
+    }
+    
+    // Verify IDs are ascending
+    for i in 1..items.len() {
+        assert!(items[i].id.unwrap() > items[i-1].id.unwrap(),
+            "Processing items should have ascending IDs");
+    }
+    
+    Ok(())
+}
+
+/// Verify parent-child relationships are correct
+async fn verify_parent_child_relationships(
+    items: &[onedrive_sync_daemon::persistency::processing_item_repository::ProcessingItem],
+    drive_items_repo: &DriveItemWithFuseRepository,
+) -> Result<()> {
+    for item in items {
+        if let Some(parent_ref) = &item.drive_item.parent_reference {
+            // Check if parent item exists in the processing items or in database
+            let parent_exists_in_processing = items.iter().any(|i| i.drive_item.id == parent_ref.id);
+            let parent_exists_in_db = drive_items_repo
+                .get_drive_item_with_fuse(&parent_ref.id)
+                .await?
+                .map(|p| !p.is_deleted())
+                .unwrap_or(false);
+            
+            assert!(parent_exists_in_processing || parent_exists_in_db,
+                "Item '{}' has parent '{}' that doesn't exist in processing queue or database",
+                item.drive_item.name.as_deref().unwrap_or("unnamed"),
+                parent_ref.id
+            );
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[serial]
+async fn test_parent_chain_recreation_single_level() -> Result<()> {
+    println!("\n🧪 Parent Chain Recreation: Single level parent deletion");
+    let (app_state, repo, drive_items_repo, _mock_client) = setup_test_env().await?;
+
+    // Get the file that will be modified (Q1_Report.pdf in Reports folder)
+    let file_item = drive_items_repo
+        .get_drive_item_with_fuse_by_virtual_ino(5) // Q1_Report.pdf
+        .await?
+        .unwrap();
+    
+    println!("📁 File: {} (ino: {})", 
+        file_item.drive_item().name.as_deref().unwrap_or("unnamed"), 
+        file_item.virtual_ino().unwrap()
+    );
+
+    // Get the parent folder (Reports) and mark it as deleted
+    let parent_folder = drive_items_repo
+        .get_drive_item_with_fuse_by_virtual_ino(4) // Reports folder
+        .await?
+        .unwrap();
+    
+    println!("📂 Parent folder: {} (ino: {}) - marking as deleted", 
+        parent_folder.drive_item().name.as_deref().unwrap_or("unnamed"),
+        parent_folder.virtual_ino().unwrap()
+    );
+    
+    mark_folder_as_deleted(&drive_items_repo, 4).await?;
+
+    // Create local change for the file
+    let local_change = create_test_local_processing_item(
+        file_item.drive_item().clone(),
+        ChangeOperation::Update,
+    );
+    let item_id = repo.store_processing_item(&local_change).await?;
+    println!("📋 Created local processing item with ID: {}", item_id);
+
+    // Get initial processing item count
+    let initial_items = repo.get_all_processing_items().await?;
+    let initial_count = initial_items.len();
+    println!("📊 Initial processing items count: {}", initial_count);
+
+    // Process the item
+    let sync_processor = SyncProcessor::new(app_state.clone());
+    let item_to_process = repo.get_processing_item_by_id(item_id).await?.unwrap();
+    
+    println!("🔄 Processing item: {} (operation: {:?})", 
+        item_to_process.drive_item.name.as_deref().unwrap_or("unnamed"),
+        item_to_process.change_operation
+    );
+    
+    sync_processor.process_single_item(&item_to_process).await?;
+
+    // Verify results
+    let final_items = get_processing_items_ordered(&repo).await?;
+    let create_count = count_processing_items_by_operation(&repo, ChangeOperation::Create).await?;
+    
+    println!("📊 Final processing items count: {}", final_items.len());
+    println!("📁 Created folder processing items: {}", create_count);
+    
+    for (i, item) in final_items.iter().enumerate() {
+        println!("   [{}] {:?} {} (ID: {}, Parent: {})", 
+            i + 1,
+            item.change_operation,
+            item.drive_item.name.as_deref().unwrap_or("unnamed"),
+            item.id.unwrap_or(0),
+            item.drive_item.parent_reference.as_ref()
+                .map(|p| p.id.clone())
+                .unwrap_or_else(|| "none".to_string())
+        );
+    }
+
+    // Verify we have more items than before (parent + recreated child)
+    assert!(final_items.len() > initial_count, 
+        "Should have created additional processing items for parent recreation");
+    
+    // Verify we created at least one folder
+    assert!(create_count > 0, 
+        "Should have created at least one folder processing item");
+
+    // Verify processing order: Create parent → Update child
+    let expected_pattern = vec![
+        ChangeOperation::Create, // Reports folder
+        ChangeOperation::Update, // Q1_Report.pdf file
+    ];
+    verify_processing_order(&final_items, &expected_pattern)?;
+
+    // Verify parent-child relationships
+    verify_parent_child_relationships(&final_items, &drive_items_repo).await?;
+
+    // Verify the created parent folder has correct properties
+    let parent_create_item = final_items.iter()
+        .find(|item| item.change_operation == ChangeOperation::Create)
+        .expect("Should have created folder processing item");
+    
+    assert!(parent_create_item.drive_item.folder.is_some(), 
+        "Created item should be a folder");
+    assert!(parent_create_item.drive_item.id.starts_with("local_"), 
+        "Created folder should have temporary local ID");
+
+    println!("✅ Single level parent chain recreation test passed!");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[serial]
+async fn test_parent_chain_recreation_multi_level() -> Result<()> {
+    println!("\n🧪 Parent Chain Recreation: Multi-level parent deletion");
+    let (app_state, repo, drive_items_repo, _mock_client) = setup_test_env().await?;
+
+    // Get the file that will be modified (Q1_Report.pdf)
+    let file_item = drive_items_repo
+        .get_drive_item_with_fuse_by_virtual_ino(5) // Q1_Report.pdf
+        .await?
+        .unwrap();
+    
+    println!("📁 File: {} (ino: {})", 
+        file_item.drive_item().name.as_deref().unwrap_or("unnamed"), 
+        file_item.virtual_ino().unwrap()
+    );
+
+    // Mark both Work (ino 3) and Reports (ino 4) folders as deleted
+    println!("📂 Marking Work folder (ino: 3) as deleted");
+    mark_folder_as_deleted(&drive_items_repo, 3).await?; // Work folder
+    
+    println!("📂 Marking Reports folder (ino: 4) as deleted");
+    mark_folder_as_deleted(&drive_items_repo, 4).await?; // Reports folder
+
+    // Create local change for the file
+    let local_change = create_test_local_processing_item(
+        file_item.drive_item().clone(),
+        ChangeOperation::Update,
+    );
+    let item_id = repo.store_processing_item(&local_change).await?;
+    println!("📋 Created local processing item with ID: {}", item_id);
+
+    // Get initial processing item count
+    let initial_count = repo.get_all_processing_items().await?.len();
+    println!("📊 Initial processing items count: {}", initial_count);
+
+    // Process the item
+    let sync_processor = SyncProcessor::new(app_state.clone());
+    let item_to_process = repo.get_processing_item_by_id(item_id).await?.unwrap();
+    
+    println!("🔄 Processing item: {} (operation: {:?})", 
+        item_to_process.drive_item.name.as_deref().unwrap_or("unnamed"),
+        item_to_process.change_operation
+    );
+    
+    sync_processor.process_single_item(&item_to_process).await?;
+
+    // Verify results
+    let final_items = get_processing_items_ordered(&repo).await?;
+    let create_count = count_processing_items_by_operation(&repo, ChangeOperation::Create).await?;
+    
+    println!("📊 Final processing items count: {}", final_items.len());
+    println!("📁 Created folder processing items: {}", create_count);
+    
+    for (i, item) in final_items.iter().enumerate() {
+        println!("   [{}] {:?} {} (ID: {}, Parent: {})", 
+            i + 1,
+            item.change_operation,
+            item.drive_item.name.as_deref().unwrap_or("unnamed"),
+            item.id.unwrap_or(0),
+            item.drive_item.parent_reference.as_ref()
+                .map(|p| p.id.clone())
+                .unwrap_or_else(|| "none".to_string())
+        );
+    }
+
+    // Verify we have more items than before (2 parents + recreated child)
+    assert!(final_items.len() > initial_count, 
+        "Should have created additional processing items for parent recreation");
+    
+    // Verify we created exactly 2 folders
+    assert_eq!(create_count, 2, 
+        "Should have created exactly 2 folder processing items (Work and Reports)");
+
+    // Verify processing order: Create Work → Create Reports → Update file
+    let expected_pattern = vec![
+        ChangeOperation::Create, // Work folder
+        ChangeOperation::Create, // Reports folder
+        ChangeOperation::Update, // Q1_Report.pdf file
+    ];
+    verify_processing_order(&final_items, &expected_pattern)?;
+
+    // Verify parent-child relationships
+    verify_parent_child_relationships(&final_items, &drive_items_repo).await?;
+
+    // Verify the folder hierarchy is correct
+    let create_items: Vec<_> = final_items.iter()
+        .filter(|item| item.change_operation == ChangeOperation::Create)
+        .collect();
+    
+    assert_eq!(create_items.len(), 2, "Should have exactly 2 created folders");
+    
+    // First created item should be Work folder (higher in hierarchy)
+    let work_item = &create_items[0];
+    assert!(work_item.drive_item.name.as_ref().unwrap().contains("Work") || 
+            work_item.drive_item.id.starts_with("local_"), 
+        "First created item should be Work folder or have local ID");
+    
+    // Second created item should be Reports folder (child of Work)
+    let reports_item = &create_items[1];
+    assert!(reports_item.drive_item.name.as_ref().unwrap().contains("Reports") || 
+            reports_item.drive_item.id.starts_with("local_"), 
+        "Second created item should be Reports folder or have local ID");
+
+    println!("✅ Multi-level parent chain recreation test passed!");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[serial]
+async fn test_parent_chain_recreation_local_create() -> Result<()> {
+    println!("\n🧪 Parent Chain Recreation: Local file creation in deleted parent");
+    let (app_state, repo, drive_items_repo, _mock_client) = setup_test_env().await?;
+
+    // Get the Reports folder and mark it as deleted
+    let reports_folder = drive_items_repo
+        .get_drive_item_with_fuse_by_virtual_ino(4) // Reports folder
+        .await?
+        .unwrap();
+    
+    println!("📂 Marking Reports folder as deleted");
+    mark_folder_as_deleted(&drive_items_repo, 4).await?;
+
+    // Create a new file in the deleted Reports folder
+    let new_file = create_test_file_item(
+        "new_report_123", 
+        "NewReport.pdf", 
+        Some(reports_folder.drive_item().id.clone())
+    );
+
+    // Create local processing item for new file creation
+    let local_create = create_test_local_processing_item(new_file, ChangeOperation::Create);
+    let item_id = repo.store_processing_item(&local_create).await?;
+    
+    println!("📋 Created local file creation processing item with ID: {}", item_id);
+
+    // Get initial processing item count
+    let initial_count = repo.get_all_processing_items().await?.len();
+    println!("📊 Initial processing items count: {}", initial_count);
+
+    // Process the item
+    let sync_processor = SyncProcessor::new(app_state.clone());
+    let item_to_process = repo.get_processing_item_by_id(item_id).await?.unwrap();
+    
+    println!("🔄 Processing item: {} (operation: {:?})", 
+        item_to_process.drive_item.name.as_deref().unwrap_or("unnamed"),
+        item_to_process.change_operation
+    );
+    
+    sync_processor.process_single_item(&item_to_process).await?;
+
+    // Verify results
+    let final_items = get_processing_items_ordered(&repo).await?;
+    let create_count = count_processing_items_by_operation(&repo, ChangeOperation::Create).await?;
+    
+    println!("📊 Final processing items count: {}", final_items.len());
+    println!("📁 Total create operations: {}", create_count);
+    
+    for (i, item) in final_items.iter().enumerate() {
+        println!("   [{}] {:?} {} (ID: {})", 
+            i + 1,
+            item.change_operation,
+            item.drive_item.name.as_deref().unwrap_or("unnamed"),
+            item.id.unwrap_or(0)
+        );
+    }
+
+    // Verify we created parent folder + new file
+    assert!(final_items.len() > initial_count, 
+        "Should have created additional processing items");
+    assert_eq!(create_count, 2, 
+        "Should have exactly 2 create operations: folder + file");
+
+    // Verify processing order: Create parent folder → Create new file
+    let expected_pattern = vec![
+        ChangeOperation::Create, // Reports folder
+        ChangeOperation::Create, // NewReport.pdf file
+    ];
+    verify_processing_order(&final_items, &expected_pattern)?;
+
+    println!("✅ Local file creation in deleted parent test passed!");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[serial]
+async fn test_parent_chain_recreation_skip_delete_operations() -> Result<()> {
+    println!("\n🧪 Parent Chain Recreation: Skip delete operations (should not recreate parents)");
+    let (app_state, repo, drive_items_repo, _mock_client) = setup_test_env().await?;
+
+    // Get the file and its parent folder
+    let file_item = drive_items_repo
+        .get_drive_item_with_fuse_by_virtual_ino(5) // Q1_Report.pdf
+        .await?
+        .unwrap();
+    
+    // Mark parent folder as deleted
+    println!("📂 Marking Reports folder as deleted");
+    mark_folder_as_deleted(&drive_items_repo, 4).await?; // Reports folder
+
+    // Create local DELETE operation for the file
+    let local_delete = create_test_local_processing_item(
+        file_item.drive_item().clone(),
+        ChangeOperation::Delete,
+    );
+    let item_id = repo.store_processing_item(&local_delete).await?;
+    
+    println!("📋 Created local file deletion processing item with ID: {}", item_id);
+
+    // Get initial processing item count
+    let initial_count = repo.get_all_processing_items().await?.len();
+
+    // Process the item
+    let sync_processor = SyncProcessor::new(app_state.clone());
+    let item_to_process = repo.get_processing_item_by_id(item_id).await?.unwrap();
+    
+    println!("🔄 Processing delete operation for: {}", 
+        item_to_process.drive_item.name.as_deref().unwrap_or("unnamed")
+    );
+    
+    sync_processor.process_single_item(&item_to_process).await?;
+
+    // Verify results
+    let final_items = get_processing_items_ordered(&repo).await?;
+    let create_count = count_processing_items_by_operation(&repo, ChangeOperation::Create).await?;
+    
+    println!("📊 Final processing items count: {}", final_items.len());
+    println!("📁 Created folder processing items: {}", create_count);
+
+    // For delete operations, we should NOT recreate parents
+    assert_eq!(final_items.len(), initial_count, 
+        "Delete operations should not trigger parent recreation");
+    assert_eq!(create_count, 0, 
+        "Should not have created any folder processing items for delete operations");
+
+    // Verify the original item was processed normally
+    let processed_item = repo.get_processing_item_by_id(item_id).await?.unwrap();
+    assert_eq!(processed_item.status, ProcessingStatus::Done, 
+        "Delete operation should complete normally");
+
+    println!("✅ Skip delete operations test passed!");
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[serial]
 async fn test_zzz_comprehensive_conflict_coverage_complete() -> Result<()> {
