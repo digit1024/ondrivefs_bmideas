@@ -87,26 +87,63 @@ impl ConflictsPage {
                 .into()
             }
             Ok(conflicts) => {
-                let list = conflicts.iter().fold(column![], |col, item| {
-                    let conflict_row = row![
-                        column![
-                            text::body(&item.name),
-                            text::body(&item.path).size(14),
-                            text::body(&item.error_message).size(14),
-                        ].spacing(4),
+                // Group conflicts by onedrive_id
+                let mut grouped_conflicts: std::collections::HashMap<String, Vec<&ConflictItem>> = std::collections::HashMap::new();
+                for conflict in conflicts {
+                    grouped_conflicts.entry(conflict.onedrive_id.clone()).or_insert_with(Vec::new).push(conflict);
+                }
+
+                let list = grouped_conflicts.iter().fold(column![], |col, (onedrive_id, conflict_items)| {
+                    // Find local and remote changes
+                    let local_change = conflict_items.iter().find(|item| item.change_type == "local" && item.onedrive_id.as_str() ==  onedrive_id.as_str());
+                    let remote_change = conflict_items.iter().find(|item| item.change_type == "remote" && item.onedrive_id.as_str() ==  onedrive_id.as_str());
+                    
+                    // Use the first item for the buttons (they all have the same onedrive_id)
+                    let first_item = conflict_items.first().unwrap();
+                    
+                    let conflict_group = column![
+                        // Header with onedrive_id
+                        text::body(format!("Conflict ID: {}", onedrive_id)).size(16),
+                        
+                        // Local change section
+                        if let Some(local) = local_change {
+                            column![
+                                text::body("Local Change:").size(14),
+                                text::body(&local.name).size(16),
+                                text::body(&local.path).size(14),
+                                text::body(&local.error_message).size(14),
+                            ].spacing(4)
+                        } else {
+                            column![].into()
+                        },
+                        
+                        // Remote change section
+                        if let Some(remote) = remote_change {
+                            column![
+                                text::body("Remote Change:").size(14),
+                                text::body(&remote.name).size(16),
+                                text::body(&remote.path).size(14),
+                                text::body(&remote.error_message).size(14),
+                            ].spacing(4)
+                        } else {
+                            column![].into()
+                        },
+                        
+                        // Action buttons (only one set per group)
                         row![
-                            button("Keep Local").on_press(Message::Resolve { db_id: item.db_id, choice: UserChoice::KeepLocal }),
-                            button("Use Remote").on_press(Message::Resolve { db_id: item.db_id, choice: UserChoice::UseRemote })
+                            button("Keep Local").on_press(Message::Resolve { db_id: first_item.db_id, choice: UserChoice::KeepLocal }),
+                            button("Use Remote").on_press(Message::Resolve { db_id: first_item.db_id, choice: UserChoice::UseRemote })
                         ].spacing(10).align_y(Alignment::Center)
                     ]
-                    .spacing(20)
-                    .align_y(Alignment::Center);
+                    .spacing(15)
+                    .align_x(Alignment::Start);
                     
-                    col.push(container(conflict_row).padding(10).class(style::Container::Card))
+                    col.push(container(conflict_group).padding(15).class(style::Container::Card))
                 });
+                
                 column![
                     text::body("The following conflicts require your attention:").size(20),
-                    scrollable(list.spacing(10))
+                    scrollable(list.spacing(15))
                 ]
                 .spacing(20)
                 .into()
