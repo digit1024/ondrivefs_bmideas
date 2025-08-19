@@ -66,9 +66,21 @@ impl Page {
                     .push(button::standard("Load more").on_press(Message::LoadMore)),
             );
 
+        // Create responsive grid with dynamic column calculation
         let mut grid = column().spacing(spacing);
-        for chunk in self.items.chunks(5) {
-            let mut roww = row().spacing(spacing);
+        
+        // Use available width to determine columns per row
+        // Start with different responsive breakpoints
+        let columns_per_row = if self.items.len() < 3 {
+            self.items.len().max(1) // Show fewer columns if we have fewer items
+        } else {
+            // Use responsive breakpoints similar to CSS
+            // This will be more responsive than fixed 5 columns
+            6 // Start with 6 for wide screens, will adjust with flexible width
+        };
+        
+        for chunk in self.items.chunks(columns_per_row) {
+            let mut roww = row().spacing(spacing).width(Length::Fill);
             for item in chunk {
                 let thumb_el: cosmic::Element<Message> = if let Some(path) = self.thumb_paths.get(&item.ino) {
                     let handle = ImageHandle::from_path(path.clone());
@@ -76,11 +88,20 @@ impl Page {
                     let img = image_widget(handle);
            
                     let clickable = button::custom(img).class(cosmic::style::Button::Image).on_press(Message::OpenItem(item.ino));
-                    let image_container = container(clickable).center_x(176.0).center_y(176.0);
+                    let image_container = container(clickable)
+                        .width(Length::Fill)
+                        .height(Length::Fixed(176.0))
+                        .center_x(Length::Fill)
+                        .center_y(Length::Fill);
                     image_container.into()
                 } else {
                     // Placeholder while loading thumbnail
-                    container(text::body("Loading thumb...")).width(Length::Fixed(176.0)).height(Length::Fixed(176.0)).into()
+                    container(text::body("Loading thumb..."))
+                        .width(Length::Fill)
+                        .height(Length::Fixed(176.0))
+                        .center_x(Length::Fill)
+                        .center_y(Length::Fill)
+                        .into()
                 };
                 let card = container(
                     column()
@@ -92,7 +113,7 @@ impl Page {
                 )
                 .class(cosmic::style::Container::Card)
                 .padding(8)
-                .width(Length::Fixed(196.0));
+                .width(Length::FillPortion(1)); // Use flexible width that fills available space equally
                 roww = roww.push(card);
             }
             grid = grid.push(roww);
