@@ -7,6 +7,7 @@ The DBus integration provides system-level communication, enabling the OneDrive 
 ## Architecture
 
 ### DbusServerManager
+
 **File**: `dbus_server/mod.rs`
 
 Main server lifecycle manager:
@@ -19,6 +20,7 @@ pub struct DbusServerManager {
 ```
 
 **Key Responsibilities**:
+
 - Server startup and shutdown
 - Connection management
 - Service registration
@@ -27,6 +29,7 @@ pub struct DbusServerManager {
 ## Service Implementation
 
 ### ServiceImpl
+
 **File**: `dbus_server/server.rs`
 
 Implements the DBus interface:
@@ -40,6 +43,7 @@ pub struct ServiceImpl {
 **Interface**: `org.freedesktop.OneDriveSync`
 
 **Key Methods**:
+
 - `get_status()`: Retrieve daemon status
 - `start_sync()`: Manually trigger synchronization
 - `pause_sync()`: Pause synchronization
@@ -50,6 +54,7 @@ pub struct ServiceImpl {
 ## DBus Interface Definition
 
 ### DaemonStatus
+
 **File**: `lib/dbus/types.rs`
 
 ```rust
@@ -63,6 +68,7 @@ pub struct DaemonStatus {
 ```
 
 ### SyncStatus Enum
+
 ```rust
 pub enum SyncStatus {
     Running,    // Synchronization active
@@ -74,6 +80,7 @@ pub enum SyncStatus {
 ## Signal Broadcasting
 
 ### StatusBroadcastTask
+
 **File**: `tasks/status_broadcast.rs`
 
 Periodic status updates:
@@ -86,6 +93,7 @@ pub struct StatusBroadcastTask {
 ```
 
 **Broadcast Signals**:
+
 - **change-detected**: Emitted every 10 seconds with current status
 - **sync-started**: Synchronization cycle begins
 - **sync-completed**: Synchronization cycle completes
@@ -93,6 +101,7 @@ pub struct StatusBroadcastTask {
 - **error-occurred**: Error condition detected
 
 ### Signal Emission
+
 ```rust
 impl StatusBroadcastTask {
     pub async fn run(&self) {
@@ -113,6 +122,7 @@ impl StatusBroadcastTask {
 ## Message Handling
 
 ### MessageHandler
+
 **File**: `dbus_server/message_handler.rs`
 
 Routes DBus messages to appropriate handlers:
@@ -124,6 +134,7 @@ pub struct MessageHandler {
 ```
 
 **Message Types**:
+
 - **Method Calls**: Interface method invocations
 - **Property Access**: Property get/set operations
 - **Signal Handling**: Incoming signal processing
@@ -131,6 +142,7 @@ pub struct MessageHandler {
 ## Integration Points
 
 ### AppState Integration
+
 **File**: `dbus_server/mod.rs`
 
 ```rust
@@ -154,17 +166,21 @@ async fn compute_status(app_state: &Arc<AppState>) -> DaemonStatus {
 ```
 
 ### Connectivity Integration
+
 **File**: `connectivity.rs`
 
 Network status monitoring:
+
 - **Online**: Full connectivity to OneDrive
 - **Offline**: No network access
 - **Limited**: Partial connectivity
 
 ### Scheduler Integration
+
 **File**: `scheduler/periodic_scheduler.rs`
 
 Task status monitoring:
+
 - **Running**: Task currently executing
 - **Paused**: Task suspended
 - **Completed**: Task finished successfully
@@ -173,9 +189,11 @@ Task status monitoring:
 ## System Integration
 
 ### Desktop Integration
+
 **File**: `resources/open-onedrive-daemon.desktop`
 
 Desktop entry for system integration:
+
 ```ini
 [Desktop Entry]
 Name=Open OneDrive Daemon
@@ -186,9 +204,11 @@ Categories=Network;FileManager;
 ```
 
 ### Service Integration
+
 **File**: `resources/open-onedrive-daemon.service`
 
 Systemd service definition:
+
 ```ini
 [Unit]
 Description=Open OneDrive Daemon
@@ -208,11 +228,13 @@ WantedBy=default.target
 ## Error Handling
 
 ### Connection Failures
+
 - **Automatic Retry**: Connection attempts retried automatically
 - **Graceful Degradation**: Continue operation without DBus when possible
 - **Error Logging**: Comprehensive error tracking
 
 ### Service Failures
+
 - **Health Monitoring**: Regular health checks
 - **Recovery Mechanisms**: Automatic service restart
 - **User Notification**: Error reporting via alternative channels
@@ -220,11 +242,13 @@ WantedBy=default.target
 ## Performance Considerations
 
 ### Signal Frequency
+
 - **Status Updates**: 10-second intervals (configurable)
 - **Event-driven**: Immediate signals for important events
 - **Batch Updates**: Grouped status updates when possible
 
 ### Resource Management
+
 - **Connection Pooling**: Efficient DBus connection handling
 - **Memory Usage**: Minimal memory footprint for signals
 - **CPU Impact**: Low-overhead status computation
@@ -232,11 +256,13 @@ WantedBy=default.target
 ## Security
 
 ### Access Control
+
 - **Session Bus**: User-level access only
 - **Method Validation**: Input parameter validation
 - **Permission Checks**: Operation authorization
 
 ### Data Privacy
+
 - **Minimal Exposure**: Only necessary status information
 - **No Sensitive Data**: No authentication tokens or file content
 - **Audit Logging**: Access logging for debugging
@@ -244,6 +270,7 @@ WantedBy=default.target
 ## Debugging & Monitoring
 
 ### DBus Monitoring
+
 ```bash
 # Monitor DBus messages
 dbus-monitor --session "interface='org.freedesktop.OneDriveSync'"
@@ -254,6 +281,7 @@ dbus-send --session --dest=org.freedesktop.DBus --type=method_call \
 ```
 
 ### Signal Testing
+
 ```bash
 # Test status retrieval
 dbus-send --session --dest=org.freedesktop.OneDriveSync \
@@ -261,6 +289,7 @@ dbus-send --session --dest=org.freedesktop.OneDriveSync \
 ```
 
 ### Logging
+
 - **DBus Operations**: All DBus interactions logged
 - **Signal Emission**: Signal broadcast tracking
 - **Error Conditions**: Detailed error reporting
@@ -268,12 +297,14 @@ dbus-send --session --dest=org.freedesktop.OneDriveSync \
 ## Future Enhancements
 
 ### Planned Features
+
 - **Configuration Interface**: Runtime configuration changes
 - **Statistics Interface**: Detailed sync statistics
 - **Notification Interface**: User notification management
 - **Plugin Interface**: Extensible functionality
 
 ### Integration Opportunities
+
 - **GNOME Integration**: GNOME Shell integration
 - **KDE Integration**: KDE Plasma integration
 - **System Monitor**: System monitoring tools integration

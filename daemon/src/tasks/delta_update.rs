@@ -353,6 +353,7 @@ impl SyncCycle {
                 .processing_repo
                 .store_processing_item(&processing_item)
                 .await?;
+            info!("✅ Processing item stored: {}", _id);
         }
 
         // Process all items using the new two-way sync system

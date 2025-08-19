@@ -785,7 +785,7 @@ impl ProcessingItemRepository {
             UPDATE processing_items SET
                 drive_item_id = ?, name = ?, etag = ?, last_modified = ?, created_date = ?, size = ?, is_folder = ?,
                 mime_type = ?, download_url = ?, is_deleted = ?, parent_id = ?, parent_path = ?,
-                status = ?, error_message = ?, last_status_update = ?, retry_count = ?, priority = ?,
+                status = ?, error_message = ?, last_status_update = datetime('now'), retry_count = ?, priority = ?,
                 change_type = ?, change_operation = ?, conflict_resolution = ?, validation_errors = ?, user_decision = ?,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
@@ -805,7 +805,7 @@ impl ProcessingItemRepository {
         .bind(parent_path)
         .bind(item.status.as_str())
         .bind(&item.error_message)
-        .bind(&item.last_status_update)
+        
         .bind(item.retry_count)
         .bind(item.priority)
         .bind(item.change_type.as_str())
@@ -1089,6 +1089,9 @@ impl ProcessingItemRepository {
             .execute(&self.pool)
             .await?;
         sqlx::query("delete from sync_state where id != (select max (id) from sync_state)")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("delete from download_queue where status ='completed'")
             .execute(&self.pool)
             .await?;
 

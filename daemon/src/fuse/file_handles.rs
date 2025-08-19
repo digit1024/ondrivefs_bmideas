@@ -230,6 +230,24 @@ impl FileHandleManager {
                 .drive_item_with_fuse_repository()
                 .get_drive_item_with_fuse(&onedrive_id),
         ) {
+            let processing_repo =
+                ProcessingItemRepository::new(self.app_state.persistency().pool().clone());
+
+            // Check if a pending processing item already exists for this drive item
+            let existing = sync_await(processing_repo
+                .get_pending_processing_item_by_drive_item_id_and_change_type(
+                    &item.drive_item().id, 
+                    &crate::persistency::processing_item_repository::ChangeType::Local
+                ))?;
+
+            if existing.is_some() {
+                debug!(
+                    "📝 Processing item already exists for {}, skipping duplicate creation",
+                    onedrive_id
+                );
+                return Ok(());
+            }
+
             //if onedriveId is local then it's create
             let operation = if onedrive_id.starts_with("local_") {
                 crate::persistency::processing_item_repository::ChangeOperation::Create
@@ -239,8 +257,6 @@ impl FileHandleManager {
 
             let processing_item = ProcessingItem::new_local(item.drive_item().clone(), operation);
 
-            let processing_repo =
-                ProcessingItemRepository::new(self.app_state.persistency().pool().clone());
             let _id = sync_await(processing_repo.store_processing_item(&processing_item))?;
             debug!(
                 "📝 Created ProcessingItem for dirty handle: {} (DB ID: {})",

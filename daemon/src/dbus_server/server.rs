@@ -1,12 +1,14 @@
-use crate::persistency::processing_item_repository::{ChangeType, ProcessingStatus};
+use crate::persistency::processing_item_repository::{ChangeType, ProcessingStatus, ChangeOperation};
 use onedrive_sync_lib::dbus::types::{ConflictItem, UserChoice};
 use std::{fs, sync::Arc};
 
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use onedrive_sync_lib::dbus::types::{DaemonStatus, SyncQueueItem, SyncStatus, UserProfile};
 use onedrive_sync_lib::dbus::types::MediaItem;
 use zbus::interface;
 use zbus::object_server::SignalEmitter;
+use uuid;
+use anyhow::Result;
 
 use crate::file_manager::FileManager;
 
@@ -106,12 +108,17 @@ impl ServiceImpl {
                 zbus::fdo::Error::Failed("Corresponding conflicted item not found".to_string())
             })?;
 
-        let (winning_item, losing_item) = match (choice, &conflicted_item.change_type) {
+        let (winning_item, losing_item) = match (&choice, &conflicted_item.change_type) {
             (UserChoice::KeepLocal, &ChangeType::Local) => (conflicted_item, corresponding_item),
             (UserChoice::KeepLocal, &ChangeType::Remote) => (corresponding_item, conflicted_item),
             (UserChoice::UseRemote, &ChangeType::Remote) => (conflicted_item, corresponding_item),
             (UserChoice::UseRemote, &ChangeType::Local) => (corresponding_item, conflicted_item),
         };
+
+        // Check if we need to transform the operation based on the conflict scenario
+        let transformation_result = self.transform_operation_after_conflict_resolution(
+            &winning_item, &losing_item, &choice
+        ).await.map_err(|e| zbus::fdo::Error::Failed(format!("Failed to transform operation: {}", e)))?;
 
         // Cancel the losing item
         processing_repo
@@ -119,11 +126,41 @@ impl ServiceImpl {
             .await
             .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to cancel losing item: {}", e)))?;
 
-        // Re-queue the winning item by setting its status to New
-        processing_repo
-            .update_status_by_id(winning_item.id.unwrap(), &ProcessingStatus::New)
-            .await
-            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to re-queue winning item: {}", e)))?;
+        // Apply transformation if needed
+        if let Some((new_operation, new_id, new_name)) = transformation_result {
+            info!("Transforming operation for conflict resolution: {} {:?} -> {} {:?}", 
+                  winning_item.drive_item.id, winning_item.change_operation, new_id, new_operation);
+            
+            // Update the winning item with transformed operation
+            let mut updated_item = winning_item.clone();
+            updated_item.change_operation = new_operation;
+            updated_item.drive_item.id = new_id.clone();
+            updated_item.status = ProcessingStatus::New; // Set status to New for processing
+            if let Some(name) = new_name {
+                updated_item.drive_item.name = Some(name);
+            }
+            
+            // Update the processing item in database
+            processing_repo
+                .update_processing_item(&updated_item)
+                .await
+                .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to update transformed item: {}", e)))?;
+
+            // Update DriveItemWithFuse if ID changed
+            if new_id != winning_item.drive_item.id {
+                let drive_item_with_fuse_repo = self.app_state.persistency().drive_item_with_fuse_repository();
+                drive_item_with_fuse_repo
+                    .update_onedrive_id(&winning_item.drive_item.id, &new_id)
+                    .await
+                    .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to update drive item ID: {}", e)))?;
+            }
+        } else {
+            // Re-queue the winning item by setting its status to New (original behavior)
+            processing_repo
+                .update_status_by_id(winning_item.id.unwrap(), &ProcessingStatus::New)
+                .await
+                .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to re-queue winning item: {}", e)))?;
+        }
 
         info!(
             "Conflict resolved for OneDrive item {}. Kept {} version.",
@@ -133,6 +170,11 @@ impl ServiceImpl {
 
         Ok(())
     }
+
+
+
+
+    #[allow(dead_code)]
     async fn get_user_profile(&self) -> zbus::fdo::Result<UserProfile> {
         debug!("DBus: get_user_profile called");
 
@@ -148,6 +190,7 @@ impl ServiceImpl {
             mail: user_profile.mail.unwrap_or_default(),
         })
     }
+    #[allow(dead_code)]
     async fn get_daemon_status(&self) -> zbus::fdo::Result<DaemonStatus> {
         debug!("DBus: get_daemon_status called");
 
@@ -191,6 +234,7 @@ impl ServiceImpl {
         })
     }
 
+    #[allow(dead_code)]
     async fn get_download_queue(&self) -> zbus::fdo::Result<Vec<SyncQueueItem>> {
         debug!("DBus: get_download_queue called");
 
@@ -227,6 +271,7 @@ impl ServiceImpl {
         Ok(sync_items)
     }
 
+    #[allow(dead_code)]
     async fn get_upload_queue(&self) -> zbus::fdo::Result<Vec<SyncQueueItem>> {
         debug!("DBus: get_upload_queue called");
 
@@ -256,6 +301,7 @@ impl ServiceImpl {
         Ok(sync_items)
     }
 
+    #[allow(dead_code)]
     async fn get_recent_logs(&self) -> zbus::fdo::Result<Vec<String>> {
         use std::fs::File;
         use std::io::{BufRead, BufReader};
@@ -278,6 +324,7 @@ impl ServiceImpl {
     }
 
     /// List media items (images/videos) newest first with pagination and optional date filters
+    #[allow(dead_code)]
     async fn list_media(&self, offset: u32, limit: u32, start_date: String, end_date: String) -> zbus::fdo::Result<Vec<MediaItem>> {
         let repo = self.app_state.persistency().drive_item_with_fuse_repository();
         let start_opt = if start_date.trim().is_empty() { None } else { Some(start_date.as_str()) };
@@ -309,6 +356,7 @@ impl ServiceImpl {
     }
 
     /// Ensure a medium thumbnail exists for inode; returns absolute file path
+    #[allow(dead_code)]
     async fn fetch_thumbnail(&self, ino: u64) -> zbus::fdo::Result<String> {
         use tokio::fs;
         use tokio::io::AsyncWriteExt;
@@ -338,6 +386,7 @@ impl ServiceImpl {
     }
 
     /// Ensure file is downloaded locally at local/{ino}; return absolute path
+    #[allow(dead_code)]
     async fn ensure_local_by_ino(&self, ino: u64) -> zbus::fdo::Result<String> {
         info!("DBus: ensure_local_by_ino called for ino: {}", ino);
         use tokio::fs;
@@ -384,6 +433,7 @@ impl ServiceImpl {
         Ok(target_path.to_string_lossy().to_string())
     }
 
+    #[allow(dead_code)]
     async fn full_reset(&self) -> zbus::fdo::Result<()> {
         use log::info;
         use std::fs;
@@ -428,6 +478,7 @@ impl ServiceImpl {
     }
 
     /// List all sync folders
+    #[allow(dead_code)]
     async fn list_sync_folders(&self) -> zbus::fdo::Result<Vec<String>> {
         let folders = self
             .app_state
@@ -441,6 +492,7 @@ impl ServiceImpl {
     }
 
     /// Add a sync folder (store in settings, queue files for download)
+    #[allow(dead_code)]
     async fn add_sync_folder(&self, folder_path: String) -> zbus::fdo::Result<bool> {
         let mut settings = self.app_state.config().settings.read().await.clone();
         let normalized = folder_path.trim_start_matches('/').to_string();
@@ -490,6 +542,7 @@ impl ServiceImpl {
     }
 
     /// Remove a sync folder (remove from settings, delete downloaded files)
+    #[allow(dead_code)]
     async fn remove_sync_folder(&self, folder_path: String) -> zbus::fdo::Result<bool> {
         let mut settings = self.app_state.config().settings.read().await.clone();
         let normalized = folder_path.trim_start_matches('/').to_string();
@@ -539,6 +592,7 @@ impl ServiceImpl {
     }
 
     /// Toggle sync pause state
+    #[allow(dead_code)]
     async fn toggle_sync_pause(&self) -> zbus::fdo::Result<bool> {
         debug!("DBus: toggle_sync_pause called");
         
@@ -565,4 +619,75 @@ impl ServiceImpl {
     }
 }
 
+impl ServiceImpl {
+    /// Public wrapper for resolve_conflict for testing purposes
+    #[allow(dead_code)]
+    pub async fn resolve_conflict_for_test(
+        &self,
+        conflicted_item_db_id: i64,
+        choice: UserChoice,
+    ) -> zbus::fdo::Result<()> {
+        self.resolve_conflict(conflicted_item_db_id, choice).await
+    }
 
+    /// Transform operation after conflict resolution based on the specific conflict scenario
+    async fn transform_operation_after_conflict_resolution(
+        &self,
+        winning_item: &crate::persistency::processing_item_repository::ProcessingItem,
+        losing_item: &crate::persistency::processing_item_repository::ProcessingItem,
+        choice: &UserChoice,
+    ) -> Result<Option<(ChangeOperation, String, Option<String>)>> {
+        match (choice, &winning_item.change_type, &winning_item.change_operation, &losing_item.change_operation) {
+            
+            
+            (UserChoice::KeepLocal, ChangeType::Local, ChangeOperation::Update, ChangeOperation::Delete) => {
+                let new_id = format!("local_{}", uuid::Uuid::new_v4());
+                info!("Local update on deleted remote → Create new: {} → {}", winning_item.drive_item.id, new_id);
+                Ok(Some((ChangeOperation::Create, new_id, None)))
+            }
+            
+            (UserChoice::KeepLocal, ChangeType::Local, ChangeOperation::Move, ChangeOperation::Delete) => {
+                let new_id = format!("local_{}", uuid::Uuid::new_v4());
+                info!("Local move on deleted remote → Create at target: {} → {}", winning_item.drive_item.id, new_id);
+                Ok(Some((ChangeOperation::Create, new_id, None)))
+            }
+            
+            (UserChoice::KeepLocal, ChangeType::Local, ChangeOperation::Rename, ChangeOperation::Delete) => {
+                let new_id = format!("local_{}", uuid::Uuid::new_v4());
+                info!("Local rename on deleted remote → Create with new name: {} → {}", winning_item.drive_item.id, new_id);
+                Ok(Some((ChangeOperation::Create, new_id, None)))
+            }
+            
+            
+            (UserChoice::UseRemote, ChangeType::Remote, ChangeOperation::Update, ChangeOperation::Delete) => {
+                info!("Remote update on deleted local → Restore from remote: {}", winning_item.drive_item.id);
+                Ok(Some((ChangeOperation::Create, winning_item.drive_item.id.clone(), None)))
+            }
+            
+            (UserChoice::UseRemote, ChangeType::Remote, ChangeOperation::Move, ChangeOperation::Delete) => {
+                info!("Remote move on deleted local → Create at new location: {}", winning_item.drive_item.id);
+                Ok(Some((ChangeOperation::Create, winning_item.drive_item.id.clone(), None)))
+            }
+            
+            
+            (UserChoice::KeepLocal, ChangeType::Local, ChangeOperation::Create, ChangeOperation::Create) => {
+                info!("Local create on existing remote → Overwrite remote: {}", losing_item.drive_item.id);
+                Ok(Some((ChangeOperation::Update, losing_item.drive_item.id.clone(), None)))
+            }
+            
+            
+            (UserChoice::KeepLocal, ChangeType::Remote, ChangeOperation::Move, _) |
+            (UserChoice::KeepLocal, ChangeType::Remote, ChangeOperation::Rename, _) => {
+                // This case requires identifying the conflicting local item and renaming it
+                // This is complex and should be handled in a separate enhancement
+                warn!("Remote rename/move conflict detected - complex scenario requiring additional implementation");
+                Ok(None)
+            }
+            
+            
+            _ => {
+                Ok(None)
+            }
+        }
+    }
+}
