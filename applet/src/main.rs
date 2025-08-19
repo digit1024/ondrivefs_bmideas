@@ -1,18 +1,15 @@
 // SPDX-License-Identifier: MPL-2.0
 
-mod config;
+mod applet;
 mod dbus_client;
-mod i18n;
-
-use crate::window::Window;
-
-mod window;
 
 fn main() -> cosmic::iced::Result {
-    let env = env_logger::Env::default()
-        .filter_or("MY_LOG_LEVEL", "warn")
-        .write_style_or("MY_LOG_STYLE", "always");
+    // Initialize logging
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .init();
 
-    env_logger::init_from_env(env);
-    cosmic::applet::run::<Window>(())
+    tracing::info!("Starting OneDrive sync applet");
+
+    applet::run()
 }

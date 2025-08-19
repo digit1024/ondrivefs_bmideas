@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use anyhow::Result;
-use log::info;
+use tracing::info;
 use onedrive_sync_lib::dbus::types::DaemonStatus;
 use zbus::connection::Builder;
 use zbus::Proxy;
@@ -54,7 +54,7 @@ impl DbusClient {
         let proxy = self.get_proxy().await?;
         let mut stream = proxy.receive_signal("DaemonStatusChanged").await?;
         tokio::spawn(async move {
-            use futures_util::StreamExt;
+            use futures_lite::StreamExt;
             while let Some(msg) = stream.next().await {
                 if let Ok(status) = msg.body().deserialize::<DaemonStatus>() {
                     on_status(status).await;
