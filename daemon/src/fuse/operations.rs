@@ -817,10 +817,7 @@ impl fuser::Filesystem for OneDriveFuse {
                 }
             }
 
-            // Clean up any open handles for this inode
-            if let Some(ino) = item.virtual_ino() {
-                self.file_handles().cleanup_handles_for_inode(ino);
-            }
+            
 
             // Mark as deleted in database
             let mut updated_item = item.clone();
