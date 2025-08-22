@@ -17,7 +17,7 @@ use std::ffi::OsStr;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::MetadataExt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::fs::{Metadata, OpenOptions};
+use std::fs::{File, Metadata, OpenOptions};
 use libc::{O_RDONLY, O_WRONLY, O_RDWR, O_APPEND, O_CREAT, O_TRUNC, O_EXCL};
 
 
@@ -119,9 +119,8 @@ impl OneDriveFuse{
         size: u32,
         reply: ReplyData,
     ) {
-        let file_ptr = fh as usize as *mut std::fs::File;
         
-        let backend_file = unsafe { &mut *file_ptr };
+        let  mut backend_file = self.file_handles().get_file(fh).unwrap().clone();
     
         match backend_file.seek(SeekFrom::Start(offset as u64)) {
             Ok(_) => {
@@ -150,7 +149,7 @@ impl OneDriveFuse{
         reply: ReplyWrite,
     ) {
         let file_ptr = fh as usize as *mut std::fs::File;
-        let backend_file = unsafe { &mut *file_ptr };
+        let  mut backend_file = self.file_handles().get_file(fh).unwrap().clone();
         
     
         match backend_file.seek(SeekFrom::Start(offset as u64)) {
@@ -276,6 +275,10 @@ impl fuser::Filesystem for OneDriveFuse {
             reply.error(libc::ENOENT);
             return;
         }
+        if item.is_folder() {
+            reply.opened(0, 0);
+            return;
+        }
         let file_path = file_path.unwrap();
         let open_flags = OpenFlags::from_i32(flags).unwrap();
         let mut open_options = OpenOptions::new();
@@ -284,9 +287,8 @@ impl fuser::Filesystem for OneDriveFuse {
         match open_options.open(&file_path) {
             Ok(backend_file) => {
                 // SUCCESS: We can create a stateful session.
-                let boxed_file = Box::new(backend_file);
-                let fh: u64 = Box::into_raw(boxed_file) as usize as u64;
-                debug!("OPENED: fh={}", fh);
+                let fh = self.file_handles().register_file(backend_file);
+                
                 reply.opened(fh, 0); // Return the valid FH
             },
             Err(e) => {
@@ -386,8 +388,7 @@ impl fuser::Filesystem for OneDriveFuse {
         };
 
         // Then close the file handle
-        let file_ptr = fh as usize as *mut std::fs::File;
-        let _boxed_file: Box<std::fs::File> = unsafe { Box::from_raw(file_ptr) };
+        self.file_handles().close_file(fh);
     
         // When _boxed_file goes out of scope here, the File is closed!
         
@@ -580,7 +581,7 @@ impl fuser::Filesystem for OneDriveFuse {
             }
             // If it's a folder or item not found, fall through to normal error handling
         }
-        self.read_with_handle(ino, offset, size, reply);
+        self.read_with_handle(fh, offset, size, reply);
         
         
     }
@@ -684,8 +685,8 @@ impl fuser::Filesystem for OneDriveFuse {
             
     
                 //  Create file handle
-                let boxed_file = Box::new(backend_file);
-                let fh = Box::into_raw(boxed_file) as usize as u64;
+                
+                let fh = self.file_handles().register_file(backend_file);
     
                 //  Reply with created file info
                 reply.created(&Duration::from_secs(1), &attr, 0, fh, 0);
@@ -718,14 +719,7 @@ impl fuser::Filesystem for OneDriveFuse {
         ) {
             Ok(ino) => {
                 if let Ok(Some(item)) = sync_await(self.database().get_item_by_ino(ino)) {
-                    let result = sync_await(
-                        self.file_handles().create_processing_item_for_handle(&item.drive_item().id.clone())
-                    );
-                    if let Err(e) = result {
-                        error!("Failed to create processing item for handle: {}", e);
-                        reply.error(libc::EIO);
-                        return;
-                    }
+                    
 
 
                     reply.entry(
@@ -884,7 +878,7 @@ impl fuser::Filesystem for OneDriveFuse {
            .processing_item_repository();
            let _result = sync_await(processing_repo.store_processing_item(&delete_processing_item));
            
-           
+           reply.ok();
            
             
            
