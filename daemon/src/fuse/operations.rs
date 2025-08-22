@@ -183,7 +183,7 @@ impl OneDriveFuse{
         reply: ReplyWrite,
     ) {
         let item = self.get_item_by_ino(ino);
-        let file_path = self.file_operations().file_exists_locally(item.virtual_ino().unwrap_or(0));
+        let file_path = self.get_local_file_path(item.virtual_ino().unwrap_or(0));
         if file_path.is_none() {
             reply.error(libc::ENOENT);
             return;
@@ -270,7 +270,7 @@ impl fuser::Filesystem for OneDriveFuse {
     fn open(&mut self, _req: &fuser::Request, ino: u64, flags: i32, reply: fuser::ReplyOpen) {
         debug!("OPEN: ino={}", ino);
         let item = self.get_item_by_ino(ino);
-        let file_path = self.file_operations().file_exists_locally(item.virtual_ino().unwrap_or(0));
+        let file_path = self.get_local_file_path(item.virtual_ino().unwrap_or(0));
         if file_path.is_none() {
             reply.error(libc::ENOENT);
             return;
@@ -336,8 +336,7 @@ impl fuser::Filesystem for OneDriveFuse {
                     } else {
                         // Get the file path for the item
                         if let Some(file_path) = self
-                            .file_operations()
-                            .file_exists_locally(item.virtual_ino().unwrap_or(0))
+                            .get_local_file_path(item.virtual_ino().unwrap_or(0))
                         {
                             // Update DriveItem with file metadata
                             let mut updated_drive_item = item.drive_item().clone();
@@ -489,8 +488,7 @@ impl fuser::Filesystem for OneDriveFuse {
                     fuser::FileType::RegularFile
                 };
                 let name = if self
-                    .file_operations()
-                    .file_exists_locally(child.virtual_ino().unwrap_or(0))
+                    .get_local_file_path(child.virtual_ino().unwrap_or(0))
                     .is_none()
                     && !child.is_folder()
                 {
@@ -546,7 +544,7 @@ impl fuser::Filesystem for OneDriveFuse {
             reply.error(libc::EIO);
             return;
         }
-        let file_path = self.file_operations().file_exists_locally(item.virtual_ino().unwrap_or(0));
+        let file_path = self.get_local_file_path(item.virtual_ino().unwrap_or(0));
         if let Some(file_path) = file_path {
             let mut file = OpenOptions::new().read(true).open(&file_path).unwrap();
             file.seek(SeekFrom::Start(offset as u64)).unwrap();
@@ -562,7 +560,7 @@ impl fuser::Filesystem for OneDriveFuse {
             // VIRTUAL_FILE_HANDLE_ID
             if let Ok(Some(item)) = sync_await(self.database().get_item_by_ino(ino)) {
                 if !item.is_folder() {
-                    let content = self.file_operations().generate_placeholder_content(&item);
+                    let content = self.generate_placeholder_content(&item);
 
                     // Handle offset and size properly
                     let content_len = content.len() as i64;
@@ -629,9 +627,9 @@ impl fuser::Filesystem for OneDriveFuse {
         let name_str = name.to_string_lossy();
         debug!("CREATE: parent={}, name={}", parent, name_str);
         let parent_item = self.get_item_by_ino(parent);
-        let existing_driveItem = sync_await( self.drive_item_with_fuse_repo().get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(parent, &name_str)).unwrap();
+        let existing_drive_item = sync_await( self.drive_item_with_fuse_repo().get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(parent, &name_str)).unwrap();
         let open_flags =  OpenFlags::from_i32(flags).unwrap();
-        if open_flags.create_new && existing_driveItem.is_some() {
+        if open_flags.create_new && existing_drive_item.is_some() {
             reply.error(libc::EEXIST);
             return;
         }
@@ -660,10 +658,9 @@ impl fuser::Filesystem for OneDriveFuse {
                 }
     
                 // 10. For O_APPEND, seek to end
-                let mut seek_pos = 0;
                 if open_flags.append {
                     if let Ok(metadata) = std::fs::metadata(&new_file_path) {
-                        seek_pos = metadata.len();
+                        let seek_pos = metadata.len();
                         if let Err(e) = backend_file.seek(SeekFrom::Start(seek_pos)) {
                             eprintln!("Warning: failed to seek to end: {}", e);
                         }
@@ -850,7 +847,7 @@ impl fuser::Filesystem for OneDriveFuse {
             parent, name_str, newparent, newname_str
         );
         let parent_item = self.get_item_by_ino(parent);
-        let mut original_item = sync_await( self.drive_item_with_fuse_repo().get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(parent, &name_str)).unwrap().unwrap();
+        let original_item = sync_await( self.drive_item_with_fuse_repo().get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(parent, &name_str)).unwrap().unwrap();
         let existing_drive_item = sync_await( self.drive_item_with_fuse_repo().get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(newparent, &newname_str)).unwrap();
         if existing_drive_item.is_some() {
             //its a replace! Special CASE!
@@ -973,12 +970,12 @@ impl fuser::Filesystem for OneDriveFuse {
                     warn!("Failed to mark item as modified: {}", e);
                 }
             }
-            let path = self.file_operations().file_exists_locally(item.virtual_ino().unwrap_or(0));
+            let path = self.get_local_file_path(item.virtual_ino().unwrap_or(0));
             if path.is_some() {
                 let file_path = path.unwrap();
                 if let Some(new_size) = size {
                     match std::fs::OpenOptions::new().write(true).open(&file_path) {
-                        Ok(mut file) => {
+                        Ok(file) => {
                             if let Err(e) = file.set_len(new_size) {
                                 error!("Failed to truncate file {}: {}", file_path.display(), e);
                                 reply.error(e.raw_os_error().unwrap_or(libc::EIO));
@@ -1078,8 +1075,7 @@ impl fuser::Filesystem for OneDriveFuse {
                     fuser::FileType::RegularFile
                 };
                 let name = if self
-                    .file_operations()
-                    .file_exists_locally(child.virtual_ino().unwrap_or(0))
+                    .get_local_file_path(child.virtual_ino().unwrap_or(0))
                     .is_none()
                     && !child.is_folder()
                 {

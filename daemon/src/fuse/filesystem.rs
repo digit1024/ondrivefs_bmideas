@@ -11,11 +11,13 @@ use anyhow::Result;
 use log::{info, warn};
 use sqlx::Pool;
 use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::io::{Read, Seek, SeekFrom, Write};
 use crate::fuse::operations::MetadataToFileAttr;
 
 use crate::fuse::database::DatabaseManager;
 use crate::fuse::file_handles::FileHandleManager;
-use crate::fuse::file_operations::FileOperationsManager;
+
 
 /// OneDrive FUSE filesystem implementation using DriveItemWithFuse
 pub struct OneDriveFuse {
@@ -26,7 +28,6 @@ pub struct OneDriveFuse {
 
     // Managers for different responsibilities
     file_handle_manager: FileHandleManager,
-    file_operations_manager: FileOperationsManager,
     database_manager: DatabaseManager,
 }
 
@@ -45,7 +46,7 @@ impl OneDriveFuse {
 
         let file_handle_manager = FileHandleManager::new(file_manager.clone(), app_state.clone());
 
-        let file_operations_manager = FileOperationsManager::new(file_manager.clone());
+
 
         let database_manager = DatabaseManager::new(drive_item_with_fuse_repo.clone());
 
@@ -54,7 +55,6 @@ impl OneDriveFuse {
             file_manager,
             app_state,
             file_handle_manager,
-            file_operations_manager,
             database_manager,
         })
     }
@@ -96,10 +96,7 @@ impl OneDriveFuse {
         &self.file_handle_manager
     }
 
-    /// Get file operations manager
-    pub fn file_operations(&self) -> &FileOperationsManager {
-        &self.file_operations_manager
-    }
+
 
     /// Get database manager
     pub fn database(&self) -> &DatabaseManager {
@@ -144,13 +141,66 @@ impl OneDriveFuse {
         return false;
     }
     pub fn get_attributes_from_local_file_or_from_db(&self, item: &DriveItemWithFuse) -> fuser::FileAttr {
-        if let Some(file_path) = self
-            .file_operations()
-            .file_exists_locally(item.virtual_ino().unwrap_or(0))
-        {
+        if let Some(file_path) = self.get_local_file_path(item.virtual_ino().unwrap_or(0)) {
             let metadata = std::fs::metadata(&file_path).unwrap();
             return metadata.try_to_file_attr(item.virtual_ino().unwrap()).unwrap();
         }
         AttributeManager::item_to_file_attr(&item)
+    }
+
+    // Direct file operations (no wrapper)
+    pub fn get_local_file_path(&self, ino: u64) -> Option<PathBuf> {
+        self.file_manager.get_local_path_if_file_exists(ino)
+    }
+    
+    pub fn is_file_synchronized(&self, item: &DriveItemWithFuse) -> bool {
+        item.drive_item().id.starts_with("local_")
+    }
+    
+    pub fn generate_placeholder_content(&self, item: &DriveItemWithFuse) -> Vec<u8> {
+        let name = item.name().unwrap_or("unknown");
+        let size = item.size();
+
+        let placeholder = format!(
+            "This is a placeholder for file: {}\nSize: {} bytes\nThis file is not yet downloaded locally.",
+            name, size
+        );
+
+        placeholder.into_bytes()
+    }
+
+    // File I/O helper methods (extracted from operations)
+    pub fn read_file_data(&self, path: &Path, offset: u64, size: usize) -> Result<Vec<u8>, std::io::Error> {
+        let mut file = std::fs::OpenOptions::new().read(true).open(path)?;
+        file.seek(std::io::SeekFrom::Start(offset))?;
+        let mut buffer = vec![0; size];
+        let bytes_read = file.read(&mut buffer)?;
+        buffer.truncate(bytes_read);
+        Ok(buffer)
+    }
+
+    pub fn write_file_data(&self, path: &Path, offset: u64, data: &[u8], flags: i32) -> Result<u32, std::io::Error> {
+        use std::io::{Seek, SeekFrom, Write};
+        
+        let mut open_options = std::fs::OpenOptions::new();
+        open_options.write(true);
+        
+        // Parse flags for append mode
+        if (flags & libc::O_APPEND) != 0 {
+            open_options.append(true);
+        }
+        
+        let mut file = open_options.open(path)?;
+        
+        if (flags & libc::O_APPEND) != 0 {
+            // Seek to end for append mode
+            file.seek(SeekFrom::End(0))?;
+        } else {
+            // Seek to specified offset
+            file.seek(SeekFrom::Start(offset))?;
+        }
+        
+        file.write_all(data)?;
+        Ok(data.len() as u32)
     }
 }

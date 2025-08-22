@@ -7,7 +7,6 @@ pub mod attributes;
 pub mod database;
 pub mod drive_item_manager;
 pub mod file_handles;
-pub mod file_operations;
 pub mod filesystem;
 pub mod operations;
 pub mod utils;
