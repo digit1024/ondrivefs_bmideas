@@ -55,12 +55,12 @@ impl ConnectivityChecker {
 
     /// Check overall connectivity status
     pub async fn check_connectivity(&self) -> ConnectivityStatus {
-        info!("🔍 Checking connectivity status...");
+        debug!("Checking connectivity status...");
 
         // First check basic internet connectivity
         match self.check_internet_connectivity().await {
             Ok(true) => {
-                info!("✅ Internet connectivity confirmed");
+                debug!("✅ Internet connectivity confirmed");
                 self.check_ms_graph_connectivity().await
             }
             Ok(false) => {

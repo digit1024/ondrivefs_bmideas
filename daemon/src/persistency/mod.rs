@@ -103,6 +103,7 @@ impl PersistencyManager {
                 onedrive_id TEXT UNIQUE NOT NULL,
                 name TEXT,
                 etag TEXT,
+                ctag TEXT,
                 last_modified TEXT,
                 created_date TEXT,
                 size INTEGER,
@@ -145,6 +146,12 @@ impl PersistencyManager {
 
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_drive_items_with_fuse_file_source ON drive_items_with_fuse(file_source)",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_drive_items_with_fuse_ctag ON drive_items_with_fuse(ctag)",
         )
         .execute(&self.pool)
         .await?;

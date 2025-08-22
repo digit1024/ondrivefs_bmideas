@@ -57,7 +57,7 @@ impl DriveItemWithFuseRepository {
             sqlx::query(
                 r#"
                 UPDATE drive_items_with_fuse SET
-                    name = ?, etag = ?, last_modified = ?, created_date = ?, size = ?, is_folder = ?,
+                    name = ?, etag = ?, ctag = ?, last_modified = ?, created_date = ?, size = ?, is_folder = ?,
                     mime_type = ?, download_url = ?, is_deleted = ?, parent_id = ?, parent_path = ?, 
                     parent_ino = ?, virtual_path = ?,  file_source = ?, sync_status = ?,
                     updated_at = CURRENT_TIMESTAMP
@@ -66,6 +66,7 @@ impl DriveItemWithFuseRepository {
             )
             .bind(&item.drive_item.name)
             .bind(&item.drive_item.etag)
+            .bind(&item.drive_item.ctag)
             .bind(&item.drive_item.last_modified)
             .bind(&item.drive_item.created_date)
             .bind(item.drive_item.size.map(|s| s as i64))
@@ -95,15 +96,16 @@ impl DriveItemWithFuseRepository {
             let result = sqlx::query(
                 r#"
                 INSERT INTO drive_items_with_fuse (
-                    onedrive_id, name, etag, last_modified, created_date, size, is_folder,
+                    onedrive_id, name, etag, ctag, last_modified, created_date, size, is_folder,
                     mime_type, download_url, is_deleted, parent_id, parent_path, 
                     parent_ino, virtual_path, file_source, sync_status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&item.drive_item.id)
             .bind(&item.drive_item.name)
             .bind(&item.drive_item.etag)
+            .bind(&item.drive_item.ctag)
             .bind(&item.drive_item.last_modified)
             .bind(&item.drive_item.created_date)
             .bind(item.drive_item.size.map(|s| s as i64))
@@ -144,7 +146,7 @@ impl DriveItemWithFuseRepository {
     ) -> Result<Option<DriveItemWithFuse>> {
         let row = sqlx::query(
             r#"
-            SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
+            SELECT virtual_ino, onedrive_id, name, etag, ctag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path, 
                    parent_ino, virtual_path,  file_source, sync_status
             FROM drive_items_with_fuse WHERE onedrive_id = ?
@@ -168,7 +170,7 @@ impl DriveItemWithFuseRepository {
     ) -> Result<Vec<DriveItemWithFuse>> {
         let rows = sqlx::query(
             r#"
-        SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
+        SELECT virtual_ino, onedrive_id, name, etag, ctag, last_modified, created_date, size, is_folder,
                mime_type, download_url, is_deleted, parent_id, parent_path, 
                parent_ino, virtual_path,  file_source, sync_status
         FROM drive_items_with_fuse WHERE 
@@ -195,7 +197,7 @@ impl DriveItemWithFuseRepository {
     pub async fn get_all_drive_items_with_fuse(&self) -> Result<Vec<DriveItemWithFuse>> {
         let rows = sqlx::query(
             r#"
-            SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
+            SELECT virtual_ino, onedrive_id, name, etag, ctag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path, 
                    parent_ino, virtual_path,  file_source, sync_status
             FROM drive_items_with_fuse ORDER BY name
@@ -221,7 +223,7 @@ impl DriveItemWithFuseRepository {
         let rows = if parent_path.eq("/") {
             sqlx::query(
                 r#"
-                SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
+                SELECT virtual_ino, onedrive_id, name, etag, ctag, last_modified, created_date, size, is_folder,
                        mime_type, download_url, is_deleted, parent_id, parent_path, 
                        parent_ino, virtual_path,  file_source, sync_status
                 FROM drive_items_with_fuse where parent_path = '/drive/root:' AND is_deleted = 0 ORDER BY name
@@ -232,7 +234,7 @@ impl DriveItemWithFuseRepository {
         } else {
             sqlx::query(
                 r#"
-                SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
+                SELECT virtual_ino, onedrive_id, name, etag, ctag, last_modified, created_date, size, is_folder,
                        mime_type, download_url, is_deleted, parent_id, parent_path, 
                        parent_ino, virtual_path,  file_source, sync_status
                 FROM drive_items_with_fuse where REPLACE(parent_path , '/drive/root:' , '') = ? AND is_deleted = 0 ORDER BY name
@@ -259,7 +261,7 @@ impl DriveItemWithFuseRepository {
     ) -> Result<Vec<DriveItemWithFuse>> {
         let rows = sqlx::query(
             r#"
-            SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
+            SELECT virtual_ino, onedrive_id, name, etag, ctag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path, 
                    parent_ino, virtual_path,  file_source, sync_status
             FROM drive_items_with_fuse WHERE parent_id = ? AND is_deleted = 0 ORDER BY name
@@ -285,7 +287,7 @@ impl DriveItemWithFuseRepository {
     ) -> Result<Vec<DriveItemWithFuse>> {
         let rows = sqlx::query(
             r#"
-            SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
+            SELECT virtual_ino, onedrive_id, name, etag, ctag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path, 
                    parent_ino, virtual_path,  file_source, sync_status
             FROM drive_items_with_fuse WHERE parent_ino = ? AND is_deleted = 0 ORDER BY name
@@ -313,7 +315,7 @@ impl DriveItemWithFuseRepository {
     ) -> Result<Vec<DriveItemWithFuse>> {
         let rows = sqlx::query(
             r#"
-            SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
+            SELECT virtual_ino, onedrive_id, name, etag, ctag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path, 
                    parent_ino, virtual_path,  file_source, sync_status
             FROM drive_items_with_fuse WHERE parent_ino = ? AND is_deleted = 0 ORDER BY virtual_ino LIMIT ? OFFSET ?
@@ -343,7 +345,7 @@ impl DriveItemWithFuseRepository {
         limit: usize,
     ) -> Result<Vec<DriveItemWithFuse>> {
         let mut base = String::from(
-            r#"SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
+            r#"SELECT virtual_ino, onedrive_id, name, etag, ctag, last_modified, created_date, size, is_folder,
                        mime_type, download_url, is_deleted, parent_id, parent_path, 
                        parent_ino, virtual_path,  file_source, sync_status
                 FROM drive_items_with_fuse 
@@ -414,7 +416,7 @@ impl DriveItemWithFuseRepository {
     pub async fn get_items_by_source(&self, source: FileSource) -> Result<Vec<DriveItemWithFuse>> {
         let rows = sqlx::query(
             r#"
-            SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
+            SELECT virtual_ino, onedrive_id, name, etag, ctag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path, 
                    parent_ino, virtual_path,  file_source, sync_status
             FROM drive_items_with_fuse WHERE file_source = ? ORDER BY name
@@ -440,7 +442,7 @@ impl DriveItemWithFuseRepository {
     ) -> Result<Option<DriveItemWithFuse>> {
         let row = sqlx::query(
             r#"
-            SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
+            SELECT virtual_ino, onedrive_id, name, etag, ctag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path, 
                    parent_ino, virtual_path,  file_source, sync_status
             FROM drive_items_with_fuse WHERE virtual_path = ? AND is_deleted = 0
@@ -465,7 +467,7 @@ impl DriveItemWithFuseRepository {
     ) -> Result<Option<DriveItemWithFuse>> {
         let row = sqlx::query(
             r#"
-            SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
+            SELECT virtual_ino, onedrive_id, name, etag, ctag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path, 
                    parent_ino, virtual_path,  file_source, sync_status
             FROM drive_items_with_fuse WHERE virtual_ino = ?
@@ -616,7 +618,7 @@ impl DriveItemWithFuseRepository {
     ) -> Result<Option<DriveItemWithFuse>> {
         let row = sqlx::query(
             r#"
-            SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
+            SELECT virtual_ino, onedrive_id, name, etag, ctag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path, 
                    parent_ino, virtual_path,  file_source, sync_status
             FROM drive_items_with_fuse WHERE parent_ino = ? AND name = ? AND is_deleted = 0
@@ -643,7 +645,7 @@ impl DriveItemWithFuseRepository {
     ) -> Result<Option<DriveItemWithFuse>> {
         let row = sqlx::query(
             r#"
-            SELECT virtual_ino, onedrive_id, name, etag, last_modified, created_date, size, is_folder,
+            SELECT virtual_ino, onedrive_id, name, etag, ctag, last_modified, created_date, size, is_folder,
                    mime_type, download_url, is_deleted, parent_id, parent_path, 
                    parent_ino, virtual_path,  file_source, sync_status
             FROM drive_items_with_fuse WHERE parent_ino = ? AND LOWER(name) = LOWER(?) AND is_deleted = 0
@@ -696,6 +698,7 @@ impl DriveItemWithFuseRepository {
         let onedrive_id: String = row.try_get("onedrive_id")?;
         let name: Option<String> = row.try_get("name")?;
         let etag: Option<String> = row.try_get("etag")?;
+        let ctag: Option<String> = row.try_get("ctag")?;
         let last_modified: Option<String> = row.try_get("last_modified")?;
         let created_date: Option<String> = row.try_get("created_date")?;
         let size: Option<i64> = row.try_get("size")?;
@@ -742,6 +745,7 @@ impl DriveItemWithFuseRepository {
             id: onedrive_id,
             name,
             etag,
+            ctag: ctag.clone(),
             last_modified,
             created_date,
             size: size.map(|s| s as u64),
@@ -771,9 +775,9 @@ impl DriveItemWithFuseRepository {
             virtual_ino: Some(virtual_ino as u64),
             parent_ino: parent_ino.map(|i| i as u64),
             virtual_path,
-
             file_source,
             sync_status,
+            ctag,
         };
 
         Ok(DriveItemWithFuse {
@@ -790,6 +794,20 @@ impl DriveItemWithFuseRepository {
             .await?;
 
         debug!("Cleared all drive items with fuse");
+        Ok(())
+    }
+
+    /// Update ctag for an existing item
+    pub async fn update_ctag(&self, onedrive_id: &str, ctag: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE drive_items_with_fuse SET ctag = ?, updated_at = CURRENT_TIMESTAMP WHERE onedrive_id = ?"
+        )
+        .bind(ctag)
+        .bind(onedrive_id)
+        .execute(&self.pool)
+        .await?;
+        
+        debug!("Updated ctag for item {}: {}", onedrive_id, ctag);
         Ok(())
     }
 }

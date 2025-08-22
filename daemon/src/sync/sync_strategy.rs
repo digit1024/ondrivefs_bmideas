@@ -78,10 +78,69 @@ impl SyncStrategy {
         {
             match (&item.change_operation, &local_change.change_operation) {
                 (ChangeOperation::Update { .. }, ChangeOperation::Update { .. }) => {
-                    conflicts.push(RemoteConflict::ModifyOnModify(
-                        item.drive_item.id.clone(),
-                        local_change.drive_item.id.clone(),
-                    ));
+                    if let Ok(Some(existing_item)) = self.drive_item_with_fuse_repo
+                    .get_drive_item_with_fuse(&item.drive_item.id)
+                    .await
+                {
+                    match &existing_item.fuse_metadata.ctag {
+                        Some(existing_ctag) => {
+                            // We have a stored ctag - check if we need to retrieve remote ctag
+                            if item.drive_item.ctag.is_none() {
+                                // Delta API didn't provide ctag, we need to fetch it
+                                match self.app_state.onedrive_client
+                                    .get_item_by_id(&item.drive_item.id)
+                                    .await
+                                {
+                                    Ok(remote_item) => {
+                                        if let Some(remote_ctag) = &remote_item.ctag {
+                                            if existing_ctag != remote_ctag {
+                                                conflicts.push(RemoteConflict::ContentConflict(
+                                                    existing_ctag.clone(),
+                                                    remote_ctag.clone(),
+                                                ));
+                                            } else {
+                                                // Ctags match - only ETag changed (metadata update)
+                                                debug!("Ctags match, ETag change is metadata-only for item: {}", item.drive_item.id);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        warn!("Failed to retrieve ctag for item {}: {}", item.drive_item.id, e);
+                                        // Fall back to ETag-based conflict detection
+                                        if let Some(existing_etag) = existing_item.etag() {
+                                            if let Some(remote_etag) = &item.drive_item.etag {
+                                                if existing_etag != remote_etag {
+                                                    conflicts.push(RemoteConflict::ModifyOnModify(
+                                                        existing_etag.to_string(),
+                                                        remote_etag.clone(),
+                                                    ));
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Delta API provided ctag, use it directly
+                                if let Some(remote_ctag) = &item.drive_item.ctag {
+                                    if existing_ctag != remote_ctag {
+                                        conflicts.push(RemoteConflict::ContentConflict(
+                                            existing_ctag.clone(),
+                                            remote_ctag.clone(),
+                                        ));
+                                    } else {
+                                        // Ctags match - only ETag changed (metadata update)
+                                        debug!("Ctags match, ETag change is metadata-only for item: {}", item.drive_item.id);
+                                    }
+                                }
+                            }
+                        }
+                        None => {
+                            // No stored ctag - this item hasn't been synced yet
+                            debug!("No stored ctag for item: {}, treating as new", item.drive_item.id);
+                        }
+                    }
+                }
+                    
                 }
                 (ChangeOperation::Create, ChangeOperation::Create) => {
                     conflicts.push(RemoteConflict::CreateOnCreate(item.drive_item.id.clone()));
@@ -109,6 +168,9 @@ impl SyncStrategy {
                 _ => {}
             }
         }
+
+        
+    
 
         Ok(conflicts)
     }
@@ -206,6 +268,14 @@ impl SyncStrategy {
                             }
                         }
                     }
+                }
+                RemoteConflict::MetadataOnlyChange => {
+                    // Auto-resolve metadata-only changes (no content conflict)
+                    info!(
+                        "✅ Auto-resolved metadata-only change for item: {}",
+                        item.drive_item.id
+                    );
+                    resolved_conflicts.push(index);
                 }
                 _ => {
                     // Other conflicts are not auto-resolvable

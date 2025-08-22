@@ -29,6 +29,14 @@ pub enum RemoteConflict {
 
     #[error("Remote item was moved, but the destination parent folder has been deleted locally")]
     MoveToDeletedParent,
+
+    /// NEW: Content conflict detected via ctag mismatch
+    #[error("Content conflict detected: local ctag {0} != remote ctag {1}")]
+    ContentConflict(String, String),
+
+    /// NEW: ETag-only change (metadata update, no content conflict)
+    #[error("ETag change is metadata-only, no content conflict")]
+    MetadataOnlyChange,
 }
 
 /// Represents a conflict detected when a local change (from FUSE)

@@ -121,6 +121,7 @@ impl DatabaseManager {
             id: temporary_id.clone(),
             name: Some(name.to_string()),
             etag: None,
+            ctag: None,
             last_modified: Some(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()),
             created_date: Some(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()),
             size: Some(0),

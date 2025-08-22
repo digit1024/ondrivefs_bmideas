@@ -914,6 +914,7 @@ impl ProcessingItemRepository {
             id: drive_item_id,
             name,
             etag,
+            ctag: None, // Processing items don't have ctag initially
             last_modified,
             created_date,
             size: size.map(|s| s as u64),

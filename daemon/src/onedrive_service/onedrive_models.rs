@@ -44,6 +44,8 @@ pub struct DriveItem {
     pub name: Option<String>,
     #[serde(rename = "eTag")]
     pub etag: Option<String>,
+    #[serde(rename = "cTag")]
+    pub ctag: Option<String>,
     #[serde(rename = "lastModifiedDateTime")]
     pub last_modified: Option<String>,
     #[serde(rename = "createdDateTime")]
@@ -72,6 +74,11 @@ impl DriveItem {
     /// Set the ETag
     pub fn set_etag(&mut self, etag: String) {
         self.etag = Some(etag);
+    }
+
+    /// Set the CTag
+    pub fn set_ctag(&mut self, ctag: String) {
+        self.ctag = Some(ctag);
     }
 
     /// Set the name
@@ -169,6 +176,7 @@ pub struct DownloadResult {
 pub struct UploadResult {
     pub onedrive_id: String,
     pub etag: Option<String>,
+    pub ctag: Option<String>,
     pub web_url: Option<String>,
     pub size: Option<u64>,
 }

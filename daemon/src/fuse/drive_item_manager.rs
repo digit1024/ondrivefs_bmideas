@@ -122,6 +122,7 @@ impl DriveItemManager {
             id: "temp_root".to_string(),
             name: Some("root".to_string()),
             etag: None,
+            ctag: None,
             last_modified: None,
             created_date: None,
             size: Some(0),

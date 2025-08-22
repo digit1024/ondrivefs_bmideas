@@ -412,4 +412,19 @@ impl CachedDriveItemWithFuseRepository {
             .get_files_by_virtual_path_prefix(folder_path)
             .await
     }
+
+    /// Update ctag for an existing item
+    pub async fn update_ctag(&self, onedrive_id: &str, ctag: &str) -> Result<()> {
+        // Update in the inner repository
+        let result = self.inner.update_ctag(onedrive_id, ctag).await?;
+        
+        // Invalidate cache for this item to prevent stale data
+        if let Ok(Some(item)) = self.inner.get_drive_item_with_fuse(onedrive_id).await {
+            if let Some(inode) = item.fuse_metadata.virtual_ino {
+                self.invalidate_cache(inode).await;
+            }
+        }
+        
+        Ok(result)
+    }
 }

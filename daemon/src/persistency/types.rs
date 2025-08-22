@@ -43,9 +43,9 @@ pub struct FuseMetadata {
     pub virtual_ino: Option<u64>,
     pub parent_ino: Option<u64>,
     pub virtual_path: Option<String>,
-
     pub file_source: Option<FileSource>,
     pub sync_status: Option<String>,
+    pub ctag: Option<String>,
 }
 
 /// Complete item with both OneDrive and Fuse data
@@ -67,6 +67,7 @@ impl DriveItemWithFuse {
 
                 file_source: Some(FileSource::Remote),
                 sync_status: None,
+                ctag: None,
             },
         }
     }
@@ -122,6 +123,11 @@ impl DriveItemWithFuse {
         self.fuse_metadata.sync_status = Some(status);
     }
 
+    /// Set ctag
+    pub fn set_ctag(&mut self, ctag: String) {
+        self.fuse_metadata.ctag = Some(ctag);
+    }
+
     /// Get virtual inode
     pub fn virtual_ino(&self) -> Option<u64> {
         self.fuse_metadata.virtual_ino
@@ -145,6 +151,11 @@ impl DriveItemWithFuse {
     /// Get sync status
     pub fn sync_status(&self) -> Option<&str> {
         self.fuse_metadata.sync_status.as_deref()
+    }
+
+    /// Get ctag
+    pub fn ctag(&self) -> Option<&str> {
+        self.fuse_metadata.ctag.as_deref()
     }
 
     /// Get Fuse metadata

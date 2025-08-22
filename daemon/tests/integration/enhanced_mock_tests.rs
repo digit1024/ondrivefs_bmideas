@@ -55,6 +55,7 @@ async fn test_injectable_drive_item() -> Result<()> {
         download_url: Some("https://custom.download.url".to_string()),
         deleted: None,
         parent_reference: None,
+        ctag: None,
     };
     
     mock_client.set_expected_drive_item("test_file_123".to_string(), custom_item.clone());

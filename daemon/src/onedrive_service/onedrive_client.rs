@@ -317,6 +317,7 @@ impl OneDriveClient {
             id: "".to_string(),
             name: None,
             etag: None,
+            ctag: None,
             last_modified: None,
             created_date: None,
             size: Some(total_size),
@@ -350,6 +351,7 @@ impl OneDriveClient {
         let result = UploadResult {
             onedrive_id: drive_item.id.clone(),
             etag: drive_item.etag,
+            ctag: drive_item.ctag,
             web_url: None,
             size: drive_item.size,
         };
@@ -379,6 +381,7 @@ impl OneDriveClient {
         let result = UploadResult {
             onedrive_id: drive_item.id.clone(),
             etag: drive_item.etag,
+            ctag: drive_item.ctag,
             web_url: None,
             size: drive_item.size,
         };
@@ -532,6 +535,7 @@ impl OneDriveClient {
             id: "".to_string(),
             name: None,
             etag: None,
+            ctag: None,
             last_modified: None,
             created_date: None,
             size: None,
@@ -591,6 +595,7 @@ impl OneDriveClient {
         let result = UploadResult {
             onedrive_id: item.id.clone(),
             etag: item.etag,
+            ctag: item.ctag,
             web_url: None,
             size: item.size,
         };
@@ -627,6 +632,7 @@ impl OneDriveClient {
         let result = UploadResult {
             onedrive_id: item.id.clone(),
             etag: item.etag,
+            ctag: item.ctag,
             web_url: None,
             size: item.size,
         };

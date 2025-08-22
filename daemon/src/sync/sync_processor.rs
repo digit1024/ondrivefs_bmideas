@@ -981,6 +981,14 @@ impl SyncProcessor {
                                             .update_processing_item(&updated_processing_item)
                                             .await?;
 
+                                        // NEW: Store ctag from upload result
+                                        if let Some(ctag) = &result.ctag {
+                                            self.drive_item_with_fuse_repo
+                                                .update_ctag(real_onedrive_id, ctag)
+                                                .await?;
+                                            debug!("✅ Stored ctag for uploaded file: {} -> {}", file_name, ctag);
+                                        }
+
                                         debug!("✅ Updated processing item with real OneDrive data for file: {}", file_name);
                                     }
                                     Err(e) => {
@@ -1079,6 +1087,7 @@ impl SyncProcessor {
 
                 fs.drive_item.set_etag(result.etag.clone().unwrap());
                 fs.drive_item.set_size(result.size.clone().unwrap());
+                fs.drive_item.set_ctag(result.ctag.clone().unwrap());
                 self.drive_item_with_fuse_repo
                     .store_drive_item_with_fuse(&fs)
                     .await
@@ -1691,6 +1700,7 @@ impl SyncProcessor {
             id: temporary_id.clone(),
             name: Some(name.to_string()),
             etag: None,
+            ctag: None,
             last_modified: Some(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()),
             created_date: Some(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()),
             size: Some(0),

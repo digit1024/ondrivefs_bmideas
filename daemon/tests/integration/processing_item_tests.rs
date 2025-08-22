@@ -794,6 +794,7 @@ async fn test_mock_api_response_showcase() -> Result<()> {
         etag: Some("showcase_etag_abc123".to_string()),
         web_url: Some("https://showcase.onedrive.com/file123".to_string()),
         size: Some(2048),
+        ctag: None,
     });
     
     // 2. Configure a specific drive item response
@@ -811,6 +812,7 @@ async fn test_mock_api_response_showcase() -> Result<()> {
         download_url: Some("https://showcase.download.url".to_string()),
         deleted: None,
         parent_reference: None,
+        ctag: None,
     };
     mock_client.set_expected_drive_item("showcase_file_id".to_string(), custom_drive_item);
     
@@ -1397,6 +1399,7 @@ async fn test_conflict_resolution_local_update_on_remote_delete_keep_local() -> 
         etag: Some("mock_new_etag_456".to_string()),
         web_url: None,
         size: Some(1024),
+        ctag: None,
     });
 
     // Determine which item to use for conflict resolution (the conflicted one)
@@ -1492,6 +1495,7 @@ async fn test_conflict_resolution_local_move_on_remote_delete_keep_local() -> Re
         etag: Some("mock_moved_etag_abc".to_string()),
         web_url: None,
         size: Some(2048),
+        ctag: None,
     });
 
     // Simulate conflict resolution - Keep Local
@@ -1592,6 +1596,7 @@ async fn test_conflict_resolution_local_create_on_existing_keep_local() -> Resul
         etag: Some("overwrite_etag_xyz".to_string()),
         web_url: None,
         size: Some(512),
+        ctag: None,
     });
 
     // Simulate conflict resolution - Keep Local (should overwrite remote)
@@ -1691,6 +1696,7 @@ async fn test_conflict_resolution_integration_end_to_end() -> Result<()> {
         etag: Some("e2e_resolved_etag".to_string()),
         web_url: None,
         size: Some(4096),
+        ctag: None,
     });
 
     // Configure mock to return the uploaded file details
@@ -1708,6 +1714,7 @@ async fn test_conflict_resolution_integration_end_to_end() -> Result<()> {
         download_url: Some("https://mock.download.url".to_string()),
         deleted: None,
         parent_reference: original_item.drive_item().parent_reference.clone(),
+        ctag: None,
     };
     mock_client.set_expected_drive_item("e2e_resolved_file_id".to_string(), expected_drive_item);
 
