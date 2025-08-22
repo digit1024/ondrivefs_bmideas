@@ -18,20 +18,17 @@ pub struct FileHandleManager {
     files: Mutex<HashMap<u64, Arc<File>>>,
     next_id: Mutex<u64>,
     
-    file_manager: Arc<DefaultFileManager>,
-    app_state: Arc<crate::app_state::AppState>,
+    
 }
 
 impl FileHandleManager {
     pub fn new(
-        file_manager: Arc<DefaultFileManager>,
-        app_state: Arc<crate::app_state::AppState>,
+        
     ) -> Self {
         Self {
             files: Mutex::new(HashMap::new()),
             next_id: Mutex::new(100000),
-            file_manager,
-            app_state,
+            
         }
     }
     

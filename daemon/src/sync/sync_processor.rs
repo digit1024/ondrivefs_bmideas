@@ -34,6 +34,10 @@ impl SyncProcessor {
         debug!("🏠️ Clean up processing items...");
         self.processing_repo.hause_keeping().await?;
 
+        // NEW: Squash local changes before processing
+        debug!("🔀 Squashing local changes...");
+        self.squash_local_changes().await?;
+
         // 1. Process Remote changes first
         debug!("🔄 Processing remote changes...");
         let remote_items = self
@@ -71,6 +75,227 @@ impl SyncProcessor {
         }
 
         Ok(())
+    }
+
+    /// Squash local changes before processing to consolidate multiple changes into final state
+    async fn squash_local_changes(&self) -> Result<()> {
+        // Get unique drive item IDs with local processing items
+        let unique_ids = self.get_unique_drive_items_with_local_changes().await?;
+        
+        for drive_item_id in unique_ids {
+            self.squash_changes_for_drive_item(&drive_item_id).await?;
+        }
+        
+        Ok(())
+    }
+
+    /// Squash changes for a specific drive item by applying rules sequentially
+    async fn squash_changes_for_drive_item(&self, drive_item_id: &str) -> Result<()> {
+        loop {
+            // Get CURRENT processing items from database (already ordered by ID)
+            let items = self.get_local_processing_items_for_drive_item(drive_item_id).await?;
+            
+            if items.is_empty() {
+                break; // No more items to squash
+            }
+            
+            // Apply rules sequentially
+            if self.squash_create_delete_sequence(drive_item_id).await? {
+                continue; // Fetch fresh data and restart loop
+            }
+            
+            if self.squash_create_modify_sequence(drive_item_id).await? {
+                continue; // Fetch fresh data and restart loop
+            }
+            
+            if self.squash_multiple_modifies(drive_item_id).await? {
+                continue; // Fetch fresh data and restart loop
+            }
+            
+            if self.squash_multiple_renames(drive_item_id).await? {
+                continue; // Fetch fresh data and restart loop
+            }
+            
+            if self.squash_multiple_moves(drive_item_id).await? {
+                continue; // Fetch fresh data and restart loop
+            }
+            
+            // If we get here, no changes were made
+            break;
+        }
+        
+        Ok(())
+    }
+
+    /// Get unique drive item IDs that have local processing items
+    async fn get_unique_drive_items_with_local_changes(&self) -> Result<Vec<String>> {
+        let items = self
+            .processing_repo
+            .get_unprocessed_items_by_change_type(&ChangeType::Local)
+            .await?;
+        
+        let mut unique_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for item in items {
+            unique_ids.insert(item.drive_item.id.clone());
+        }
+        
+        Ok(unique_ids.into_iter().collect())
+    }
+
+    /// Get local processing items for a drive item, ordered by ID (chronological order)
+    async fn get_local_processing_items_for_drive_item(&self, drive_item_id: &str) -> Result<Vec<ProcessingItem>> {
+        self.processing_repo
+            .get_processing_items_by_drive_item_id_and_change_type(drive_item_id, &ChangeType::Local)
+            .await
+    }
+
+    /// Rule 1: Create + Delete = Remove all processing items
+    async fn squash_create_delete_sequence(&self, drive_item_id: &str) -> Result<bool> {
+        let items = self.get_local_processing_items_for_drive_item(drive_item_id).await?;
+        
+        let has_create = items.iter().any(|item| item.change_operation == ChangeOperation::Create);
+        let has_delete = items.iter().any(|item| item.change_operation == ChangeOperation::Delete);
+        
+        if has_create && has_delete {
+            // Remove all processing items for this drive item
+            for item in items {
+                if let Some(id) = item.id {
+                    self.processing_repo.delete_processing_item_by_id(id).await?;
+                }
+            }
+            info!("🗑️ Squashed Create+Delete sequence for item: {}", drive_item_id);
+            return Ok(true);
+        }
+        
+        Ok(false)
+    }
+    
+    /// Rule 2: Create + Modifications = Final Create
+    async fn squash_create_modify_sequence(&self, drive_item_id: &str) -> Result<bool> {
+        let items = self.get_local_processing_items_for_drive_item(drive_item_id).await?;
+        
+        let has_create = items.iter().any(|item| item.change_operation == ChangeOperation::Create);
+        let has_modifications = items.iter().any(|item| 
+            matches!(item.change_operation, 
+                ChangeOperation::Update | 
+                ChangeOperation::Rename { .. } | 
+                ChangeOperation::Move { .. }
+            )
+        );
+        
+        if has_create && has_modifications {
+            // Get the last item ID (highest ID) - this will become our Create
+            let last_item_id = items.iter().max_by_key(|item| item.id.unwrap()).unwrap().id.unwrap();
+            
+            // Get the last item to convert to Create operation
+            let last_item = items.iter().find(|item| item.id.unwrap() == last_item_id).unwrap();
+            
+            // Convert last item to Create operation
+            let mut final_create_item = last_item.clone();
+            final_create_item.change_operation = ChangeOperation::Create;
+            
+            // Update the last item to be a Create
+            self.processing_repo.update_processing_item(&final_create_item).await?;
+            
+            // Remove all other processing items
+            for item in items {
+                if let Some(id) = item.id {
+                    if id != last_item_id {
+                        self.processing_repo.delete_processing_item_by_id(id).await?;
+                    }
+                }
+            }
+            
+            info!("🔀 Squashed Create+Modifications: last item {} becomes Create for drive item: {}", 
+                  last_item_id, drive_item_id);
+            return Ok(true);
+        }
+        
+        Ok(false)
+    }
+    
+    /// Rule 3: Multiple Modifies = Keep only last Modify
+    async fn squash_multiple_modifies(&self, drive_item_id: &str) -> Result<bool> {
+        let items = self.get_local_processing_items_for_drive_item(drive_item_id).await?;
+        
+        let modify_items: Vec<_> = items.iter()
+            .filter(|item| item.change_operation == ChangeOperation::Update)
+            .collect();
+        
+        if modify_items.len() > 1 {
+            // Get the last modify ID (highest ID)
+            let last_modify_id = modify_items.iter().max_by_key(|item| item.id.unwrap()).unwrap().id.unwrap();
+            
+            // Remove all other modify items
+            for item in modify_items {
+                if let Some(id) = item.id {
+                    if id != last_modify_id {
+                        self.processing_repo.delete_processing_item_by_id(id).await?;
+                    }
+                }
+            }
+            
+            info!("🔀 Squashed multiple modifies, keeping last for item: {}", drive_item_id);
+            return Ok(true);
+        }
+        
+        Ok(false)
+    }
+    
+    /// Rule 4: Multiple Renames = Keep only last Rename
+    async fn squash_multiple_renames(&self, drive_item_id: &str) -> Result<bool> {
+        let items = self.get_local_processing_items_for_drive_item(drive_item_id).await?;
+        
+        let rename_items: Vec<_> = items.iter()
+            .filter(|item| matches!(item.change_operation, ChangeOperation::Rename { .. }))
+            .collect();
+        
+        if rename_items.len() > 1 {
+            // Get the last rename ID (highest ID)
+            let last_rename_id = rename_items.iter().max_by_key(|item| item.id.unwrap()).unwrap().id.unwrap();
+            
+            // Remove all other rename items
+            for item in rename_items {
+                if let Some(id) = item.id {
+                    if id != last_rename_id {
+                        self.processing_repo.delete_processing_item_by_id(id).await?;
+                    }
+                }
+            }
+            
+            info!("🔀 Squashed multiple renames, keeping last for item: {}", drive_item_id);
+            return Ok(true);
+        }
+        
+        Ok(false)
+    }
+    
+    /// Rule 5: Multiple Moves = Keep only last Move
+    async fn squash_multiple_moves(&self, drive_item_id: &str) -> Result<bool> {
+        let items = self.get_local_processing_items_for_drive_item(drive_item_id).await?;
+        
+        let move_items: Vec<_> = items.iter()
+            .filter(|item| matches!(item.change_operation, ChangeOperation::Move { .. }))
+            .collect();
+        
+        if move_items.len() > 1 {
+            // Get the last move ID (highest ID)
+            let last_move_id = move_items.iter().max_by_key(|item| item.id.unwrap()).unwrap().id.unwrap();
+            
+            // Remove all other move items
+            for item in move_items {
+                if let Some(id) = item.id {
+                    if id != last_move_id {
+                        self.processing_repo.delete_processing_item_by_id(id).await?;
+                    }
+                }
+            }
+            
+            info!("🔀 Squashed multiple moves, keeping last for item: {}", drive_item_id);
+            return Ok(true);
+        }
+        
+        Ok(false)
     }
 
     /// Process a single item with validation and conflict resolution

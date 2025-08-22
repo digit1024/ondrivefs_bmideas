@@ -993,6 +993,38 @@ impl ProcessingItemRepository {
         }
     }
 
+    /// Get all processing items for a drive item and change type (ordered by ID)
+    pub async fn get_processing_items_by_drive_item_id_and_change_type(
+        &self,
+        drive_item_id: &str,
+        change_type: &ChangeType,
+    ) -> Result<Vec<ProcessingItem>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, drive_item_id, name, etag, last_modified, created_date, size, is_folder,
+                   mime_type, download_url, is_deleted, parent_id, parent_path,
+                   status, error_message, last_status_update, retry_count, priority,
+                   change_type, change_operation, conflict_resolution, validation_errors, user_decision
+            FROM processing_items 
+            WHERE drive_item_id = ? AND change_type = ?
+            AND ( COALESCE(parent_path, '') NOT LIKE '/root/.%' OR (COALESCE(name, '') ='root' and COALESCE(parent_path, '') = ''))
+            ORDER BY id ASC
+            "#,
+        )
+        .bind(drive_item_id)
+        .bind(change_type.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut processing_items = Vec::new();
+        for row in rows {
+            let processing_item = self.row_to_processing_item(row).await?;
+            processing_items.push(processing_item);
+        }
+
+        Ok(processing_items)
+    }
+
     /// Get the latest local processing item for a drive item that can be updated (for squashing FUSE writes)
     pub async fn get_latest_updatable_local_processing_item(
         &self,

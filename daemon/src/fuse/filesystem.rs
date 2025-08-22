@@ -44,7 +44,7 @@ impl OneDriveFuse {
                 Arc::new(DriveItemWithFuseRepository::new(pool)),
             ));
 
-        let file_handle_manager = FileHandleManager::new(file_manager.clone(), app_state.clone());
+        let file_handle_manager = FileHandleManager::new();
 
 
 

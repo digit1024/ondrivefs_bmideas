@@ -85,27 +85,7 @@ impl DefaultFileManager {
         Ok(())
     }
 
-    /// Create an empty file in the local directory for a given inode
-    pub async fn create_empty_file(&self, ino: u64) -> Result<()> {
-        let local_path = self.get_local_dir().join(ino.to_string());
-
-        // Ensure parent directory exists
-        if let Some(parent) = local_path.parent() {
-            Self::ensure_directory_exists(parent).await?;
-        }
-
-        // Create empty file
-        fs::write(&local_path, &[])
-            .await
-            .with_context(|| format!("Failed to create empty file: {}", local_path.display()))?;
-
-        debug!(
-            "📄 Created empty file: {} (ino: {})",
-            local_path.display(),
-            ino
-        );
-        Ok(())
-    }
+   
 }
 
 impl FileManager for DefaultFileManager {
