@@ -11,7 +11,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-pub const VIRTUAL_FILE_HANDLE_ID: u64 = 1;
+// VIRTUAL_FILE_HANDLE_ID is hardcoded as 1 in operations
 
 /// File handle manager for the FUSE filesystem
 pub struct FileHandleManager {

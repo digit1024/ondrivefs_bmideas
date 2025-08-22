@@ -3,7 +3,7 @@
 use crate::file_manager::FileManager;
 use crate::fuse::attributes::AttributeManager;
 use crate::fuse::drive_item_manager::DriveItemManager;
-use crate::fuse::file_handles::VIRTUAL_FILE_HANDLE_ID;
+// VIRTUAL_FILE_HANDLE_ID is hardcoded as 1
 use crate::fuse::filesystem::OneDriveFuse;
 use crate::fuse::utils::{sync_await, FUSE_CAP_READDIRPLUS};
 use crate::persistency::types::DriveItemWithFuse;
@@ -63,51 +63,7 @@ impl MetadataToFileAttr for Metadata {
     }
 }
 
-// A struct to hold the parsed open options
-#[derive(Debug, Default)]
-struct OpenFlags {
-    pub read: bool,
-    pub write: bool,
-    pub append: bool,
-    pub create: bool,
-    pub truncate: bool,
-    pub create_new: bool,
-}
-impl OpenFlags {
-    fn from_i32(flags: i32) -> Result<Self, i32> {
-        let mut config = OpenFlags::default();
-        
-        let access_mode = flags & libc::O_ACCMODE;
-        match access_mode {
-            O_RDONLY => config.read = true,
-            O_WRONLY => config.write = true,
-            O_RDWR => {
-                config.read = true;
-                config.write = true;
-            },
-            _ => return Err(libc::EINVAL), // Invalid access mode
-        }
-        
-        // Set other flags
-        config.append = (flags & O_APPEND) != 0;
-        config.create = (flags & O_CREAT) != 0;
-        config.truncate = (flags & O_TRUNC) != 0;
-        config.create_new = (flags & O_EXCL) != 0;
-        
-        Ok(config)
-    }
-    
-fn apply_to<'a>(&self, options: &'a mut OpenOptions) -> &'a mut OpenOptions {
-    options
-        .read(self.read)    
-        .write(self.write)
-        .append(self.append)
-        .create(self.create)
-        .truncate(self.truncate)
-        .create_new(self.create_new)
-}
 
-}
 impl OneDriveFuse{
     pub fn get_item_by_ino(&self, ino: u64) -> DriveItemWithFuse {
         sync_await(self.database().get_item_by_ino(ino)).unwrap().unwrap()
@@ -182,86 +138,79 @@ impl OneDriveFuse{
         flags: i32,  // File status flags from open()
         reply: ReplyWrite,
     ) {
+        // 1. Get file path
         let item = self.get_item_by_ino(ino);
-        let file_path = self.get_local_file_path(item.virtual_ino().unwrap_or(0));
-        if file_path.is_none() {
-            reply.error(libc::ENOENT);
+        let file_path = match self.get_local_file_path(item.virtual_ino().unwrap_or(0)) {
+            Some(path) => path,
+            None => { reply.error(libc::ENOENT); return; }
+        };
+    
+        // 2. Delegate file writing to filesystem helper
+        match self.write_file_with_flags(&file_path, offset, data, flags) {
+            Ok(bytes_written) => {
+                // 3. Update database if needed
+                if let Err(_) = sync_await(self.database().mark_db_item_as_modified(ino)) {
+                    warn!("Failed to update item metadata, but write succeeded");
+                }
+                
+                // Create processing item for file update
+                if let Err(e) = self.create_processing_item(&item, crate::sync::ChangeOperation::Update) {
+                    error!("Failed to create processing item for file update: {}", e);
+                }
+                
+                reply.written(bytes_written);
+            },
+            Err(e) => reply.error(e.raw_os_error().unwrap_or(libc::EIO))
+        }
+    }
+
+    // Helper for direct I/O reads (fh = 0)
+    fn handle_direct_read(&mut self, ino: u64, offset: i64, size: u32, reply: ReplyData) {
+        let item = match sync_await(self.database().get_item_by_ino(ino)) {
+            Ok(Some(item)) => item,
+            Ok(None) => { reply.error(libc::ENOENT); return; }
+            Err(_) => { reply.error(libc::EIO); return; }
+        };
+        
+        if item.is_folder() {
+            reply.error(libc::EIO);
             return;
         }
-        let file_path = file_path.unwrap();
-    
-        // 2. Parse the flags to understand how the file was opened
-        let open_flags = match OpenFlags::from_i32(flags) {
-            Ok(flags) => flags,
-            Err(e) => {
-                reply.error(e);
-                return;
-            }
+        
+        let file_path = match self.get_local_file_path(item.virtual_ino().unwrap_or(0)) {
+            Some(path) => path,
+            None => { reply.error(libc::ENOENT); return; }
         };
-    
-        // 3. Handle O_APPEND mode - ignore provided offset and seek to end
-        let actual_offset = if open_flags.append {
-            // In append mode, we need to get the current file size
-            match std::fs::metadata(&file_path) {
-                Ok(metadata) => metadata.len() as i64,
-                Err(e) => {
-                    reply.error(e.raw_os_error().unwrap_or(libc::EIO));
-                    return;
-                }
-            }
-        } else {
-            offset // Use the provided offset
-        };
-    
-        // 4. Configure open options based on the flags
-        let mut open_options = OpenOptions::new();
-        open_flags.apply_to(&mut open_options);
-    
-        // 5. For direct writes, we need special handling:
-        // - If writing anywhere but the end, we need read access to preserve existing data
-        // - If it's a new file (offset == 0), we can write directly
-        if actual_offset > 0 && !open_flags.append {
-            // We're writing in the middle of the file, need read access to preserve data
-            open_options.read(true);
+        
+        match self.read_file_data(&file_path, offset as u64, size as usize) {
+            Ok(data) => reply.data(&data),
+            Err(e) => reply.error(e.raw_os_error().unwrap_or(libc::EIO))
         }
-    
-        // 6. Open the file and perform the write
-        match open_options.open(&file_path) {
-            Ok(mut backend_file) => {
-                // Seek to the correct position
-                match backend_file.seek(SeekFrom::Start(actual_offset as u64)) {
-                    Ok(_) => {
-                        // Perform the actual write
-                        match backend_file.write_all(data) {
-                            Ok(_) => {
-                                // Optional: Flush to ensure data is on disk
-                                if open_flags.write && (flags & libc::O_SYNC) != 0 {
-                                    if let Err(e) = backend_file.sync_all() {
-                                        eprintln!("Warning: sync failed after O_SYNC write: {}", e);
-                                    }
-                                }
-                                
-                                
-                                
-                                reply.written(data.len() as u32);
-                            },
-                            Err(e) => {
-                                let err_code = e.raw_os_error().unwrap_or(libc::EIO);
-                                reply.error(err_code);
-                            }
-                        }
-                    },
-                    Err(e) => {
-                        let err_code = e.raw_os_error().unwrap_or(libc::EIO);
-                        reply.error(err_code);
-                    }
-                }
-                // File is automatically closed here when 'backend_file' goes out of scope
-            },
-            Err(e) => {
-                let err_code = e.raw_os_error().unwrap_or(libc::EIO);
-                reply.error(err_code);
-            }
+    }
+
+    // Helper for virtual file reads (fh = 1)
+    fn handle_virtual_read(&mut self, ino: u64, offset: i64, size: u32, reply: ReplyData) {
+        let item = match sync_await(self.database().get_item_by_ino(ino)) {
+            Ok(Some(item)) => item,
+            Ok(None) => { reply.error(libc::ENOENT); return; }
+            Err(_) => { reply.error(libc::EIO); return; }
+        };
+        
+        if item.is_folder() {
+            reply.error(libc::EIO);
+            return;
+        }
+        
+        let content = self.generate_placeholder_content(&item);
+        let content_len = content.len() as i64;
+        let start = offset.min(content_len);
+        let end = (offset + size as i64).min(content_len);
+
+        if start < end {
+            let slice = &content[start as usize..end as usize];
+            reply.data(slice);
+        } else {
+            reply.data(&[]); // Empty response for out-of-bounds reads
         }
     }
 }
@@ -280,9 +229,16 @@ impl fuser::Filesystem for OneDriveFuse {
             return;
         }
         let file_path = file_path.unwrap();
-        let open_flags = OpenFlags::from_i32(flags).unwrap();
+        
+        // Use simple open options for now - we can enhance this later
         let mut open_options = OpenOptions::new();
-        open_flags.apply_to(&mut open_options);
+        open_options.read(true);
+        if (flags & libc::O_WRONLY) != 0 || (flags & libc::O_RDWR) != 0 {
+            open_options.write(true);
+        }
+        if (flags & libc::O_APPEND) != 0 {
+            open_options.append(true);
+        }
         
         match open_options.open(&file_path) {
             Ok(backend_file) => {
@@ -537,52 +493,14 @@ impl fuser::Filesystem for OneDriveFuse {
             ino, fh, offset, size
         );
 
-        if fh == 0 {
-            // handle directIO
-        let item = sync_await(self.database().get_item_by_ino(ino)).unwrap().unwrap();
-        if item.is_folder() {
-            reply.error(libc::EIO);
-            return;
+        match fh {
+            0 => self.handle_direct_read(ino, offset, size, reply),
+            1 => self.handle_virtual_read(ino, offset, size, reply), // VIRTUAL_FILE_HANDLE_ID
+            _ => self.read_with_handle(fh, offset, size, reply),
         }
-        let file_path = self.get_local_file_path(item.virtual_ino().unwrap_or(0));
-        if let Some(file_path) = file_path {
-            let mut file = OpenOptions::new().read(true).open(&file_path).unwrap();
-            file.seek(SeekFrom::Start(offset as u64)).unwrap();
-            let mut buffer = vec![0; size as usize];
-            file.read_exact(&mut buffer).unwrap();
-            reply.data(&buffer);
-        }
-            return;
-        }
-
-        // Check if this is a virtual file handle
-        if fh == 1 {
-            // VIRTUAL_FILE_HANDLE_ID
-            if let Ok(Some(item)) = sync_await(self.database().get_item_by_ino(ino)) {
-                if !item.is_folder() {
-                    let content = self.generate_placeholder_content(&item);
-
-                    // Handle offset and size properly
-                    let content_len = content.len() as i64;
-                    let start = offset.min(content_len);
-                    let end = (offset + size as i64).min(content_len);
-
-                    if start < end {
-                        let slice = &content[start as usize..end as usize];
-                        reply.data(slice);
-                        return;
-                    } else {
-                        reply.data(&[]); // Empty response for out-of-bounds reads
-                    }
-                    return;
-                }
-            }
-            // If it's a folder or item not found, fall through to normal error handling
-        }
-        self.read_with_handle(fh, offset, size, reply);
-        
-        
     }
+
+
 
     fn write(
         &mut self,
@@ -609,12 +527,18 @@ impl fuser::Filesystem for OneDriveFuse {
         }
         if fh != 0 {
             self.write_with_handle(fh, offset, data, reply);
+            // Create processing item for file update after successful write
+            if let Ok(Some(item)) = sync_await(self.database().get_item_by_ino(ino)) {
+                if let Err(e) = self.create_processing_item(&item, crate::sync::ChangeOperation::Update) {
+                    error!("Failed to create processing item for file update: {}", e);
+                }
+            }
         } else {
             self.write_direct(ino, offset, data, flags, reply) 
         }
     }
 
-    fn create(
+        fn create(
         &mut self,
         _req: &fuser::Request,
         parent: u64,
@@ -626,74 +550,52 @@ impl fuser::Filesystem for OneDriveFuse {
     ) {
         let name_str = name.to_string_lossy();
         debug!("CREATE: parent={}, name={}", parent, name_str);
-        let parent_item = self.get_item_by_ino(parent);
-        let existing_drive_item = sync_await( self.drive_item_with_fuse_repo().get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(parent, &name_str)).unwrap();
-        let open_flags =  OpenFlags::from_i32(flags).unwrap();
-        if open_flags.create_new && existing_drive_item.is_some() {
+        
+        // 1. Check for O_EXCL flag and existing file
+        let create_new = (flags & libc::O_EXCL) != 0;
+        if create_new && self.file_already_exists(parent, &name_str) {
             reply.error(libc::EEXIST);
             return;
         }
-        let mut open_options = OpenOptions::new();
-        open_flags.apply_to(&mut open_options);
-        if !open_flags.write && !open_flags.append {
-            // If neither write nor append specified, default to write for creation
-            open_options.write(true);
-        }
-        //We need to store Item now to obtain ID to know the path
-        let new_item = sync_await(
+        
+        // 2. Create file in database first to get inode
+        let new_item = match sync_await(
             self.database()
                 .apply_local_change_to_db_repository("create", parent, &name_str, false),
-        ).unwrap();
+        ) {
+            Ok(ino) => ino,
+            Err(e) => {
+                error!("Failed to create item in database: {}", e);
+                reply.error(libc::EIO);
+                return;
+            }
+        };
+        
+        // 3. Create physical file using helper
         let new_file_path = self.file_manager().get_local_dir().join(new_item.to_string());
-
-        match open_options.open(&new_file_path) {
-            Ok(mut backend_file) => {
+        match self.create_physical_file(&new_file_path, flags) {
+            Ok((backend_file, mut attr)) => {
+                // Update attr with correct inode
+                attr.ino = new_item;
                 
-    
-                // 9. Handle O_TRUNC - if file existed and we're truncating
-                if open_flags.truncate && new_file_path.exists() {
-                    if let Err(e) = backend_file.set_len(0) {
-                        eprintln!("Warning: failed to truncate file: {}", e);
-                    }
-                }
-    
-                // 10. For O_APPEND, seek to end
-                if open_flags.append {
-                    if let Ok(metadata) = std::fs::metadata(&new_file_path) {
-                        let seek_pos = metadata.len();
-                        if let Err(e) = backend_file.seek(SeekFrom::Start(seek_pos)) {
-                            eprintln!("Warning: failed to seek to end: {}", e);
-                        }
-                    }
-                }
-    
-                
-    
-                let metadata = match std::fs::metadata(&new_file_path) {
-                    Ok(meta) => meta,
-                    Err(e) => {
-                        reply.error(e.raw_os_error().unwrap_or(libc::EIO));
-                        return;
-                    }
-                };
-    
-                let attr = metadata.try_to_file_attr(new_item).unwrap();
-    
-            
-    
-                //  Create file handle
-                
+                // Create file handle
                 let fh = self.file_handles().register_file(backend_file);
-    
-                //  Reply with created file info
+                
+                // Reply with created file info
                 reply.created(&Duration::from_secs(1), &attr, 0, fh, 0);
+                
+                // Create processing item for new file
+                if let Ok(Some(item)) = sync_await(self.database().get_item_by_ino(new_item)) {
+                    if let Err(e) = self.create_processing_item(&item, crate::sync::ChangeOperation::Create) {
+                        error!("Failed to create processing item for new file: {}", e);
+                    }
+                }
             },
             Err(e) => {
+                error!("Failed to create physical file: {}", e);
                 reply.error(e.raw_os_error().unwrap_or(libc::EIO));
             }
         }
-
-    
     }
 
     fn mkdir(
@@ -771,6 +673,12 @@ impl fuser::Filesystem for OneDriveFuse {
             }
 
             debug!("📂 Unlinked file: {} ({})", name_str, onedrive_id);
+            
+            // Create processing item for file deletion
+            if let Err(e) = self.create_processing_item(&item, crate::sync::ChangeOperation::Delete) {
+                error!("Failed to create processing item for file deletion: {}", e);
+            }
+            
             reply.ok();
         } else {
             reply.error(libc::ENOENT);
@@ -824,6 +732,12 @@ impl fuser::Filesystem for OneDriveFuse {
             }
 
             debug!("📂 Removed directory: {} ({})", name_str, onedrive_id);
+            
+            // Create processing item for directory deletion
+            if let Err(e) = self.create_processing_item(&item, crate::sync::ChangeOperation::Delete) {
+                error!("Failed to create processing item for directory deletion: {}", e);
+            }
+            
             reply.ok();
         } else {
             reply.error(libc::ENOENT);
@@ -846,99 +760,88 @@ impl fuser::Filesystem for OneDriveFuse {
             "RENAME: parent={}, name={} -> newparent={}, newname={}",
             parent, name_str, newparent, newname_str
         );
-        let parent_item = self.get_item_by_ino(parent);
-        let original_item = sync_await( self.drive_item_with_fuse_repo().get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(parent, &name_str)).unwrap().unwrap();
-        let existing_drive_item = sync_await( self.drive_item_with_fuse_repo().get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(newparent, &newname_str)).unwrap();
-        if existing_drive_item.is_some() {
-            //its a replace! Special CASE!
-                
-        if flags & libc::RENAME_NOREPLACE != 0  {
-            reply.error(libc::EEXIST);
-            return;
-        }
 
-           let local_path = self.file_manager().get_local_dir();
-           let local_path_from = local_path.join(original_item.virtual_ino().unwrap().to_string());
-           let local_path_to = local_path.join(existing_drive_item.unwrap().virtual_ino().unwrap().to_string());
-           if !local_path_from.exists() || !local_path_to.exists() {
-            reply.error(libc::EEXIST);
-            return;
-           }
-           std::fs::rename(&local_path_from, &local_path_to).unwrap();
-           let _result = sync_await(self.drive_item_with_fuse_repo().delete_drive_item_with_fuse(original_item.drive_item().id.clone().as_str()));
-           let delete_processing_item = crate::persistency::processing_item_repository::ProcessingItem::new_local(
-            original_item.drive_item().clone(),  // Your DriveItem instance
-            crate::sync::ChangeOperation::Delete
-           );
-           let processing_repo = self.app_state()
-           .persistency()
-           .processing_item_repository();
-           let _result = sync_await(processing_repo.store_processing_item(&delete_processing_item));
-           
-           reply.ok();
-           
-            
-           
-            return;
-        }
-        
-        let new_parent = self.get_item_by_ino(newparent);
-
-        // Get the item to be renamed (case-insensitive lookup)
-        if let Ok(Some(item)) = sync_await(
+        // Get the item to be renamed
+        let original_item = match sync_await(
             self.drive_item_with_fuse_repo()
-                .get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(
-                    parent, &name_str,
-                ),
+                .get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(parent, &name_str)
         ) {
-            let mut updated_item = item.clone();
-
-            // Update the name
-            updated_item
-                .drive_item_mut()
-                .set_name(newname_str.to_string());
-
-            // Update parent reference if moving to different parent
-            if parent != newparent {
-                if let Ok(Some(new_parent_item)) =
-                    sync_await(self.database().get_item_by_ino(newparent))
-                {
-                    let new_parent_ref =
-                        crate::onedrive_service::onedrive_models::ParentReference {
-                            id: new_parent_item.id().to_string(),
-                            path: new_parent_item
-                                .virtual_path()
-                                .map(|p| format!("/drive/root:{}", p)),
-                        };
-                    updated_item
-                        .drive_item_mut()
-                        .set_parent_reference(new_parent_ref);
-                    updated_item.set_parent_ino(newparent);
-                }
+            Ok(Some(item)) => item,
+            Ok(None) => {
+                reply.error(libc::ENOENT);
+                return;
             }
-
-            // Mark as local change
-            updated_item.set_file_source(crate::persistency::types::FileSource::Local);
-
-            // Store the updated item
-            if let Err(e) = sync_await(
-                self.drive_item_with_fuse_repo()
-                    .store_drive_item_with_fuse(&updated_item),
-            ) {
-                error!("Failed to rename item: {}", e);
+            Err(e) => {
+                error!("Failed to get original item: {}", e);
                 reply.error(libc::EIO);
                 return;
             }
+        };
 
-            debug!(
-                "📂 Renamed: {} -> {} ({})",
-                name_str,
-                newname_str,
-                item.id()
-            );
-            reply.ok();
-        } else {
-            reply.error(libc::ENOENT);
+        // Check if target already exists
+        let existing_target = sync_await(
+            self.drive_item_with_fuse_repo()
+                .get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(newparent, &newname_str)
+        ).unwrap_or(None);
+
+        // Handle replace operation
+        if let Some(target_item) = existing_target {
+            // Check RENAME_NOREPLACE flag
+            if flags & libc::RENAME_NOREPLACE != 0 {
+                reply.error(libc::EEXIST);
+                return;
+            }
+
+            // Delegate to helper
+            match self.handle_replace_operation(&original_item, &target_item) {
+                Ok(_) => {
+                    debug!("📂 Replaced: {} -> {}", name_str, newname_str);
+                    
+                    // Create processing items for replace operation:
+                    // 1. DELETE for original item
+                    if let Err(e) = self.create_processing_item(&original_item, crate::sync::ChangeOperation::Delete) {
+                        error!("Failed to create DELETE processing item for replace: {}", e);
+                    }
+                    
+                    // 2. UPDATE for target item (because its content changed - file moved there)
+                    if let Err(e) = self.create_processing_item(&target_item, crate::sync::ChangeOperation::Update) {
+                        error!("Failed to create UPDATE processing item for replace target: {}", e);
+                    }
+                    
+                    reply.ok();
+                }
+                Err(e) => {
+                    error!("Failed to handle replace operation: {}", e);
+                    reply.error(e.raw_os_error().unwrap_or(libc::EIO));
+                }
+            }
+            return;
+        }
+
+        // Normal rename operation - delegate to helper
+        match self.rename_item_in_db(&original_item, newparent, &newname_str) {
+            Ok(_) => {
+                debug!("📂 Renamed: {} -> {} ({})", name_str, newname_str, original_item.id());
+                
+                // Create processing item based on operation type:
+                if parent != newparent {
+                    // Different parent = Move operation
+                    if let Err(e) = self.create_processing_item(&original_item, crate::sync::ChangeOperation::Move) {
+                        error!("Failed to create MOVE processing item: {}", e);
+                    }
+                } else {
+                    // Same parent, different name = Rename operation
+                    if let Err(e) = self.create_processing_item(&original_item, crate::sync::ChangeOperation::Rename) {
+                        error!("Failed to create RENAME processing item: {}", e);
+                    }
+                }
+                
+                reply.ok();
+            }
+            Err(e) => {
+                error!("Failed to rename item: {}", e);
+                reply.error(libc::EIO);
+            }
         }
     }
 
@@ -998,6 +901,13 @@ impl fuser::Filesystem for OneDriveFuse {
                 &Duration::from_secs(1),
                 &self.get_attributes_from_local_file_or_from_db(&item)
             );
+            
+            // Create processing item for attribute update if any attributes changed
+            if size.is_some() || mtime.is_some() {
+                if let Err(e) = self.create_processing_item(&item, crate::sync::ChangeOperation::Update) {
+                    error!("Failed to create processing item for attribute update: {}", e);
+                }
+            }
         } else {
             reply.error(libc::ENOENT);
         }
