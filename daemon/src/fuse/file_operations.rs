@@ -19,6 +19,9 @@ impl FileOperationsManager {
     pub fn file_exists_locally(&self, ino: u64) -> Option<PathBuf> {
         self.file_manager.get_local_path_if_file_exists(ino)
     }
+    pub fn is_synchronized(&self, item: &DriveItemWithFuse) -> bool {
+        return item.drive_item().id.starts_with("local_");
+    }
 
     /// Generate placeholder content for files that don't exist locally
     pub fn generate_placeholder_content(&self, item: &DriveItemWithFuse) -> Vec<u8> {

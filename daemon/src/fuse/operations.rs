@@ -1,49 +1,300 @@
 //! FUSE filesystem operations implementation
 
+use crate::file_manager::FileManager;
 use crate::fuse::attributes::AttributeManager;
 use crate::fuse::drive_item_manager::DriveItemManager;
 use crate::fuse::file_handles::VIRTUAL_FILE_HANDLE_ID;
 use crate::fuse::filesystem::OneDriveFuse;
 use crate::fuse::utils::{sync_await, FUSE_CAP_READDIRPLUS};
+use crate::persistency::types::DriveItemWithFuse;
 use anyhow::Context;
 use fuser::{
-    FileAttr, FileType, KernelConfig, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory,
-    ReplyDirectoryPlus, ReplyEntry, ReplyStatfs, ReplyWrite,
+    FileAttr, FileType, KernelConfig, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyDirectoryPlus, ReplyEntry, ReplyStatfs, ReplyWrite, Request, TimeOrNow
 };
 use libc::c_int;
 use log::{debug, error, info, warn};
 use std::ffi::OsStr;
-use std::time::{Duration, SystemTime};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::os::unix::fs::MetadataExt;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::fs::{Metadata, OpenOptions};
+use libc::{O_RDONLY, O_WRONLY, O_RDWR, O_APPEND, O_CREAT, O_TRUNC, O_EXCL};
 
-impl fuser::Filesystem for OneDriveFuse {
-    fn open(&mut self, _req: &fuser::Request, ino: u64, _flags: i32, reply: fuser::ReplyOpen) {
-        debug!("OPEN: ino={}", ino);
 
-        if let Ok(Some(item)) = sync_await(self.database().get_item_by_ino(ino)) {
-            if item.is_folder() {
-                reply.opened(0, 0); // Directory - no file handle needed
+#[derive(Debug)]
+pub enum AttrConversionError {
+    MissingMetadata,
+    InvalidData,
+}
+
+pub trait MetadataToFileAttr {
+    fn try_to_file_attr(&self, ino: u64) -> Result<FileAttr, AttrConversionError>;
+}
+
+impl MetadataToFileAttr for Metadata {
+    fn try_to_file_attr(&self, ino: u64) -> Result<FileAttr, AttrConversionError> {
+        let kind = if self.is_dir() {
+            FileType::Directory
+        } else if self.is_file() {
+            FileType::RegularFile
+        } else if self.is_symlink() {
+            FileType::Symlink
+        } else {
+            return Err(AttrConversionError::InvalidData);
+        };
+
+        Ok(FileAttr {
+            ino,
+            size: self.size(),
+            blocks: (self.size() + 511) / 512,
+            atime: self.accessed().map_err(|_| AttrConversionError::MissingMetadata)?,
+            mtime: self.modified().map_err(|_| AttrConversionError::MissingMetadata)?,
+            ctime: SystemTime::now(), // Often use current time as fallback
+            crtime: self.created().unwrap_or(UNIX_EPOCH),
+            kind,
+            perm: (self.mode() & 0o7777) as u16, // Mask to valid permission bits
+            nlink: self.nlink() as u32,
+            uid: self.uid(),
+            gid: self.gid(),
+            rdev: self.rdev() as u32,
+            blksize: self.blksize() as u32,
+            flags: 0,
+        })
+    }
+}
+
+// A struct to hold the parsed open options
+#[derive(Debug, Default)]
+struct OpenFlags {
+    pub read: bool,
+    pub write: bool,
+    pub append: bool,
+    pub create: bool,
+    pub truncate: bool,
+    pub create_new: bool,
+}
+impl OpenFlags {
+    fn from_i32(flags: i32) -> Result<Self, i32> {
+        let mut config = OpenFlags::default();
+        
+        let access_mode = flags & libc::O_ACCMODE;
+        match access_mode {
+            O_RDONLY => config.read = true,
+            O_WRONLY => config.write = true,
+            O_RDWR => {
+                config.read = true;
+                config.write = true;
+            },
+            _ => return Err(libc::EINVAL), // Invalid access mode
+        }
+        
+        // Set other flags
+        config.append = (flags & O_APPEND) != 0;
+        config.create = (flags & O_CREAT) != 0;
+        config.truncate = (flags & O_TRUNC) != 0;
+        config.create_new = (flags & O_EXCL) != 0;
+        
+        Ok(config)
+    }
+    
+fn apply_to<'a>(&self, options: &'a mut OpenOptions) -> &'a mut OpenOptions {
+    options
+        .read(self.read)    
+        .write(self.write)
+        .append(self.append)
+        .create(self.create)
+        .truncate(self.truncate)
+        .create_new(self.create_new)
+}
+
+}
+impl OneDriveFuse{
+    pub fn get_item_by_ino(&self, ino: u64) -> DriveItemWithFuse {
+        sync_await(self.database().get_item_by_ino(ino)).unwrap().unwrap()
+    }
+     fn read_with_handle(
+        &mut self,
+        fh: u64,
+        offset: i64,
+        size: u32,
+        reply: ReplyData,
+    ) {
+        let file_ptr = fh as usize as *mut std::fs::File;
+        
+        let backend_file = unsafe { &mut *file_ptr };
+    
+        match backend_file.seek(SeekFrom::Start(offset as u64)) {
+            Ok(_) => {
+                let mut buffer = vec![0; size as usize];
+                match backend_file.read(&mut buffer) {
+                    Ok(bytes_read) => {
+                        reply.data(&buffer[..bytes_read]);
+                    },
+                    Err(e) => {
+                        let err_code = e.raw_os_error().unwrap_or(libc::EIO);
+                        reply.error(err_code);
+                    }
+                }
+            },
+            Err(e) => {
+                let err_code = e.raw_os_error().unwrap_or(libc::EIO);
+                reply.error(err_code);
+            }
+        }
+    }
+    fn write_with_handle(
+        &mut self,
+        fh: u64,
+        offset: i64,
+        data: &[u8],
+        reply: ReplyWrite,
+    ) {
+        let file_ptr = fh as usize as *mut std::fs::File;
+        let backend_file = unsafe { &mut *file_ptr };
+        
+    
+        match backend_file.seek(SeekFrom::Start(offset as u64)) {
+            Ok(_) => {
+                match backend_file.write_all(data) {
+                    Ok(_) => {
+                        // Success! Return the number of bytes written
+                        reply.written(data.len() as u32);
+                    },
+                    Err(e) => {
+                        // Write failed
+                        let err_code = e.raw_os_error().unwrap_or(libc::EIO);
+                        reply.error(err_code);
+                    }
+                }
+            },
+            Err(e) => {
+                // Seek failed
+                let err_code = e.raw_os_error().unwrap_or(libc::EIO);
+                reply.error(err_code);
+            }
+        }
+    }
+    // Helper method for the direct access write path
+    fn write_direct(
+        &mut self,
+        ino: u64,
+        offset: i64,
+        data: &[u8],
+        flags: i32,  // File status flags from open()
+        reply: ReplyWrite,
+    ) {
+        let item = self.get_item_by_ino(ino);
+        let file_path = self.file_operations().file_exists_locally(item.virtual_ino().unwrap_or(0));
+        if file_path.is_none() {
+            reply.error(libc::ENOENT);
+            return;
+        }
+        let file_path = file_path.unwrap();
+    
+        // 2. Parse the flags to understand how the file was opened
+        let open_flags = match OpenFlags::from_i32(flags) {
+            Ok(flags) => flags,
+            Err(e) => {
+                reply.error(e);
                 return;
             }
-
-            // For files, try to open from local folder
-            match self.file_handles().get_or_create_file_handle(ino) {
-                Ok(handle_id) => {
-                    debug!(
-                        "📂 Opened file handle {} for inode {} ({})",
-                        handle_id,
-                        ino,
-                        item.name().unwrap_or("unknown")
-                    );
-                    reply.opened(handle_id, 0);
-                }
+        };
+    
+        // 3. Handle O_APPEND mode - ignore provided offset and seek to end
+        let actual_offset = if open_flags.append {
+            // In append mode, we need to get the current file size
+            match std::fs::metadata(&file_path) {
+                Ok(metadata) => metadata.len() as i64,
                 Err(e) => {
-                    debug!("📂 File not found in local folder for inode {}: {}", ino, e);
-                    // Return virtual file handle for .onedrivedownload files
-                    reply.opened(1, 0); // VIRTUAL_FILE_HANDLE_ID
+                    reply.error(e.raw_os_error().unwrap_or(libc::EIO));
+                    return;
                 }
             }
         } else {
+            offset // Use the provided offset
+        };
+    
+        // 4. Configure open options based on the flags
+        let mut open_options = OpenOptions::new();
+        open_flags.apply_to(&mut open_options);
+    
+        // 5. For direct writes, we need special handling:
+        // - If writing anywhere but the end, we need read access to preserve existing data
+        // - If it's a new file (offset == 0), we can write directly
+        if actual_offset > 0 && !open_flags.append {
+            // We're writing in the middle of the file, need read access to preserve data
+            open_options.read(true);
+        }
+    
+        // 6. Open the file and perform the write
+        match open_options.open(&file_path) {
+            Ok(mut backend_file) => {
+                // Seek to the correct position
+                match backend_file.seek(SeekFrom::Start(actual_offset as u64)) {
+                    Ok(_) => {
+                        // Perform the actual write
+                        match backend_file.write_all(data) {
+                            Ok(_) => {
+                                // Optional: Flush to ensure data is on disk
+                                if open_flags.write && (flags & libc::O_SYNC) != 0 {
+                                    if let Err(e) = backend_file.sync_all() {
+                                        eprintln!("Warning: sync failed after O_SYNC write: {}", e);
+                                    }
+                                }
+                                
+                                
+                                
+                                reply.written(data.len() as u32);
+                            },
+                            Err(e) => {
+                                let err_code = e.raw_os_error().unwrap_or(libc::EIO);
+                                reply.error(err_code);
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        let err_code = e.raw_os_error().unwrap_or(libc::EIO);
+                        reply.error(err_code);
+                    }
+                }
+                // File is automatically closed here when 'backend_file' goes out of scope
+            },
+            Err(e) => {
+                let err_code = e.raw_os_error().unwrap_or(libc::EIO);
+                reply.error(err_code);
+            }
+        }
+    }
+}
+
+impl fuser::Filesystem for OneDriveFuse {
+    fn open(&mut self, _req: &fuser::Request, ino: u64, flags: i32, reply: fuser::ReplyOpen) {
+        debug!("OPEN: ino={}", ino);
+        let item = self.get_item_by_ino(ino);
+        let file_path = self.file_operations().file_exists_locally(item.virtual_ino().unwrap_or(0));
+        if file_path.is_none() {
             reply.error(libc::ENOENT);
+            return;
+        }
+        let file_path = file_path.unwrap();
+        let open_flags = OpenFlags::from_i32(flags).unwrap();
+        let mut open_options = OpenOptions::new();
+        open_flags.apply_to(&mut open_options);
+        
+        match open_options.open(&file_path) {
+            Ok(backend_file) => {
+                // SUCCESS: We can create a stateful session.
+                let boxed_file = Box::new(backend_file);
+                let fh: u64 = Box::into_raw(boxed_file) as usize as u64;
+                debug!("OPENED: fh={}", fh);
+                reply.opened(fh, 0); // Return the valid FH
+            },
+            Err(e) => {
+                // FAILURE: We cannot open the file (e.g., permission denied).
+                // We must signal this. The kernel will then likely use
+                // the direct path (fh=0) for subsequent operations, which will also fail.
+                reply.error(e.raw_os_error().unwrap_or(libc::EIO));
+            }
         }
     }
 
@@ -135,29 +386,16 @@ impl fuser::Filesystem for OneDriveFuse {
         };
 
         // Then close the file handle
-        let close_result = self.file_handles().close_file_handle(fh);
-
-        // Determine the final response
-        match (update_result, close_result) {
-            (Ok(_), Ok(_)) => {
-                debug!("📂 Released file handle {}", fh);
-                reply.ok();
-            }
-            (Ok(_), Err(e)) => {
-                error!("Failed to close file handle {}: {}", fh, e);
-                reply.error(libc::EIO);
-            }
-            (Err(_), Ok(_)) => {
-                // Update failed but close succeeded
-                reply.error(libc::EIO);
-            }
-            (Err(_), Err(e)) => {
-                // Both update and close failed
-                error!("Failed to close file handle {}: {}", fh, e);
-                reply.error(libc::EIO);
-            }
-        }
+        let file_ptr = fh as usize as *mut std::fs::File;
+        let _boxed_file: Box<std::fs::File> = unsafe { Box::from_raw(file_ptr) };
+    
+        // When _boxed_file goes out of scope here, the File is closed!
+        
+        reply.ok();
+ 
     }
+
+
 
     fn lookup(&mut self, _req: &fuser::Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         let name_str = name.to_string_lossy();
@@ -178,11 +416,15 @@ impl fuser::Filesystem for OneDriveFuse {
                     lookup_name,
                 ),
         ) {
-            reply.entry(
-                &Duration::from_secs(3),
-                &AttributeManager::item_to_file_attr(&item),
-                0,
-            );
+            let attr = self.get_attributes_from_local_file_or_from_db(&item);
+            
+                reply.entry(
+                    &Duration::from_secs(3),
+                    &AttributeManager::item_to_file_attr(&item),
+                    0,
+                );
+            
+            
         } else {
             reply.error(libc::ENOENT);
         }
@@ -194,7 +436,7 @@ impl fuser::Filesystem for OneDriveFuse {
         if let Ok(Some(item)) = sync_await(self.database().get_item_by_ino(ino)) {
             reply.attr(
                 &Duration::from_secs(3),
-                &AttributeManager::item_to_file_attr(&item),
+                &self.get_attributes_from_local_file_or_from_db(&item),
             );
         } else {
             reply.error(libc::ENOENT);
@@ -297,8 +539,20 @@ impl fuser::Filesystem for OneDriveFuse {
         );
 
         if fh == 0 {
-            // Directory read - return empty data
-            reply.data(&[]);
+            // handle directIO
+        let item = sync_await(self.database().get_item_by_ino(ino)).unwrap().unwrap();
+        if item.is_folder() {
+            reply.error(libc::EIO);
+            return;
+        }
+        let file_path = self.file_operations().file_exists_locally(item.virtual_ino().unwrap_or(0));
+        if let Some(file_path) = file_path {
+            let mut file = OpenOptions::new().read(true).open(&file_path).unwrap();
+            file.seek(SeekFrom::Start(offset as u64)).unwrap();
+            let mut buffer = vec![0; size as usize];
+            file.read_exact(&mut buffer).unwrap();
+            reply.data(&buffer);
+        }
             return;
         }
 
@@ -317,6 +571,7 @@ impl fuser::Filesystem for OneDriveFuse {
                     if start < end {
                         let slice = &content[start as usize..end as usize];
                         reply.data(slice);
+                        return;
                     } else {
                         reply.data(&[]); // Empty response for out-of-bounds reads
                     }
@@ -325,19 +580,9 @@ impl fuser::Filesystem for OneDriveFuse {
             }
             // If it's a folder or item not found, fall through to normal error handling
         }
-
-        match self
-            .file_handles()
-            .read_from_handle(fh, offset as u64, size)
-        {
-            Ok(data) => {
-                reply.data(&data);
-            }
-            Err(e) => {
-                error!("Failed to read from handle {}: {}", fh, e);
-                reply.error(libc::EIO);
-            }
-        }
+        self.read_with_handle(ino, offset, size, reply);
+        
+        
     }
 
     fn write(
@@ -348,7 +593,7 @@ impl fuser::Filesystem for OneDriveFuse {
         offset: i64,
         data: &[u8],
         _write_flags: u32,
-        _flags: i32,
+        flags: i32,
         _lock_owner: Option<u64>,
         reply: ReplyWrite,
     ) {
@@ -359,54 +604,14 @@ impl fuser::Filesystem for OneDriveFuse {
             offset,
             data.len()
         );
-
-        // Handle virtual file handles by converting them to real file handles
-        let actual_fh = if fh == 1 {
-            // VIRTUAL_FILE_HANDLE_ID
-            debug!(
-                "📂 Converting virtual file handle {} to real file handle for inode {}",
-                fh, ino
-            );
-            // Create the local file if it doesn't exist
-            if let Err(e) = sync_await(self.file_manager().create_empty_file(ino)) {
-                error!("Failed to create local file for virtual handle: {}", e);
-                reply.error(libc::EIO);
-                return;
-            }
-
-            // Get a real file handle
-            match self.file_handles().get_or_create_file_handle(ino) {
-                Ok(real_fh) => {
-                    debug!(
-                        "📂 Created real file handle {} for virtual handle {}",
-                        real_fh, fh
-                    );
-                    real_fh
-                }
-                Err(e) => {
-                    error!(
-                        "Failed to create real file handle for virtual handle: {}",
-                        e
-                    );
-                    reply.error(libc::EIO);
-                    return;
-                }
-            }
+        if fh==1 {
+            reply.error(libc::EIO);
+            return;
+        }
+        if fh != 0 {
+            self.write_with_handle(fh, offset, data, reply);
         } else {
-            fh
-        };
-
-        match self
-            .file_handles()
-            .write_to_handle(actual_fh, offset as u64, data)
-        {
-            Ok(_) => {
-                reply.written(data.len() as u32);
-            }
-            Err(e) => {
-                error!("Failed to write to handle {}: {}", actual_fh, e);
-                reply.error(libc::EIO);
-            }
+            self.write_direct(ino, offset, data, flags, reply) 
         }
     }
 
@@ -417,50 +622,80 @@ impl fuser::Filesystem for OneDriveFuse {
         name: &OsStr,
         _mode: u32,
         _umask: u32,
-        _flags: i32,
+        flags: i32,
         reply: ReplyCreate,
     ) {
         let name_str = name.to_string_lossy();
         debug!("CREATE: parent={}, name={}", parent, name_str);
-
-        match sync_await(
+        let parent_item = self.get_item_by_ino(parent);
+        let existing_driveItem = sync_await( self.drive_item_with_fuse_repo().get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(parent, &name_str)).unwrap();
+        let open_flags =  OpenFlags::from_i32(flags).unwrap();
+        if open_flags.create_new && existing_driveItem.is_some() {
+            reply.error(libc::EEXIST);
+            return;
+        }
+        let mut open_options = OpenOptions::new();
+        open_flags.apply_to(&mut open_options);
+        if !open_flags.write && !open_flags.append {
+            // If neither write nor append specified, default to write for creation
+            open_options.write(true);
+        }
+        //We need to store Item now to obtain ID to know the path
+        let new_item = sync_await(
             self.database()
                 .apply_local_change_to_db_repository("create", parent, &name_str, false),
-        ) {
-            Ok(ino) => {
-                if let Ok(Some(item)) = sync_await(self.database().get_item_by_ino(ino)) {
-                    // Create the actual file in the local directory
-                    if let Err(e) = sync_await(self.file_manager().create_empty_file(ino)) {
-                        error!("Failed to create local file: {}", e);
-                        reply.error(libc::EIO);
+        ).unwrap();
+        let new_file_path = self.file_manager().get_local_dir().join(new_item.to_string());
+
+        match open_options.open(&new_file_path) {
+            Ok(mut backend_file) => {
+                
+    
+                // 9. Handle O_TRUNC - if file existed and we're truncating
+                if open_flags.truncate && new_file_path.exists() {
+                    if let Err(e) = backend_file.set_len(0) {
+                        eprintln!("Warning: failed to truncate file: {}", e);
+                    }
+                }
+    
+                // 10. For O_APPEND, seek to end
+                let mut seek_pos = 0;
+                if open_flags.append {
+                    if let Ok(metadata) = std::fs::metadata(&new_file_path) {
+                        seek_pos = metadata.len();
+                        if let Err(e) = backend_file.seek(SeekFrom::Start(seek_pos)) {
+                            eprintln!("Warning: failed to seek to end: {}", e);
+                        }
+                    }
+                }
+    
+                
+    
+                let metadata = match std::fs::metadata(&new_file_path) {
+                    Ok(meta) => meta,
+                    Err(e) => {
+                        reply.error(e.raw_os_error().unwrap_or(libc::EIO));
                         return;
                     }
-
-                    // Try to open the file
-                    match self.file_handles().get_or_create_file_handle(ino) {
-                        Ok(handle_id) => {
-                            reply.created(
-                                &Duration::from_secs(180),
-                                &AttributeManager::item_to_file_attr(&item),
-                                handle_id,
-                                handle_id,
-                                0,
-                            );
-                        }
-                        Err(e) => {
-                            error!("Failed to open created file: {}", e);
-                            reply.error(libc::EIO);
-                        }
-                    }
-                } else {
-                    reply.error(libc::EIO);
-                }
-            }
+                };
+    
+                let attr = metadata.try_to_file_attr(new_item).unwrap();
+    
+            
+    
+                //  Create file handle
+                let boxed_file = Box::new(backend_file);
+                let fh = Box::into_raw(boxed_file) as usize as u64;
+    
+                //  Reply with created file info
+                reply.created(&Duration::from_secs(1), &attr, 0, fh, 0);
+            },
             Err(e) => {
-                error!("Failed to create file: {}", e);
-                reply.error(libc::EIO);
+                reply.error(e.raw_os_error().unwrap_or(libc::EIO));
             }
         }
+
+    
     }
 
     fn mkdir(
@@ -529,9 +764,7 @@ impl fuser::Filesystem for OneDriveFuse {
             let onedrive_id = item.id();
 
             // Clean up any open handles for this inode
-            if let Some(ino) = item.virtual_ino() {
-                self.file_handles().cleanup_handles_for_inode(ino);
-            }
+            
 
             // Mark as deleted in database
             let mut updated_item = item.clone();
@@ -616,7 +849,7 @@ impl fuser::Filesystem for OneDriveFuse {
         name: &OsStr,
         newparent: u64,
         newname: &OsStr,
-        _flags: u32,
+        flags: u32,
         reply: fuser::ReplyEmpty,
     ) {
         let name_str = name.to_string_lossy();
@@ -625,6 +858,43 @@ impl fuser::Filesystem for OneDriveFuse {
             "RENAME: parent={}, name={} -> newparent={}, newname={}",
             parent, name_str, newparent, newname_str
         );
+        let parent_item = self.get_item_by_ino(parent);
+        let mut original_item = sync_await( self.drive_item_with_fuse_repo().get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(parent, &name_str)).unwrap().unwrap();
+        let existing_drive_item = sync_await( self.drive_item_with_fuse_repo().get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(newparent, &newname_str)).unwrap();
+        if existing_drive_item.is_some() {
+            //its a replace! Special CASE!
+                
+        if flags & libc::RENAME_NOREPLACE != 0  {
+            reply.error(libc::EEXIST);
+            return;
+        }
+
+           let local_path = self.file_manager().get_local_dir();
+           let local_path_from = local_path.join(original_item.virtual_ino().unwrap().to_string());
+           let local_path_to = local_path.join(existing_drive_item.unwrap().virtual_ino().unwrap().to_string());
+           if !local_path_from.exists() || !local_path_to.exists() {
+            reply.error(libc::EEXIST);
+            return;
+           }
+           std::fs::rename(&local_path_from, &local_path_to).unwrap();
+           let _result = sync_await(self.drive_item_with_fuse_repo().delete_drive_item_with_fuse(original_item.drive_item().id.clone().as_str()));
+           let delete_processing_item = crate::persistency::processing_item_repository::ProcessingItem::new_local(
+            original_item.drive_item().clone(),  // Your DriveItem instance
+            crate::sync::ChangeOperation::Delete
+           );
+           let processing_repo = self.app_state()
+           .persistency()
+           .processing_item_repository();
+           let _result = sync_await(processing_repo.store_processing_item(&delete_processing_item));
+           
+           
+           
+            
+           
+            return;
+        }
+        
+        let new_parent = self.get_item_by_ino(newparent);
 
         // Get the item to be renamed (case-insensitive lookup)
         if let Ok(Some(item)) = sync_await(
@@ -686,23 +956,24 @@ impl fuser::Filesystem for OneDriveFuse {
 
     fn setattr(
         &mut self,
-        _req: &fuser::Request,
+        _req: &Request<'_>,
         ino: u64,
-        _file_handle: Option<u32>,
-        _to_set: Option<u32>,
-        _uid: Option<u32>,
-        _gid: Option<u64>,
-        size: Option<fuser::TimeOrNow>,
-        _atime: Option<fuser::TimeOrNow>,
-        mtime: Option<SystemTime>,
-        _ctime: Option<u64>,
-        _fh: Option<SystemTime>,
+        mode: Option<u32>,
+        uid: Option<u32>,
+        gid: Option<u32>,
+        size: Option<u64>,
+        atime: Option<TimeOrNow>,
+        mtime: Option<TimeOrNow>,
+        ctime: Option<SystemTime>,
+        fh: Option<u64>,
         _crtime: Option<SystemTime>,
-        _chgtime: Option<SystemTime>,
-        _bkuptime: Option<u32>,
+        chgtime: Option<SystemTime>,
+        _bkuptime: Option<SystemTime>,
+        flags: Option<u32>,
         reply: ReplyAttr,
     ) {
         debug!("SETATTR: ino={}", ino);
+        
 
         if let Ok(Some(item)) = sync_await(self.database().get_item_by_ino(ino)) {
             // Mark as modified if any attributes changed
@@ -711,10 +982,33 @@ impl fuser::Filesystem for OneDriveFuse {
                     warn!("Failed to mark item as modified: {}", e);
                 }
             }
+            let path = self.file_operations().file_exists_locally(item.virtual_ino().unwrap_or(0));
+            if path.is_some() {
+                let file_path = path.unwrap();
+                if let Some(new_size) = size {
+                    match std::fs::OpenOptions::new().write(true).open(&file_path) {
+                        Ok(mut file) => {
+                            if let Err(e) = file.set_len(new_size) {
+                                error!("Failed to truncate file {}: {}", file_path.display(), e);
+                                reply.error(e.raw_os_error().unwrap_or(libc::EIO));
+                                return;
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to open file for truncation: {}", e);
+                            reply.error(e.raw_os_error().unwrap_or(libc::EIO));
+                            return;
+                        }
+                    }
+                }
+            
+            }
+ 
+
 
             reply.attr(
                 &Duration::from_secs(1),
-                &AttributeManager::item_to_file_attr(&item),
+                &self.get_attributes_from_local_file_or_from_db(&item)
             );
         } else {
             reply.error(libc::ENOENT);

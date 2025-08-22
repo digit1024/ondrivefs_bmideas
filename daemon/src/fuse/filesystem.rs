@@ -1,14 +1,17 @@
 //! Main FUSE filesystem implementation
 
 use crate::file_manager::DefaultFileManager;
+use crate::fuse::attributes::AttributeManager;
 use crate::fuse::utils::sync_await;
 use crate::persistency::cached_drive_item_with_fuse_repository::CachedDriveItemWithFuseRepository;
 use crate::persistency::download_queue_repository::DownloadQueueRepository;
 use crate::persistency::drive_item_with_fuse_repository::DriveItemWithFuseRepository;
+use crate::persistency::types::DriveItemWithFuse;
 use anyhow::Result;
 use log::{info, warn};
 use sqlx::Pool;
 use std::sync::Arc;
+use crate::fuse::operations::MetadataToFileAttr;
 
 use crate::fuse::database::DatabaseManager;
 use crate::fuse::file_handles::FileHandleManager;
@@ -139,5 +142,15 @@ impl OneDriveFuse {
             return true;
         }
         return false;
+    }
+    pub fn get_attributes_from_local_file_or_from_db(&self, item: &DriveItemWithFuse) -> fuser::FileAttr {
+        if let Some(file_path) = self
+            .file_operations()
+            .file_exists_locally(item.virtual_ino().unwrap_or(0))
+        {
+            let metadata = std::fs::metadata(&file_path).unwrap();
+            return metadata.try_to_file_attr(item.virtual_ino().unwrap()).unwrap();
+        }
+        AttributeManager::item_to_file_attr(&item)
     }
 }

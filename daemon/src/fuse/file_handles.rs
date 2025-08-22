@@ -3,7 +3,7 @@
 use crate::file_manager::DefaultFileManager;
 use crate::fuse::utils::sync_await;
 use crate::persistency::processing_item_repository::{ProcessingItem, ProcessingItemRepository};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use log::{debug, error};
 use std::collections::HashMap;
 use std::fs::File;
@@ -42,9 +42,55 @@ impl FileHandleManager {
             app_state,
         }
     }
+    pub fn create_file_handle(&self, ino: u64) -> Result<u64> {
+        let mut handles = self.open_handles.lock().unwrap();
+        let mut next_id = self.next_handle_id.lock().unwrap();
+        let item = sync_await(self.get_item_by_ino(ino)).context("Failed to get item by ino")?.unwrap();
+        if item.is_folder() {
+            // We are not interested in folders
+             Err(anyhow::anyhow!("Folder inode {} found", ino))
+            }else{
+                // Get local file path for real files
+                let local_path = self
+                .file_manager
+                .get_local_path_if_file_exists(ino)
+                .ok_or_else(|| anyhow::anyhow!("File not found in local folder for inode: {}", ino))?;
+
+                // Create new file handle
+                let file = std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(&local_path)?;
+
+                let handle_id = *next_id;
+                *next_id += 1;
+
+                let open_handle = OpenFileHandle {
+                    file,
+                    onedrive_id: item.id().to_string(),
+                    ino,
+                    is_dirty: false,
+                };
+
+                handles.insert(handle_id, open_handle);
+
+                debug!(
+                    "📂 Created new file handle {} for inode {} at {}",
+                    handle_id,
+                    ino,
+                    local_path.display()
+                );
+
+                Ok(handle_id)
+            }
+        
+        
+        
+        
+    }
 
     /// Get or create a file handle for the given inode
-    pub fn get_or_create_file_handle(&self, ino: u64) -> Result<u64> {
+    pub fn _get_or_create_file_handle(&self, ino: u64) -> Result<u64> {
         let mut handles = self.open_handles.lock().unwrap();
         let mut next_id = self.next_handle_id.lock().unwrap();
 
