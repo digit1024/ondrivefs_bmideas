@@ -129,17 +129,15 @@ else
     echo -e "${YELLOW}⚠️ Icons directory not found: $ICONS_DIR${NC}"
 fi
 
-# Also install open-onedrive.png
-DOWNLOADING_SRC="$SCRIPT_DIR/open-onedrive.png"
-if [ -f "$DOWNLOADING_SRC" ]; then
-    for size in $ICON_SIZES; do
-        DOWNLOADING_DST="$HOME/.local/share/icons/hicolor/${size}x${size}/apps/open-onedrive.png"
-        mkdir -p "$(dirname "$DOWNLOADING_DST")"
-        cp "$DOWNLOADING_SRC" "$DOWNLOADING_DST"
-        echo -e "   • ${size}x${size} downloading icon installed"
-    done
+# Install open-onedrive.svg in scalable folder
+SVG_SRC="$SCRIPT_DIR/open-onedrive.svg"
+if [ -f "$SVG_SRC" ]; then
+    SVG_DST="$HOME/.local/share/icons/hicolor/scalable/apps/open-onedrive.svg"
+    mkdir -p "$(dirname "$SVG_DST")"
+    cp "$SVG_SRC" "$SVG_DST"
+    echo -e "   • SVG icon installed to scalable folder: $SVG_DST"
 else
-    echo -e "${YELLOW}⚠️ Downloading icon file not found: $DOWNLOADING_SRC${NC}"
+    echo -e "${YELLOW}⚠️ SVG icon file not found: $SVG_SRC${NC}"
 fi
 
 # Update icon cache

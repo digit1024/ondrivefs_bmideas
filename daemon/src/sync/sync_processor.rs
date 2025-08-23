@@ -32,7 +32,7 @@ impl SyncProcessor {
     /// Process all items with priority: Remote first, then Local
     pub async fn process_all_items(&self) -> Result<()> {
         debug!("🏠️ Clean up processing items...");
-        self.processing_repo.hause_keeping().await?;
+        //self.processing_repo.hause_keeping().await?;
 
         // NEW: Squash local changes before processing
         debug!("🔀 Squashing local changes...");
@@ -78,7 +78,7 @@ impl SyncProcessor {
     }
 
     /// Squash local changes before processing to consolidate multiple changes into final state
-    async fn squash_local_changes(&self) -> Result<()> {
+    pub async fn squash_local_changes(&self) -> Result<()> {
         // Get unique drive item IDs with local processing items
         let unique_ids = self.get_unique_drive_items_with_local_changes().await?;
         

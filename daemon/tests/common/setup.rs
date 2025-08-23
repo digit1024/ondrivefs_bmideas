@@ -9,6 +9,8 @@ use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::sync::Mutex;
 
+static MOCK_ENV_PATH: &str = "/tmp/onedrivetestsenv";
+
 use crate::common::mock_onedrive_client::MockOneDriveClient;
 
 /// Global test environment that persists across all tests
@@ -22,7 +24,7 @@ pub static TEST_ENV: Lazy<Arc<Mutex<TestEnv>>> = Lazy::new(|| {
 pub struct TestEnv {
     #[allow(dead_code)]
     /// Root temporary directory (persisted)
-    temp_dir: TempDir,
+    temp_dir: PathBuf,
     #[allow(dead_code)]
     /// Path to the test database
     db_path: PathBuf,
@@ -40,12 +42,18 @@ impl TestEnv {
     /// Create a new test environment with persistent directories
     fn new() -> Result<Self> {
         // Create persistent temp directory
-        let temp_dir = TempDir::new().context("Failed to create temp directory")?;
+
+        let temp_dir = PathBuf::from(MOCK_ENV_PATH);
+        if !temp_dir.exists() {
+            std::fs::create_dir_all(&temp_dir)?;
+        }
+        //Now I need to swap HOME variable
+        std::env::set_var("HOME", &temp_dir);
 
         // Set up directory structure
-        let data_dir = temp_dir.path().join("data");
-        let config_dir = temp_dir.path().join("config");
-        let cache_dir = temp_dir.path().join("cache");
+        let data_dir = temp_dir.join("data");
+        let config_dir = temp_dir.join("config");
+        let cache_dir = temp_dir.join("cache");
 
         // Create directories
         std::fs::create_dir_all(&data_dir)?;
@@ -69,7 +77,7 @@ impl TestEnv {
 
         println!(
             "🧪 Test environment created at: {}",
-            temp_dir.path().display()
+            temp_dir.display()
         );
         println!("📁 Data directory: {}", data_dir.display());
         println!("⚙️  Config directory: {}", config_dir.display());
@@ -144,8 +152,6 @@ impl TestEnv {
             .await
             .context("Failed to create AppState with mock")?;
 
-
-
         // Initialize database schema
         app_state
             .persistency()
@@ -153,9 +159,12 @@ impl TestEnv {
             .await
             .context("Failed to initialize database")?;
 
+        let app_state = Arc::new(app_state);
+        self.app_state = Some(app_state.clone());
+
         println!("✅ AppState with mock OneDrive client initialized successfully");
 
-        Ok(Arc::new(app_state))
+        Ok(app_state)
     }
 
     /// Get the test database path
@@ -180,7 +189,7 @@ impl TestEnv {
 
     /// Get the root temp directory path for inspection
     pub fn temp_dir_path(&self) -> &std::path::Path {
-        self.temp_dir.path()
+        self.temp_dir.as_path()
     }
 
     /// Clear specific tables (useful between test groups)
@@ -198,7 +207,25 @@ impl TestEnv {
 
     /// Clear all data from specific repositories (useful for test isolation)
     pub async fn clear_all_data(&self) -> Result<()> {
-        if let Some(ref app_state) = self.app_state {
+        println!("🧹 Clearing data ");
+        let ref app_state = self.app_state;
+        let ref app_state = match app_state {  
+            Some(app_state) => app_state,
+            None => return Err(anyhow::anyhow!("App state not found")),
+        };
+        
+            let data_dir = app_state.config().local_dir();
+                        //loop through all files in the data directory and remove them
+                        println!("🧹 Clearing data files");
+                        for entry in std::fs::read_dir(&data_dir)? {
+                            
+                            let entry = entry?;
+                            let path = entry.path();
+                            if path.is_file() {
+                                println!("🧹 Clearing file: {}", path.display());
+                                std::fs::remove_file(path)?;
+                            }
+                        }
             // Clear processing items
             app_state
                 .persistency()
@@ -212,9 +239,12 @@ impl TestEnv {
                 .drive_item_with_fuse_repository()
                 .clear_all_items()
                 .await?;
+            // Remove all files in the data directory
+            
+
 
             println!("🧹 Cleared all test data");
-        }
+        
         Ok(())
     }
 }

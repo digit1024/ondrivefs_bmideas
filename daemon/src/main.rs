@@ -357,16 +357,9 @@ async fn main() -> Result<()> {
             let _ = fuse_shutdown_rx.recv().await;
 
             // Gracefully unmount FUSE
-            #[cfg(target_os = "linux")]
             {
                 let _ = std::process::Command::new("fusermount")
                     .arg("-u")
-                    .arg(&mount_point_for_unmount)
-                    .status();
-            }
-            #[cfg(target_os = "macos")]
-            {
-                let _ = std::process::Command::new("umount")
                     .arg(&mount_point_for_unmount)
                     .status();
             }

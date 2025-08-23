@@ -24,7 +24,7 @@ use onedrive_sync_daemon::onedrive_service::onedrive_models::{
 
 
 
-async fn setup_test_env() -> Result<(
+pub async fn setup_test_env() -> Result<(
     Arc<AppState>,
     ProcessingItemRepository,
     DriveItemWithFuseRepository,

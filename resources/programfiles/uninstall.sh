@@ -53,18 +53,16 @@ else
     echo -e "${YELLOW}ℹ️ MIME file not found: $MIME_FILE${NC}"
 fi
 
-# Remove icons in all sizes
-ICON_SIZES="16 32 48 64 128 256"
-ICONS_REMOVED=0
-
-for size in $ICON_SIZES; do
-    ICON_DST="$HOME/.local/share/icons/hicolor/${size}x${size}/apps/open-onedrive.png"
-    if [ -f "$ICON_DST" ]; then
-        echo -e "${YELLOW}🖼️ Removing ${size}x${size} icon: $ICON_DST${NC}"
-        rm "$ICON_DST"
-        ICONS_REMOVED=$((ICONS_REMOVED + 1))
-    fi
-done
+# Remove SVG icon from scalable folder
+SVG_ICON="$HOME/.local/share/icons/hicolor/scalable/apps/open-onedrive.svg"
+if [ -f "$SVG_ICON" ]; then
+    echo -e "${YELLOW}🖼️ Removing SVG icon: $SVG_ICON${NC}"
+    rm "$SVG_ICON"
+    ICONS_REMOVED=1
+else
+    echo -e "${YELLOW}ℹ️ SVG icon not found: $SVG_ICON${NC}"
+    ICONS_REMOVED=0
+fi
 
 if [ $ICONS_REMOVED -gt 0 ]; then
     if command -v gtk-update-icon-cache >/dev/null 2>&1; then

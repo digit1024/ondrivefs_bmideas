@@ -2,7 +2,7 @@
 Name=Onedrive Sync Ui
 Comment=onedrive-sync applet for POP OS Cosmic 
 Type=Application
-Icon=open-onedrive-ok
+Icon=open-onedrive
 Exec=onedrive-sync-ui %F
 Terminal=false
 StartupNotify=true
