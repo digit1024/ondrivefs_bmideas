@@ -98,6 +98,10 @@ impl SyncProcessor {
             if items.is_empty() {
                 break; // No more items to squash
             }
+            //Remove Items IN trash!
+            if self.squash_delete_in_trash(drive_item_id).await? {
+                continue; // Fetch fresh data and restart loop
+            }
             
             // Apply rules sequentially
             if self.squash_create_delete_sequence(drive_item_id).await? {
@@ -169,6 +173,52 @@ impl SyncProcessor {
         
         Ok(false)
     }
+         /// Rule 0:  Any actions with _local without CREATE = Remove all processing items
+         async fn squash_delete_in_trash(&self, drive_item_id: &str) -> Result<bool> {
+            let items = self.get_local_processing_items_for_drive_item(drive_item_id).await?;
+            //Get the current Item from the database
+            let current_item = self.drive_item_with_fuse_repo.get_drive_item_with_fuse(drive_item_id).await?.unwrap();
+            let is_in_trash = current_item.virtual_path().unwrap_or("").starts_with("/root/.Trash-1000");
+            
+            if is_in_trash{
+                
+                let processing_item = crate::persistency::processing_item_repository::ProcessingItem::new_local(
+                    current_item.drive_item().clone(),
+                    ChangeOperation::Delete
+                );
+                self.processing_repo.store_processing_item(&processing_item).await?;
+                return Ok(true);
+            }
+            
+            Ok(false)
+        }
+        /// Rule 0:  Any actions with _local without CREATE = Remove all processing items
+        async fn squash_no_create(&self, drive_item_id: &str) -> Result<bool> {
+            let items = self.get_local_processing_items_for_drive_item(drive_item_id).await?;
+            if items.is_empty() {
+                return Ok(false);
+            }
+            if !drive_item_id.starts_with("local_") {
+                return Ok(false);
+                //This is for file that has not been synced yet
+            }
+            
+            let has_create = items.iter().any(|item| item.change_operation == ChangeOperation::Create);
+            let has_delete = items.iter().any(|item| item.change_operation == ChangeOperation::Delete);
+            
+            if !has_create &&!has_delete{
+                // Remove all processing items for this drive item
+                for item in items {
+                    if let Some(id) = item.id {
+                        self.processing_repo.delete_processing_item_by_id(id).await?;
+                    }
+                }
+                info!("🗑️ Squashed Create+Delete sequence for item: {}", drive_item_id);
+                return Ok(true);
+            }
+            
+            Ok(false)
+        }
     
     /// Rule 2: Create + Modifications = Final Create
     async fn squash_create_modify_sequence(&self, drive_item_id: &str) -> Result<bool> {

@@ -626,6 +626,9 @@ impl fuser::Filesystem for OneDriveFuse {
                         &AttributeManager::item_to_file_attr(&item),
                         0,
                     );
+                    if let Err(e) = self.create_processing_item(&item, crate::sync::ChangeOperation::Create) {
+                    }
+
                 } else {
                     reply.error(libc::EIO);
                 }
@@ -822,7 +825,10 @@ impl fuser::Filesystem for OneDriveFuse {
         match self.rename_item_in_db(&original_item, newparent, &newname_str) {
             Ok(_) => {
                 debug!("📂 Renamed: {} -> {} ({})", name_str, newname_str, original_item.id());
-                
+                let original_item = sync_await(
+                    self.drive_item_with_fuse_repo()
+                        .get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(newparent, &newname_str)
+                ).unwrap().unwrap();// We need to obtain Modified item to create processing item
                 // Create processing item based on operation type:
                 if parent != newparent {
                     // Different parent = Move operation
