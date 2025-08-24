@@ -124,6 +124,9 @@ impl DriveItem {
     pub fn clear_deleted(&mut self) {
         self.deleted = None;
     }
+    pub fn set_id(&mut self, id: String) {
+        self.id = id;
+    }
 }
 
 /// FolderFacet: Represents the folder facet of a drive item.

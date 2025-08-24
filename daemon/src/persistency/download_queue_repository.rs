@@ -169,4 +169,22 @@ impl DownloadQueueRepository {
         debug!("Cleared all download queue items");
         Ok(())
     }
+
+    /// Update OneDrive ID for all items in download queue (used when OneDrive ID changes)
+    pub async fn update_onedrive_id(&self, old_id: &str, new_id: &str) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE download_queue 
+            SET drive_item_id = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE drive_item_id = ?
+            "#,
+        )
+        .bind(new_id)
+        .bind(old_id)
+        .execute(&self.pool)
+        .await?;
+
+        debug!("Updated OneDrive ID in download queue: {} -> {}", old_id, new_id);
+        Ok(())
+    }
 }

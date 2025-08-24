@@ -186,7 +186,7 @@ impl SyncProcessor {
             //Get the current Item from the database
             let current_item = self.drive_item_with_fuse_repo.get_drive_item_with_fuse(drive_item_id).await?.unwrap();
             let is_in_trash = current_item.virtual_path().unwrap_or("").starts_with("/root/.Trash-1000");
-            self.drive_item_with_fuse_repo.mark_as_deleted_by_onedrive_id(drive_item_id).await?;
+            
             let was_synced = !drive_item_id.starts_with("local_");
             
             if is_in_trash && was_synced{
@@ -206,13 +206,15 @@ impl SyncProcessor {
                     ChangeOperation::Delete
                 );
                 self.processing_repo.store_processing_item(&processing_item).await?;
+                
                 return Ok(true);
-            }else{
+            }else if is_in_trash { // Not synced
                 for item in items {
                     if let Some(id) = item.id {
                         self.processing_repo.delete_processing_item_by_id(id).await?;
                     }
                 }
+                self.drive_item_with_fuse_repo.mark_as_deleted_by_onedrive_id(drive_item_id).await?;
                 return Ok(true);
             }
             
@@ -990,23 +992,42 @@ impl SyncProcessor {
                                 let temporary_id = &item.drive_item.id;
                                 let real_onedrive_id = &result.onedrive_id;
 
+                                info!("🔄 Starting ID update process for new file: {} -> {}", temporary_id, real_onedrive_id);
+
                                 // Update DriveItemWithFuse
+                                info!("🔄 Updating DriveItemWithFuse repository...");
                                 self.drive_item_with_fuse_repo
                                     .update_onedrive_id(temporary_id, real_onedrive_id)
                                     .await?;
+                                info!("✅ Updated DriveItemWithFuse repository");
 
                                 // Update ProcessingItems
+                                info!("🔄 Updating ProcessingItems repository...");
                                 self.processing_repo
                                     .update_onedrive_id(temporary_id, real_onedrive_id)
                                     .await?;
+                                info!("✅ Updated ProcessingItems repository");
 
                                 // Update parent IDs for any children that reference this temporary ID
+                                info!("🔄 Updating parent IDs in DriveItemWithFuse...");
                                 self.drive_item_with_fuse_repo
                                     .update_parent_id_for_children(temporary_id, real_onedrive_id)
                                     .await?;
+                                info!("✅ Updated parent IDs in DriveItemWithFuse");
+
+                                info!("🔄 Updating parent IDs in ProcessingItems...");
                                 self.processing_repo
                                     .update_parent_id_for_children(temporary_id, real_onedrive_id)
                                     .await?;
+                                info!("✅ Updated parent IDs in ProcessingItems");
+
+                                // Update OneDrive IDs in download queue
+                                info!("🔄 Updating download queue repository...");
+                                let download_queue_repo = self.app_state.persistency().download_queue_repository();
+                                download_queue_repo
+                                    .update_onedrive_id(temporary_id, real_onedrive_id)
+                                    .await?;
+                                info!("✅ Updated download queue repository");
 
                                 debug!(
                                     "🔄 Updated database references: {} -> {}",
@@ -1153,7 +1174,7 @@ impl SyncProcessor {
                     .onedrive_client
                     .upload_updated_file(&file_data, &item.drive_item.id)
                     .await
-                    .context("Failed to update file on OneDrive")?;
+                    .context(format!("Failed to update file on OneDrive , {}  / {} " , item.drive_item.id , item.drive_item.name.as_deref().unwrap_or("unnamed")))?;
                 info!(
                     "📤 Updated file on OneDrive: {} -> {}",
                     path.display(),
@@ -1161,13 +1182,29 @@ impl SyncProcessor {
                 );
                 fs.set_sync_status("synced".to_string());
 
+                // Update the OneDrive ID with the new ID from upload result
+                let old_id = item.drive_item.id.clone();
+                let new_id = result.onedrive_id.clone();
+                
+                info!("🔄 Starting ID update process: {} -> {}", old_id, new_id);
+                
+                
                 fs.drive_item.set_etag(result.etag.clone().unwrap());
                 fs.drive_item.set_size(result.size.clone().unwrap());
                 fs.drive_item.set_ctag(result.ctag.clone().unwrap());
+
+                info!("✅ Updated local fs object with new ID: {}", new_id);
+
+                // Update all database references with the new OneDrive ID
+                
+                
+
+
                 self.drive_item_with_fuse_repo
                     .store_drive_item_with_fuse(&fs)
                     .await
                     .context("Failed to store modifiedFUSE item")?;
+                info!("✅ Successfully stored updated FUSE item");
             } else {
                 return Err(anyhow::anyhow!(
                     "Local file does not exist: {}",
