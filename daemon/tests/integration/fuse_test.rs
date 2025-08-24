@@ -5,6 +5,7 @@ use std::thread;
 use anyhow::Result;
 use fuser::MountOption;
 use onedrive_sync_daemon::app_state::AppState;
+use onedrive_sync_daemon::file_manager::FileManager;
 use onedrive_sync_daemon::fuse::OneDriveFuse;
 use onedrive_sync_daemon::onedrive_service::onedrive_client::OneDriveClientTrait;
 use onedrive_sync_daemon::onedrive_service::onedrive_models::{UserProfile, DriveItem, FileFacet, DeltaResponseApi};
@@ -310,6 +311,47 @@ async fn test_basic_multple_updates() -> Result<()> {
     let processing_items = app_state.persistency().processing_item_repository().get_all_processing_items().await?;
     assert_eq!(processing_items.len(), 1 , "Processing Items Should Be squashed to 1 Creat");
     assert_eq!(processing_items[0].change_operation, ChangeOperation::Create);
+    
+    // Clean up - unmount the filesystem
+    fuse_mount.stop()?;
+    
+    Ok(())
+}
+
+
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tests_ls_does_not_work_if_one_of_the_files_were_modified() -> Result<()> {
+    let (app_state, _, _, _mock_client) = setup_test_env().await?;
+    
+    // Create and mount the FUSE filesystem
+    let mut fuse_mount = FuseMount::new(&app_state).await?;
+    
+    // Give the mount a moment to initialize
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    
+    // Test that the mount point exists and is accessible
+    let mount_path = mount_point();
+    
+    
+    // Test that we can access the expected file
+    let file_path = format!("{}/Documents/Work/Reports/Q1_Report.pdf.onedrivedownload", mount_path);
+    assert!(std::path::Path::new(&file_path).exists(), "Expected file should exist at: {}", file_path);
+    // Now Lets creae this file locally and we should observe that ".onedrivedownload" is not there
+    // id for this item is  5 From fixtures
+    let filepath = app_state.file_manager().get_local_dir().join("5");
+    std::fs::write(filepath, "AAA").unwrap();
+    
+    
+    // Now Lets check that the file is there
+    let file_path = format!("{}/Documents/Work/Reports/Q1_Report.pdf", mount_path);
+    assert!(std::path::Path::new(&file_path).exists(), "Expected file should exist at: {}", file_path);
+
+    
+ 
+    
+    
+
     
     // Clean up - unmount the filesystem
     fuse_mount.stop()?;

@@ -100,31 +100,38 @@ impl SyncProcessor {
             }
             //Remove Items IN trash!
             if self.squash_delete_in_trash(drive_item_id).await? {
+                info!("🗑️ Squashed Delete in Trash for item: {}", drive_item_id);
                 continue; // Fetch fresh data and restart loop
             }
             
             // Apply rules sequentially
             if self.squash_create_delete_sequence(drive_item_id).await? {
+                info!("🗑️ Squashed Create+Delete sequence for item: {}", drive_item_id);
                 continue; // Fetch fresh data and restart loop
             }
             
             if self.squash_create_modify_sequence(drive_item_id).await? {
+                info!("🗑️ Squashed Create+Modify sequence for item: {}", drive_item_id);
                 continue; // Fetch fresh data and restart loop
             }
             
             if self.squash_multiple_modifies(drive_item_id).await? {
+                info!("🗑️ Squashed multiple modifies for item: {}", drive_item_id);
                 continue; // Fetch fresh data and restart loop
             }
             
             if self.squash_multiple_renames(drive_item_id).await? {
+                info!("🗑️ Squashed multiple renames for item: {}", drive_item_id);
                 continue; // Fetch fresh data and restart loop
             }
             
-            if self.squash_multiple_moves(drive_item_id).await? {
+            if self.squash_multiple_moves(drive_item_id).await? {   
+                info!("🗑️ Squashed multiple moves for item: {}", drive_item_id);
                 continue; // Fetch fresh data and restart loop
             }
             
             // If we get here, no changes were made
+            info!("No more changes to squash for item: {}", drive_item_id);
             break;
         }
         
@@ -179,14 +186,33 @@ impl SyncProcessor {
             //Get the current Item from the database
             let current_item = self.drive_item_with_fuse_repo.get_drive_item_with_fuse(drive_item_id).await?.unwrap();
             let is_in_trash = current_item.virtual_path().unwrap_or("").starts_with("/root/.Trash-1000");
+            self.drive_item_with_fuse_repo.mark_as_deleted_by_onedrive_id(drive_item_id).await?;
+            let was_synced = !drive_item_id.starts_with("local_");
             
-            if is_in_trash{
+            if is_in_trash && was_synced{
                 
+            // Get the last item ID (highest ID) - this shoudl be Delete 
+            let last_item_id = items.iter().max_by_key(|item| item.id.unwrap()).unwrap().id.unwrap();
+            
+            // Get the last item to convert to Delete operation
+            let last_item = items.iter().find(|item| item.id.unwrap() == last_item_id).unwrap();
+            if last_item.change_operation == ChangeOperation::Delete{
+                return Ok(false);
+            }
+            
+            // Convert last item to Delete operation
                 let processing_item = crate::persistency::processing_item_repository::ProcessingItem::new_local(
                     current_item.drive_item().clone(),
                     ChangeOperation::Delete
                 );
                 self.processing_repo.store_processing_item(&processing_item).await?;
+                return Ok(true);
+            }else{
+                for item in items {
+                    if let Some(id) = item.id {
+                        self.processing_repo.delete_processing_item_by_id(id).await?;
+                    }
+                }
                 return Ok(true);
             }
             

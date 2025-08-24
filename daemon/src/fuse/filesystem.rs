@@ -124,15 +124,16 @@ impl OneDriveFuse {
         reply: &mut fuser::ReplyDirectory,
         offset: i64,
     ) -> bool {
-        if offset < 2 {
+        if offset < 1 {
             // We need to add at least .
             let item = sync_await(self.database().get_item_by_ino(ino))
                 .unwrap()
                 .unwrap();
             let dot_ino = item.virtual_ino().unwrap_or(ino);
             let _r = reply.add(dot_ino, 1, fuser::FileType::Directory, ".".to_string());
+            if offset < 2 {
             //Assuming tht buffer cannot get full so fast
-            if offset == 1 {
+            
                 let dotdot_ino = item.parent_ino().unwrap_or(1);
                 let _r = reply.add(dotdot_ino, 2, fuser::FileType::Directory, "..".to_string());
             }
