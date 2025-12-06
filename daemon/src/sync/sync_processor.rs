@@ -32,7 +32,7 @@ impl SyncProcessor {
     /// Process all items with priority: Remote first, then Local
     pub async fn process_all_items(&self) -> Result<()> {
         debug!("🏠️ Clean up processing items...");
-        //self.processing_repo.hause_keeping().await?;
+        self.processing_repo.hause_keeping().await?;
 
         // NEW: Squash local changes before processing
         debug!("🔀 Squashing local changes...");
@@ -889,7 +889,13 @@ impl SyncProcessor {
                     let temporary_id = &item.drive_item.id;
                     let real_onedrive_id = &result.onedrive_id;
 
-                    // Update DriveItemWithFuse
+                    // Update download_queue FIRST (has FK constraint on drive_items_with_fuse.onedrive_id)
+                    let download_queue_repo = self.app_state.persistency().download_queue_repository();
+                    download_queue_repo
+                        .update_onedrive_id(temporary_id, real_onedrive_id)
+                        .await?;
+
+                    // Now safe to update DriveItemWithFuse (parent of FK)
                     self.drive_item_with_fuse_repo
                         .update_onedrive_id(temporary_id, real_onedrive_id)
                         .await?;
@@ -994,7 +1000,15 @@ impl SyncProcessor {
 
                                 info!("🔄 Starting ID update process for new file: {} -> {}", temporary_id, real_onedrive_id);
 
-                                // Update DriveItemWithFuse
+                                // Update download_queue FIRST (has FK constraint on drive_items_with_fuse.onedrive_id)
+                                info!("🔄 Updating download queue repository...");
+                                let download_queue_repo = self.app_state.persistency().download_queue_repository();
+                                download_queue_repo
+                                    .update_onedrive_id(temporary_id, real_onedrive_id)
+                                    .await?;
+                                info!("✅ Updated download queue repository");
+
+                                // Now safe to update DriveItemWithFuse (parent of FK)
                                 info!("🔄 Updating DriveItemWithFuse repository...");
                                 self.drive_item_with_fuse_repo
                                     .update_onedrive_id(temporary_id, real_onedrive_id)
@@ -1020,14 +1034,6 @@ impl SyncProcessor {
                                     .update_parent_id_for_children(temporary_id, real_onedrive_id)
                                     .await?;
                                 info!("✅ Updated parent IDs in ProcessingItems");
-
-                                // Update OneDrive IDs in download queue
-                                info!("🔄 Updating download queue repository...");
-                                let download_queue_repo = self.app_state.persistency().download_queue_repository();
-                                download_queue_repo
-                                    .update_onedrive_id(temporary_id, real_onedrive_id)
-                                    .await?;
-                                info!("✅ Updated download queue repository");
 
                                 debug!(
                                     "🔄 Updated database references: {} -> {}",

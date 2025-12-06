@@ -1,0 +1,41 @@
+graph TD
+    A[Start Local Sync] --> B[Squash Local Changes]
+    B --> C[Apply Squashing Rules]
+    C --> D[Create+Delete = Remove All]
+    C --> E[Create+Modify = Final Create]
+    C --> F[Multiple Modifies = Last Modify]
+    C --> G[Multiple Renames = Last Rename]
+    C --> H[Multiple Moves = Last Move]
+    D --> I[Detect Conflicts]
+    E --> I
+    F --> I
+    G --> I
+    H --> I
+    I --> J{Any Conflicts?}
+    J -->|Yes| K[Mark as Conflicted]
+    J -->|No| L[Mark as Validated]
+    L --> M[Process Operation]
+    M --> N{Operation Type}
+    N -->|Create| O[Handle Local Create]
+    N -->|Update| P[Handle Local Update]
+    N -->|Delete| Q[Handle Local Delete]
+    N -->|Move| R[Handle Local Move]
+    N -->|Rename| S[Handle Local Rename]
+    O --> T{Is Folder?}
+    T -->|Yes| U[Create Folder on OneDrive]
+    T -->|No| V[Upload File to OneDrive]
+    U --> W[Update DB with Real ID]
+    V --> W
+    P --> X{Is Folder?}
+    X -->|Yes| Y[Update Metadata Only]
+    X -->|No| Z[Upload Updated File]
+    Q --> AA[Delete from OneDrive]
+    R --> AB[Move on OneDrive]
+    S --> AC[Rename on OneDrive]
+    W --> AD[Mark as Done]
+    Y --> AD
+    Z --> AD
+    AA --> AD
+    AB --> AD
+    AC --> AD
+    K --> AE[End - Conflicted]

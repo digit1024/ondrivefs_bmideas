@@ -1,0 +1,39 @@
+graph TD
+    A[Start Remote Sync] --> B[Detect Conflicts]
+    B --> C{Any Conflicts?}
+    C -->|Yes| D[Attempt Auto-Resolve]
+    D --> E{Auto-Resolve Successful?}
+    E -->|Yes| F[Mark as Validated]
+    E -->|No| G[Mark as Conflicted]
+    C -->|No| F
+    F --> H[Process Operation]
+    H --> I{Operation Type}
+    I -->|Create| J[Handle Remote Create]
+    I -->|Update| K[Handle Remote Update]
+    I -->|Delete| L[Handle Remote Delete]
+    I -->|Move| M[Handle Remote Move]
+    I -->|Rename| N[Handle Remote Rename]
+    J --> O[Setup FUSE Metadata]
+    J --> P{Should Download?}
+    P -->|Yes| Q[Add to Download Queue]
+    P -->|No| R[Skip Download]
+    K --> S[Check ETag Change]
+    S -->|Changed| T[Add to Download Queue]
+    S -->|No Change| U[Skip Download]
+    L --> V[Remove from Download Queue]
+    L --> W[Delete Local File]
+    L --> X[Delete Child Items]
+    M --> Y[Move on OneDrive]
+    M --> Z[Update FUSE Metadata]
+    N --> AA[Update FUSE Metadata]
+    Q --> AB[Mark as Done]
+    R --> AB
+    T --> AB
+    U --> AB
+    V --> AB
+    W --> AB
+    X --> AB
+    Y --> AB
+    Z --> AB
+    AA --> AB
+    G --> AC[End - Conflicted]

@@ -118,9 +118,10 @@ impl HttpClient {
 
     /// Make a PATCH request with authorization header
     #[allow(dead_code)]
-    pub async fn patch<T>(&self, url: &str, body: &T, auth_header: &str) -> Result<T>
+    pub async fn patch<T, B>(&self, url: &str, body: &B, auth_header: &str) -> Result<T>
     where
-        T: Serialize + serde::de::DeserializeOwned + std::fmt::Debug,
+        T: serde::de::DeserializeOwned + std::fmt::Debug,
+        B: Serialize,
     {
         let url = self.get_full_url(url)?;
         let response = self
@@ -180,6 +181,7 @@ impl HttpClient {
             .put(&url)
             .header("Authorization", auth_header)
             .header("Content-Type", "application/octet-stream")
+            .header("Content-Length", file_data.len().to_string())
             .body(file_data.to_vec())
             .send()
             .await?;

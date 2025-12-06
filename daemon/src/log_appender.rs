@@ -59,7 +59,7 @@ fn get_log_level() -> LevelFilter {
             "warn" => LevelFilter::Warn,
             "error" => LevelFilter::Error,
             "off" => LevelFilter::Off,
-            _ => LevelFilter::Info, // Default fallback
+            _ => LevelFilter::Warn, // Default fallback
         }
     } else {
         // Default to Info level to reduce noise
@@ -143,6 +143,7 @@ fn build_log_config(stdout: ConsoleAppender, file: RollingFileAppender) -> Resul
                 .additive(false)
                 .build("zbus", LevelFilter::Warn), // Only show warnings and errors from zbus
         )
+
         .build(
             Root::builder()
                 .appender("stdout")

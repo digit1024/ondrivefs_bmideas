@@ -8,7 +8,7 @@ use crate::persistency::download_queue_repository::DownloadQueueRepository;
 use crate::persistency::drive_item_with_fuse_repository::DriveItemWithFuseRepository;
 use crate::persistency::types::DriveItemWithFuse;
 use anyhow::Result;
-use log::{info, warn};
+use log::{debug, info, warn};
 use sqlx::Pool;
 use std::sync::Arc;
 use std::path::{Path, PathBuf};
@@ -118,31 +118,9 @@ impl OneDriveFuse {
     pub fn app_state(&self) -> &Arc<crate::app_state::AppState> {
         &self.app_state
     }
-    pub fn add_dot_entries_if_needed(
-        &self,
-        ino: u64,
-        reply: &mut fuser::ReplyDirectory,
-        offset: i64,
-    ) -> bool {
-        if offset < 1 {
-            // We need to add at least .
-            let item = sync_await(self.database().get_item_by_ino(ino))
-                .unwrap()
-                .unwrap();
-            let dot_ino = item.virtual_ino().unwrap_or(ino);
-            let _r = reply.add(dot_ino, 1, fuser::FileType::Directory, ".".to_string());
-            if offset < 2 {
-            //Assuming tht buffer cannot get full so fast
-            
-                let dotdot_ino = item.parent_ino().unwrap_or(1);
-                let _r = reply.add(dotdot_ino, 2, fuser::FileType::Directory, "..".to_string());
-            }
-            return true;
-        }
-        return false;
-    }
+
     pub fn get_attributes_from_local_file_or_from_db(&self, item: &DriveItemWithFuse) -> fuser::FileAttr {
-        if let Some(file_path) = self.get_local_file_path(item.virtual_ino().unwrap_or(0)) {
+        if let Some(file_path) = self.get_local_file_path(item.virtual_ino().unwrap()) {
             let metadata = std::fs::metadata(&file_path).unwrap();
             return metadata.try_to_file_attr(item.virtual_ino().unwrap()).unwrap();
         }

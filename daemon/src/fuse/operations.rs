@@ -86,12 +86,14 @@ impl OneDriveFuse{
                         reply.data(&buffer[..bytes_read]);
                     },
                     Err(e) => {
+                        error!("Failed to read file data: {}", e);
                         let err_code = e.raw_os_error().unwrap_or(libc::EIO);
                         reply.error(err_code);
                     }
                 }
             },
             Err(e) => {
+                error!("Failed to seek file: {}", e);
                 let err_code = e.raw_os_error().unwrap_or(libc::EIO);
                 reply.error(err_code);
             }
@@ -117,6 +119,7 @@ impl OneDriveFuse{
                     },
                     Err(e) => {
                         // Write failed
+                        error!("Failed to write file data: {}", e);
                         let err_code = e.raw_os_error().unwrap_or(libc::EIO);
                         reply.error(err_code);
                     }
@@ -124,6 +127,7 @@ impl OneDriveFuse{
             },
             Err(e) => {
                 // Seek failed
+                error!("Failed to seek file for write: {}", e);
                 let err_code = e.raw_os_error().unwrap_or(libc::EIO);
                 reply.error(err_code);
             }
@@ -160,7 +164,10 @@ impl OneDriveFuse{
                 
                 reply.written(bytes_written);
             },
-            Err(e) => reply.error(e.raw_os_error().unwrap_or(libc::EIO))
+            Err(e) => {
+                error!("Failed to write file with flags: {}", e);
+                reply.error(e.raw_os_error().unwrap_or(libc::EIO))
+            }
         }
     }
 
@@ -169,10 +176,15 @@ impl OneDriveFuse{
         let item = match sync_await(self.database().get_item_by_ino(ino)) {
             Ok(Some(item)) => item,
             Ok(None) => { reply.error(libc::ENOENT); return; }
-            Err(_) => { reply.error(libc::EIO); return; }
+            Err(e) => { 
+                error!("Failed to get item by ino {}: {}", ino, e);
+                reply.error(libc::EIO); 
+                return; 
+            }
         };
         
         if item.is_folder() {
+            error!("Cannot read folder as file for ino: {}", ino);
             reply.error(libc::EIO);
             return;
         }
@@ -184,7 +196,10 @@ impl OneDriveFuse{
         
         match self.read_file_data(&file_path, offset as u64, size as usize) {
             Ok(data) => reply.data(&data),
-            Err(e) => reply.error(e.raw_os_error().unwrap_or(libc::EIO))
+            Err(e) => {
+                error!("Failed to read file data from path: {}", e);
+                reply.error(e.raw_os_error().unwrap_or(libc::EIO))
+            }
         }
     }
 
@@ -193,10 +208,15 @@ impl OneDriveFuse{
         let item = match sync_await(self.database().get_item_by_ino(ino)) {
             Ok(Some(item)) => item,
             Ok(None) => { reply.error(libc::ENOENT); return; }
-            Err(_) => { reply.error(libc::EIO); return; }
+            Err(e) => { 
+                error!("Failed to get item by ino {}: {}", ino, e);
+                reply.error(libc::EIO); 
+                return; 
+            }
         };
         
         if item.is_folder() {
+            error!("Cannot read folder as file for ino: {}", ino);
             reply.error(libc::EIO);
             return;
         }
@@ -225,7 +245,7 @@ impl fuser::Filesystem for OneDriveFuse {
             return;
         }
         if item.is_folder() {
-            reply.opened(0, 0);
+            reply.error(libc::ENOENT);
             return;
         }
         let file_path = file_path.unwrap();
@@ -251,6 +271,7 @@ impl fuser::Filesystem for OneDriveFuse {
                 // FAILURE: We cannot open the file (e.g., permission denied).
                 // We must signal this. The kernel will then likely use
                 // the direct path (fh=0) for subsequent operations, which will also fail.
+                error!("Failed to open file {}: {}", file_path.display(), e);
                 reply.error(e.raw_os_error().unwrap_or(libc::EIO));
             }
         }
@@ -391,7 +412,7 @@ impl fuser::Filesystem for OneDriveFuse {
 
         if let Ok(Some(item)) = sync_await(self.database().get_item_by_ino(ino)) {
             reply.attr(
-                &Duration::from_secs(3),
+                &Duration::from_secs(0),
                 &self.get_attributes_from_local_file_or_from_db(&item),
             );
         } else {
@@ -408,26 +429,74 @@ impl fuser::Filesystem for OneDriveFuse {
         mut reply: ReplyDirectory,
     ) {
         debug!("READDIR: ino={}, offset={}", ino, offset);
-        let dots_added = self.add_dot_entries_if_needed(ino, &mut reply, offset);
-        let current_offset = offset;
-        let entries_added = if dots_added { 2 } else { 0 };
+        
+        // Calculate how many dot entries we need to add
+        let dots_to_add = if offset < 2 { 2 - offset as usize } else { 0 };
+        
+        // Add dot entries if needed
+        if dots_to_add > 0 {
+            let item = match sync_await(self.database().get_item_by_ino(ino)) {
+                Ok(Some(item)) => item,
+                Ok(None) => {
+                    error!("Failed to get item by ino {}: {}", ino, "item not found");
+                    reply.error(libc::ENOENT);
+                    return;
+                }
+                Err(e) => {
+                    error!("Failed to get item by ino {}: {}", ino, e);
+                    reply.error(libc::EIO);
+                    return;
+                }
+            };
+            
+            
+            // Add "." entry
+            if offset == 0 {
+                
+                if reply.add(
+                    ino,
+                    1,
+                    fuser::FileType::Directory,
+                    ".",
+                ) {
+                    reply.ok();
+                    return;
+                }
+            }
+            
+            // Add ".." entry  
+            if offset <= 1 {
+                let parent_ino = item.parent_ino().unwrap_or(1);
+                let p = self.get_item_by_ino(parent_ino);
+                
+                if reply.add(
+                    parent_ino,
+                    2,
+                    fuser::FileType::Directory,
+                    "..",
+                ) {
+                    reply.ok();
+                    return;
+                }
+            }
+        }
+        
+        // Calculate the actual database offset for child items
+        // If offset < 2, we start from the beginning of children
+        // If offset >= 2, we start from (offset - 2) in the children list
+        let mut db_offset = if offset < 2 { 0 } else { (offset - 2) as usize };
+        
         let batch_size = 100; // Fetch 100 items at a time
-                              // for offset 0 actual offset woudl be 0
-                              // but if we have not added entries so offset was lets say 2 actual offset woudl be offset - 2
-        let mut actual_offset: usize = if dots_added {
-            offset as usize
-        } else {
-            (offset - 2) as usize
-        }; //actual offset is the offset of the first child
-
+        
         loop {
             let children = match sync_await(self.database().get_children_by_parent_ino_paginated(
                 ino,
-                actual_offset,
+                db_offset,
                 batch_size,
             )) {
                 Ok(children) => children,
-                Err(_) => {
+                Err(e) => {
+                    error!("Failed to get children for parent ino {}: {}", ino, e);
                     reply.error(libc::EIO);
                     return;
                 }
@@ -437,12 +506,14 @@ impl fuser::Filesystem for OneDriveFuse {
             if children.is_empty() {
                 break;
             }
+            
             for (i, child) in children.iter().enumerate() {
                 let file_type = if child.is_folder() {
                     fuser::FileType::Directory
                 } else {
                     fuser::FileType::RegularFile
                 };
+                
                 let name = if self
                     .get_local_file_path(child.virtual_ino().unwrap_or(0))
                     .is_none()
@@ -452,13 +523,12 @@ impl fuser::Filesystem for OneDriveFuse {
                 } else {
                     child.name().unwrap_or("unknown").to_string()
                 };
+                
 
-                let entry_offset = if dots_added {
-                    offset as i64 + i as i64 + 3 // Add 2 for "." and ".."
-                } else {
-                    offset as i64 + i as i64 + 1
-                };
-
+                // Calculate the entry offset for this child
+                // Entry offset = db_offset + i + 3 (because dots are at 1 and 2)
+                let entry_offset = (db_offset + i) as i64 + 3;
+                
                 // Try to add to reply buffer
                 debug!("Adding entry: {} at offset {}", name, entry_offset);
                 if reply.add(
@@ -471,9 +541,13 @@ impl fuser::Filesystem for OneDriveFuse {
                     reply.ok();
                     return;
                 }
-                actual_offset += 1;
             }
+            
+            // Move to next batch
+            
+            db_offset += children.len();
         }
+        
         reply.ok();
     }
 
@@ -522,6 +596,7 @@ impl fuser::Filesystem for OneDriveFuse {
             data.len()
         );
         if fh==1 {
+            error!("Cannot write to virtual file handle for ino: {}", ino);
             reply.error(libc::EIO);
             return;
         }
@@ -630,6 +705,7 @@ impl fuser::Filesystem for OneDriveFuse {
                     }
 
                 } else {
+                    error!("Failed to get created directory item by ino: {}", ino);
                     reply.error(libc::EIO);
                 }
             }
@@ -717,6 +793,8 @@ impl fuser::Filesystem for OneDriveFuse {
                     reply.error(libc::ENOTEMPTY);
                     return;
                 }
+            } else {
+                error!("Failed to get children for directory ino {}: {}", item.virtual_ino().unwrap_or(0), "database error");
             }
 
             
@@ -943,96 +1021,101 @@ impl fuser::Filesystem for OneDriveFuse {
         mut reply: ReplyDirectoryPlus,
     ) {
         debug!("READDIRPLUS: ino={}, fh={}, offset={}", ino, fh, offset);
-        if let Ok(children) = sync_await(self.database().get_children_by_parent_ino(ino)) {
-            let mut entries = Vec::new();
+        let children = match sync_await(self.database().get_children_by_parent_ino(ino)) {
+            Ok(children) => children,
+            Err(e) => {
+                error!("Failed to get children for parent ino {} in readdirplus: {}", ino, e);
+                reply.error(libc::EIO);
+                return;
+            }
+        };
+        let mut entries = Vec::new();
 
-            // Get the current item
-            let item = match sync_await(self.database().get_item_by_ino(ino)) {
-                Ok(Some(item)) => item,
-                Ok(None) => {
-                    reply.error(libc::ENOENT);
-                    return;
-                }
-                Err(_) => {
-                    reply.error(libc::EIO);
-                    return;
-                }
+        // Get the current item
+        let item = match sync_await(self.database().get_item_by_ino(ino)) {
+            Ok(Some(item)) => item,
+            Ok(None) => {
+                reply.error(libc::ENOENT);
+                return;
+            }
+            Err(e) => {
+                error!("Failed to get item by ino {} for readdirplus: {}", ino, e);
+                reply.error(libc::EIO);
+                return;
+            }
+        };
+
+        // Add "." and ".." entries
+
+        let dot_ino = item.virtual_ino().unwrap_or(ino);
+        let dotdot_ino = item.parent_ino().unwrap_or(1);
+        let parent_item = sync_await(self.database().get_item_by_ino(dotdot_ino))
+            .unwrap()
+            .unwrap();
+        entries.push((
+            dot_ino,
+            fuser::FileType::Directory,
+            ".".to_string(),
+            AttributeManager::item_to_file_attr(&item),
+            0 as u64,
+        ));
+        debug!("Adding . entry: {}", dot_ino);
+        entries.push((
+            dotdot_ino,
+            fuser::FileType::Directory,
+            "..".to_string(),
+            AttributeManager::item_to_file_attr(&parent_item),
+            0 as u64,
+        ));
+        debug!("Adding .. entry: {}", dotdot_ino);
+
+        // Add child entries
+        for (i, child) in children.iter().enumerate() {
+            let file_type = if child.is_folder() {
+                fuser::FileType::Directory
+            } else {
+                fuser::FileType::RegularFile
             };
-
-            // Add "." and ".." entries
-
-            let dot_ino = item.virtual_ino().unwrap_or(ino);
-            let dotdot_ino = item.parent_ino().unwrap_or(1);
-            let parent_item = sync_await(self.database().get_item_by_ino(dotdot_ino))
-                .unwrap()
-                .unwrap();
+            let name = if self
+                .get_local_file_path(child.virtual_ino().unwrap_or(0))
+                .is_none()
+                && !child.is_folder()
+            {
+                format!("{}.onedrivedownload", child.name().unwrap_or("unknown"))
+            } else {
+                child.name().unwrap_or("unknown").to_string()
+            };
+            let attr = AttributeManager::item_to_file_attr(&child);
             entries.push((
-                dot_ino,
-                fuser::FileType::Directory,
-                ".".to_string(),
-                AttributeManager::item_to_file_attr(&item),
+                child.virtual_ino().unwrap_or(0),
+                file_type,
+                name,
+                attr,
                 0 as u64,
             ));
-            debug!("Adding . entry: {}", dot_ino);
-            entries.push((
-                dotdot_ino,
-                fuser::FileType::Directory,
-                "..".to_string(),
-                AttributeManager::item_to_file_attr(&parent_item),
-                0 as u64,
-            ));
-            debug!("Adding .. entry: {}", dotdot_ino);
+        }
 
-            // Add child entries
-            for (i, child) in children.iter().enumerate() {
-                let file_type = if child.is_folder() {
-                    fuser::FileType::Directory
-                } else {
-                    fuser::FileType::RegularFile
-                };
-                let name = if self
-                    .get_local_file_path(child.virtual_ino().unwrap_or(0))
-                    .is_none()
-                    && !child.is_folder()
-                {
-                    format!("{}.onedrivedownload", child.name().unwrap_or("unknown"))
-                } else {
-                    child.name().unwrap_or("unknown").to_string()
-                };
-                let attr = AttributeManager::item_to_file_attr(&child);
-                entries.push((
-                    child.virtual_ino().unwrap_or(0),
-                    file_type,
+        let current_offset = 1;
+        // Add entries with proper offset handling
+        for (i, (ino, kind, name, attr, geno)) in entries.iter().enumerate() {
+            debug!("Adding entry: {} at offset {}", name, i + 1);
+            if offset < i as i64 + 1 {
+                if reply.add(
+                    *ino,
+                    i as i64 + 1,
                     name,
-                    attr,
-                    0 as u64,
-                ));
-            }
+                    &Duration::from_secs(5),
+                    &attr,
+                    geno.clone(),
+                ) {
+                    debug!("Failed to add");
 
-            let current_offset = 1;
-            // Add entries with proper offset handling
-            for (i, (ino, kind, name, attr, geno)) in entries.iter().enumerate() {
-                debug!("Adding entry: {} at offset {}", name, i + 1);
-                if offset < i as i64 + 1 {
-                    if reply.add(
-                        *ino,
-                        i as i64 + 1,
-                        name,
-                        &Duration::from_secs(5),
-                        &attr,
-                        geno.clone(),
-                    ) {
-                        debug!("Failed to add");
-
-                        break;
-                    }
+                    break;
                 }
             }
-
-            reply.ok();
-        } else {
-            reply.error(libc::ENOENT);
         }
+
+        reply.ok();
     }
 
     fn init(&mut self, _req: &fuser::Request<'_>, config: &mut KernelConfig) -> Result<(), c_int> {

@@ -712,16 +712,16 @@ impl OneDriveClient {
         Ok(result)
     }
 
-    /// Move an item to a new parent folder
+    /// Move an item to a new parent folder (PATCH to update parentReference)
 
     pub async fn move_item(&self, item_id: &str, new_parent_id: &str) -> Result<DriveItem> {
         let auth_header = self.auth_header().await?;
-        let url = format!("/me/drive/items/{}/move", item_id);
+        let url = format!("/me/drive/items/{}", item_id);
         let body = self.build_move_item_body(new_parent_id);
 
         let item: DriveItem = self
             .http_client
-            .post(&url, &body, &auth_header)
+            .patch(&url, &body, &auth_header)
             .await
             .context("Failed to move item")?;
 
@@ -778,7 +778,7 @@ impl OneDriveClient {
 
         // Send PATCH request to update the name
         self.http_client
-            .patch::<serde_json::Value>(&url, &body, &auth_header)
+            .patch::<serde_json::Value, _>(&url, &body, &auth_header)
             .await
             .context("Failed to rename item")?;
 

@@ -43,17 +43,39 @@ impl PersistencyManager {
             std::fs::create_dir_all(parent)?;
         }
 
-        // Create connection pool
+        // Create connection pool with WAL mode for concurrent reads/writes
+        // WAL mode allows readers while writing, crucial for FUSE + Sync concurrency
         let database_url = format!("sqlite:{}?mode=rwc", db_path.display());
 
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
+            .max_connections(5) // Allow multiple connections for FUSE + Sync
+            .after_connect(|conn, _meta| {
+                Box::pin(async move {
+                    // Enable WAL mode for better concurrency
+                    sqlx::query("PRAGMA journal_mode = WAL")
+                        .execute(&mut *conn)
+                        .await?;
+                    // Set busy timeout to wait instead of failing immediately
+                    sqlx::query("PRAGMA busy_timeout = 5000")
+                        .execute(&mut *conn)
+                        .await?;
+                    // Optimize for performance
+                    sqlx::query("PRAGMA synchronous = NORMAL")
+                        .execute(&mut *conn)
+                        .await?;
+                    // Disable FK checks for better write performance (we handle order manually)
+                    sqlx::query("PRAGMA foreign_keys = OFF")
+                        .execute(&mut *conn)
+                        .await?;
+                    Ok(())
+                })
+            })
             .connect(&database_url)
             .await
             .context("Failed to connect to database")?;
 
         info!(
-            "Initialized database connection pool at: {}",
+            "Initialized database connection pool (WAL mode) at: {}",
             db_path.display()
         );
 
