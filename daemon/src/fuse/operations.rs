@@ -796,24 +796,17 @@ impl fuser::Filesystem for OneDriveFuse {
                 ),
         ) {
             let onedrive_id = item.id();
+            let dir_ino = item.virtual_ino().unwrap_or(0);
 
-            // Check if directory is empty
-            if let Ok(children) = sync_await(
-                self.database()
-                    .get_children_by_parent_ino(item.virtual_ino().unwrap_or(0)),
-            ) {
-                if !children.is_empty() {
-                    debug!("📂 Cannot remove non-empty directory: {}", name_str);
-                    reply.error(libc::ENOTEMPTY);
-                    return;
-                }
-            } else {
-                error!("Failed to get children for directory ino {}: {}", item.virtual_ino().unwrap_or(0), "database error");
+            // Recursively mark all children as deleted first
+            // This ensures child items don't cause conflicts when parent is deleted
+            if let Err(e) = self.mark_children_as_deleted_recursively(dir_ino) {
+                error!("Failed to mark children as deleted: {}", e);
+                reply.error(libc::EIO);
+                return;
             }
 
-            
-
-            // Mark as deleted in database
+            // Mark the directory itself as deleted
             let mut updated_item = item.clone();
             updated_item.drive_item_mut().mark_deleted();
 
@@ -826,9 +819,9 @@ impl fuser::Filesystem for OneDriveFuse {
                 return;
             }
 
-            debug!("📂 Removed directory: {} ({})", name_str, onedrive_id);
+            debug!("📂 Removed directory (and all children): {} ({})", lookup_name, onedrive_id);
             
-            // Create processing item for directory deletion
+            // Create processing item for directory deletion (only for parent - children are handled by OneDrive)
             if let Err(e) = self.create_processing_item(&item, crate::sync::ChangeOperation::Delete) {
                 error!("Failed to create processing item for directory deletion: {}", e);
             }

@@ -366,6 +366,40 @@ impl OneDriveFuse {
         sync_await(processing_repo.store_processing_item(&processing_item))?;
         Ok(())
     }
+
+    /// Recursively mark all children of a folder as deleted in the database
+    /// This ensures that when a folder is deleted, all its contents are also marked as deleted
+    /// without creating separate processing items (parent delete handles everything on OneDrive)
+    pub fn mark_children_as_deleted_recursively(&self, parent_ino: u64) -> Result<(), anyhow::Error> {
+        // Get all children of this folder
+        let children = sync_await(
+            self.drive_item_with_fuse_repo()
+                .get_children_by_parent_ino(parent_ino)
+        )?;
+
+        for child in children {
+            let child_ino = child.virtual_ino().unwrap_or(0);
+            
+            // If child is a folder, recursively mark its children first
+            if child.is_folder() {
+                self.mark_children_as_deleted_recursively(child_ino)?;
+            }
+
+            // Mark this child as deleted
+            let mut updated_child = child.clone();
+            updated_child.drive_item_mut().mark_deleted();
+            
+            sync_await(
+                self.drive_item_with_fuse_repo()
+                    .store_drive_item_with_fuse(&updated_child)
+            )?;
+            
+            debug!("🗑️ Marked child as deleted: {} (ino={})", 
+                   child.name().unwrap_or("unknown"), child_ino);
+        }
+
+        Ok(())
+    }
 }
 
 // OpenFlags struct for parsing file open flags
