@@ -726,11 +726,18 @@ impl fuser::Filesystem for OneDriveFuse {
         let name_str = name.to_string_lossy();
         debug!("UNLINK: parent={}, name={}", parent, name_str);
 
+        // Strip .onedrivedownload extension if present for lookup
+        let lookup_name = if name_str.ends_with(".onedrivedownload") {
+            &name_str[..name_str.len() - 17] // Remove ".onedrivedownload"
+        } else {
+            &name_str
+        };
+
         // Get the item to be deleted (case-insensitive lookup)
         if let Ok(Some(item)) = sync_await(
             self.drive_item_with_fuse_repo()
                 .get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(
-                    parent, &name_str,
+                    parent, lookup_name,
                 ),
         ) {
             let onedrive_id = item.id();
@@ -774,11 +781,18 @@ impl fuser::Filesystem for OneDriveFuse {
         let name_str = name.to_string_lossy();
         debug!("RMDIR: parent={}, name={}", parent, name_str);
 
+        // Strip .onedrivedownload extension if present for lookup (shouldn't happen for dirs, but be safe)
+        let lookup_name = if name_str.ends_with(".onedrivedownload") {
+            &name_str[..name_str.len() - 17]
+        } else {
+            &name_str
+        };
+
         // Get the directory to be deleted (case-insensitive lookup)
         if let Ok(Some(item)) = sync_await(
             self.drive_item_with_fuse_repo()
                 .get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(
-                    parent, &name_str,
+                    parent, lookup_name,
                 ),
         ) {
             let onedrive_id = item.id();
@@ -842,10 +856,22 @@ impl fuser::Filesystem for OneDriveFuse {
             parent, name_str, newparent, newname_str
         );
 
+        // Strip .onedrivedownload extension if present for lookup
+        let lookup_name = if name_str.ends_with(".onedrivedownload") {
+            &name_str[..name_str.len() - 17]
+        } else {
+            &name_str
+        };
+        let lookup_newname = if newname_str.ends_with(".onedrivedownload") {
+            &newname_str[..newname_str.len() - 17]
+        } else {
+            &newname_str
+        };
+
         // Get the item to be renamed
         let original_item = match sync_await(
             self.drive_item_with_fuse_repo()
-                .get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(parent, &name_str)
+                .get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(parent, lookup_name)
         ) {
             Ok(Some(item)) => item,
             Ok(None) => {
@@ -862,7 +888,7 @@ impl fuser::Filesystem for OneDriveFuse {
         // Check if target already exists
         let existing_target = sync_await(
             self.drive_item_with_fuse_repo()
-                .get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(newparent, &newname_str)
+                .get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(newparent, lookup_newname)
         ).unwrap_or(None);
 
         // Handle replace operation
@@ -900,12 +926,12 @@ impl fuser::Filesystem for OneDriveFuse {
         }
 
         // Normal rename operation - delegate to helper
-        match self.rename_item_in_db(&original_item, newparent, &newname_str) {
+        match self.rename_item_in_db(&original_item, newparent, lookup_newname) {
             Ok(_) => {
-                debug!("📂 Renamed: {} -> {} ({})", name_str, newname_str, original_item.id());
+                debug!("📂 Renamed: {} -> {} ({})", lookup_name, lookup_newname, original_item.id());
                 let original_item = sync_await(
                     self.drive_item_with_fuse_repo()
-                        .get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(newparent, &newname_str)
+                        .get_drive_item_with_fuse_by_parent_ino_and_name_case_insensitive(newparent, lookup_newname)
                 ).unwrap().unwrap();// We need to obtain Modified item to create processing item
                 // Create processing item based on operation type:
                 if parent != newparent {
