@@ -15,6 +15,7 @@ pub struct Page {
     pub start_date: String,
     pub end_date: String,
     pub thumb_paths: HashMap<u64, String>, // ino -> local path
+    pub filter_card_expanded: bool,
 }
 
 impl Page {
@@ -28,6 +29,7 @@ impl Page {
             start_date: String::new(),
             end_date: String::new(),
             thumb_paths: HashMap::new(),
+            filter_card_expanded: false,
         }
     }
 
@@ -93,6 +95,50 @@ impl Page {
             Message::ApplyFilters => {
                 self.offset = 0;
                 self.update(Message::FetchPage)
+            }
+            Message::ToggleFilterCard => {
+                self.filter_card_expanded = !self.filter_card_expanded;
+                cosmic::Task::none()
+            }
+            Message::OpenStartDateCalendar => {
+                let current_date = if self.start_date.is_empty() {
+                    chrono::Utc::now().date_naive()
+                } else {
+                    chrono::NaiveDate::parse_from_str(&self.start_date, "%Y-%m-%d")
+                        .unwrap_or_else(|_| chrono::Utc::now().date_naive())
+                };
+                let action = crate::app::ApplicationAction::Dialog(
+                    crate::app::DialogAction::Open(crate::app::DialogPage::StartDateCalendar(
+                        crate::app::dialog::DateInfo::new(current_date),
+                    )),
+                );
+                cosmic::task::future(async move {
+                    cosmic::Action::App(crate::app::Message::Application(action))
+                })
+            }
+            Message::OpenEndDateCalendar => {
+                let current_date = if self.end_date.is_empty() {
+                    chrono::Utc::now().date_naive()
+                } else {
+                    chrono::NaiveDate::parse_from_str(&self.end_date, "%Y-%m-%d")
+                        .unwrap_or_else(|_| chrono::Utc::now().date_naive())
+                };
+                let action = crate::app::ApplicationAction::Dialog(
+                    crate::app::DialogAction::Open(crate::app::DialogPage::EndDateCalendar(
+                        crate::app::dialog::DateInfo::new(current_date),
+                    )),
+                );
+                cosmic::task::future(async move {
+                    cosmic::Action::App(crate::app::Message::Application(action))
+                })
+            }
+            Message::StartDateSelected(date) => {
+                self.start_date = date.format("%Y-%m-%d").to_string();
+                cosmic::Task::none()
+            }
+            Message::EndDateSelected(date) => {
+                self.end_date = date.format("%Y-%m-%d").to_string();
+                cosmic::Task::none()
             }
             Message::ThumbLoaded(ino, result) => {
                 if let Ok(path) = result {

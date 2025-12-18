@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use cosmic::iced::{Alignment, Length};
-use cosmic::widget::{button, column, container, row, segmented_control, text};
+use cosmic::widget::{column, container, row, segmented_control, text};
 use onedrive_sync_lib::dbus::types::SyncQueueItem;
 use super::{message::Message, page::Page};
 
@@ -19,26 +19,10 @@ impl Page {
         // Page header
         let header_section = column()
             .spacing(spacing.space_s)
-            .push(text::title1("Download & Upload Queues"))
-            .push(text::body("Monitor active transfers and queue status"));
+            .push(text::title1("Download Queue"));
 
-        // Refresh button
-        let action_buttons = row()
-            .spacing(spacing.space_s)
-            .push(button::standard("Refresh").on_press(Message::Refresh));
-
-        // Header with actions
-        let header_row = row()
-            .spacing(spacing.space_l)
-            .align_y(cosmic::iced::Alignment::Center)
-            .push(header_section)
-            .push(
-                container(action_buttons)
-                    .align_x(cosmic::iced::alignment::Horizontal::Right)
-                    .width(Length::Fill)
-            );
-
-        content = content.push(header_row);
+        // Header section
+        content = content.push(header_section);
 
         // Loading and error states as cards
         if self.loading {
@@ -69,20 +53,8 @@ impl Page {
             content = content.push(error_card);
         }
 
-        // Queue selection tabs
-        let queue_selector = container(self.horizontal_selection())
-            .padding([spacing.space_none, spacing.space_s])
-            .width(Length::Fill);
-
-        content = content.push(queue_selector);
-
-        // Queue content based on selection  
-        let selected_queue = self.selected_queue.clone();
-        let queue_content = if selected_queue == "Download" {
-            self.create_enhanced_queue_card("Download Queue", &self.download_queue)
-        } else {
-            self.create_enhanced_queue_card("Upload Queue", &self.upload_queue)
-        };
+        // Queue content - only Downloads
+        let queue_content = self.create_enhanced_queue_card("Download Queue", &self.download_queue);
 
         container(content.push(queue_content))
             .center_x(Length::Fill)

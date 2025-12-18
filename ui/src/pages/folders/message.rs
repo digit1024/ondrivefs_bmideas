@@ -9,5 +9,6 @@ pub enum Message {
     FolderNameChanged(String),
     FolderAdded(Result<bool, String>),
     FolderDeleted(Result<bool, String>),
+    AutoRefresh,
 }
 

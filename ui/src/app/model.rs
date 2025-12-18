@@ -15,7 +15,7 @@ use log::info;
 use std::collections::HashMap;
 use std::env;
 
-use super::{ApplicationAction, ContextPage, MenuAction, PageId};
+use super::{ApplicationAction, ContextPage, DialogAction, DialogPage, MenuAction, PageId};
 
 /// The application model stores app-specific state used to describe its interface and
 /// drive its logic.
@@ -41,6 +41,7 @@ pub struct AppModel {
     conflicts_page: pages::ConflictsPage,
     logs_page: pages::LogsPage,
     gallery_page: pages::GalleryPage,
+    dialog: Option<DialogPage>,
 }
 
 /// Messages emitted by the application and its widgets.
@@ -192,6 +193,7 @@ impl cosmic::Application for AppModel {
             conflicts_page: pages::ConflictsPage::new(),
             logs_page: pages::LogsPage::new(),
             gallery_page: pages::GalleryPage::new(),
+            dialog: None,
         };
 
         // Create startup commands: set window title and fetch initial data for pages
@@ -210,6 +212,9 @@ impl cosmic::Application for AppModel {
         let fetch_gallery_command = cosmic::task::future(async move {
             Message::GalleryPage(pages::gallery::message::Message::FetchPage)
         });
+        let fetch_logs_command = cosmic::task::future(async move {
+            Message::LogsPage(pages::logs::message::Message::FetchLogs)
+        });
 
         (
             app,
@@ -219,6 +224,7 @@ impl cosmic::Application for AppModel {
                 fetch_queues_command,
                 fetch_folders_command,
                 fetch_gallery_command,
+                fetch_logs_command,
             ]),
         )
     }
@@ -229,6 +235,8 @@ impl cosmic::Application for AppModel {
             Some(PageId::Queues) => self.queues_page.subscription().map(Message::QueuesPage),
             Some(PageId::Gallery) => self.gallery_page.subscription().map(Message::GalleryPage),
             Some(PageId::Logs) => self.logs_page.subscription().map(Message::LogsPage),
+            Some(PageId::Conflicts) => self.conflicts_page.subscription().map(Message::ConflictsPage),
+            Some(PageId::Folders) => self.folders_page.subscription().map(Message::FoldersPage),
             _ => Subscription::none(),
         }
     }
@@ -287,6 +295,11 @@ impl cosmic::Application for AppModel {
             .into()
     }
 
+    fn dialog(&self) -> Option<Element<Self::Message>> {
+        let dialog_page = self.dialog.as_ref()?;
+        Some(dialog_page.view().into())
+    }
+
     /// Handles messages emitted by the application and its widgets.
     fn update(&mut self, message: Self::Message) -> cosmic::Task<cosmic::Action<Message>> {
         match message {
@@ -299,6 +312,9 @@ impl cosmic::Application for AppModel {
                             self.context_page = context_page;
                             self.core.window.show_context = true;
                         }
+                    }
+                    ApplicationAction::Dialog(dialog_action) => {
+                        return self.update_dialog(dialog_action);
                     }
                 }
                 Task::none()
@@ -364,6 +380,56 @@ impl AppModel {
             self.set_window_title(window_title, id)
         } else {
             Task::none()
+        }
+    }
+
+    fn update_dialog(&mut self, dialog_action: DialogAction) -> Task<cosmic::Action<Message>> {
+        match dialog_action {
+            DialogAction::Open(page) => {
+                self.dialog = Some(page);
+                Task::none()
+            }
+            DialogAction::Update(page) => {
+                self.dialog = Some(page);
+                Task::none()
+            }
+            DialogAction::Close => {
+                self.dialog = None;
+                Task::none()
+            }
+            DialogAction::Complete => {
+                if let Some(page) = &self.dialog {
+                    match page {
+                        DialogPage::FullResetConfirm => {
+                            self.dialog = None;
+                            return cosmic::task::future(async move {
+                                cosmic::Action::App(Message::StatusPage(
+                                    pages::status::message::Message::ConfirmReset,
+                                ))
+                            });
+                        }
+                        DialogPage::StartDateCalendar(date_info) => {
+                            let selected_date = date_info.selected_date();
+                            self.dialog = None;
+                            return cosmic::task::future(async move {
+                                cosmic::Action::App(Message::GalleryPage(
+                                    pages::gallery::message::Message::StartDateSelected(selected_date),
+                                ))
+                            });
+                        }
+                        DialogPage::EndDateCalendar(date_info) => {
+                            let selected_date = date_info.selected_date();
+                            self.dialog = None;
+                            return cosmic::task::future(async move {
+                                cosmic::Action::App(Message::GalleryPage(
+                                    pages::gallery::message::Message::EndDateSelected(selected_date),
+                                ))
+                            });
+                        }
+                    }
+                }
+                Task::none()
+            }
         }
     }
 }

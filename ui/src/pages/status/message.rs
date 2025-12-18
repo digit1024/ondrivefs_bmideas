@@ -10,7 +10,8 @@ pub enum Message {
     ProfileLoaded(Result<UserProfile, String>),
     Refresh,
     AutoRefresh,
-    FullReset,
+    RequestFullResetDialog,
+    ConfirmReset,
     ToggleSyncPause,
 }
 

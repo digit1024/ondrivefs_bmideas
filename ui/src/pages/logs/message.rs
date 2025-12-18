@@ -8,5 +8,6 @@ pub enum Message {
     LogsLoaded(Result<Vec<String>, String>),
     Refresh,
     AutoRefresh,
+    TogglePause,
 }
 

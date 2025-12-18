@@ -34,9 +34,8 @@ impl Page {
         // Action buttons row with better styling
         let action_buttons = row()
             .spacing(spacing.space_s)
-            .push(button::standard("Refresh").on_press(Message::Refresh))
             .push(button::standard("Pause/Resume Sync").on_press(Message::ToggleSyncPause))
-            .push(button::destructive("Full Reset").on_press(Message::FullReset));
+            .push(button::destructive("Full Reset").on_press(Message::RequestFullResetDialog));
 
         // Header section with title and actions
         let header_section = row()

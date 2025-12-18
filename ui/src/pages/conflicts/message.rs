@@ -8,5 +8,6 @@ pub enum Message {
     Resolved(Result<(), String>),
     Loaded(Result<Vec<ConflictItem>, String>),
     Reload,
+    AutoRefresh,
 }
 

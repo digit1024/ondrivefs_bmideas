@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use cosmic::{
-    iced::{Alignment, Length, widget::{button, column, row, container, scrollable}},
+    iced::{Alignment, Length, Subscription, time, widget::{button, column, row, container, scrollable}},
     style,
 };
 use cosmic::widget::text;
 use onedrive_sync_lib::dbus::types::{ConflictItem, UserChoice};
 use crate::dbus_client::{self, DbusClient};
+use std::time::Duration;
 use super::message::Message;
 
 pub struct ConflictsPage {
@@ -20,8 +21,23 @@ impl ConflictsPage {
         }
     }
 
+    pub fn subscription(&self) -> Subscription<Message> {
+        time::every(Duration::from_secs(5)).map(|_| Message::AutoRefresh)
+    }
+
     pub fn update(&mut self, message: Message) -> cosmic::Task<cosmic::Action<crate::app::Message>> {
         match message {
+            Message::AutoRefresh | Message::Reload => {
+                let load_conflicts = async {
+                    dbus_client::with_dbus_client(|client: DbusClient| async move {
+                        client.get_conflicts().await
+                    })
+                    .await
+                };
+                cosmic::task::future(load_conflicts).map(|result| {
+                    cosmic::Action::App(crate::app::Message::ConflictsPage(Message::Loaded(result)))
+                })
+            }
             Message::Loaded(conflicts) => {
                 self.conflicts = conflicts;
                 cosmic::Task::none()
@@ -53,17 +69,6 @@ impl ConflictsPage {
                 self.conflicts = Err(e);
                 cosmic::Task::none()
             }
-            Message::Reload => {
-                let load_conflicts = async {
-                    dbus_client::with_dbus_client(|client: DbusClient| async move {
-                        client.get_conflicts().await
-                    })
-                    .await
-                };
-                cosmic::task::future(load_conflicts).map(|result| {
-                    cosmic::Action::App(crate::app::Message::ConflictsPage(Message::Loaded(result)))
-                })
-            }
         }
     }
 
@@ -74,7 +79,6 @@ impl ConflictsPage {
                     .spacing(10)
                     .align_x(Alignment::Center)
                     .push(text::body("No conflicts found.").size(24))
-                    .push(button("Check Again").on_press(Message::Reload))
                     .into()
             }
             Ok(conflicts) => {
@@ -158,7 +162,6 @@ impl ConflictsPage {
                     .align_x(Alignment::Center)
                     .push(text::body("Failed to load conflicts:").size(24))
                     .push(text::body(e.clone()))
-                    .push(button("Retry").on_press(Message::Reload))
                     .into()
             }
         };

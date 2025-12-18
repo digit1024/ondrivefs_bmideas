@@ -1,24 +1,55 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use cosmic::iced::{Alignment, Length};
-use cosmic::widget::{button, column, container, row, scrollable, text, text_input, image as image_widget};
+use cosmic::widget::{button, column, container, row, scrollable, text, image as image_widget};
 use cosmic::iced::widget::image::Handle as ImageHandle;
 use super::{message::Message, page::Page};
 
 impl Page {
     pub fn view(&self) -> cosmic::Element<Message> {
         let spacing = cosmic::theme::active().cosmic().spacing.space_m;
-        let header = row()
-            .spacing(spacing)
-            .push(text::title2("Gallery").size(24))
-            .push(
+        let header = text::title2("Gallery").size(24);
+        
+        // Filter card - collapsible
+        let filter_toggle_text = if self.filter_card_expanded { "Hide Filters" } else { "Show Filters" };
+        let mut filter_card_items: Vec<cosmic::Element<Message>> = vec![
+            row()
+                .spacing(spacing)
+                .push(text::title3("Filter"))
+                .push(
+                    container(button::standard(filter_toggle_text).on_press(Message::ToggleFilterCard))
+                        .align_x(Alignment::End)
+                        .width(Length::Fill)
+                )
+                .into()
+        ];
+        
+        if self.filter_card_expanded {
+            filter_card_items.push(
                 row()
                     .spacing(spacing)
-                    .push(text_input::inline_input("Start date (YYYY-MM-DD)", &self.start_date).on_input(Message::DateStartChanged))
-                    .push(text_input::inline_input("End date (YYYY-MM-DD)", &self.end_date).on_input(Message::DateEndChanged))
-                    .push(button::standard("Apply").on_press(Message::ApplyFilters))
-                    .push(button::standard("Load more").on_press(Message::LoadMore)),
+                    .push(
+                        button::standard(if self.start_date.is_empty() { "Select Start Date" } else { &self.start_date })
+                            .on_press(Message::OpenStartDateCalendar)
+                    )
+                    .push(
+                        button::standard(if self.end_date.is_empty() { "Select End Date" } else { &self.end_date })
+                            .on_press(Message::OpenEndDateCalendar)
+                    )
+                    .push(button::suggested("Apply").on_press(Message::ApplyFilters))
+                    .into()
             );
+            
+        }
+        
+        let filter_card = container(
+            column()
+                .spacing(spacing)
+                .extend(filter_card_items)
+        )
+        .class(cosmic::style::Container::Card)
+        .padding(spacing)
+        .width(Length::Fill);
 
         // Create responsive grid with dynamic column calculation
         let mut grid = column().spacing(spacing);
@@ -91,13 +122,15 @@ impl Page {
             container(text::body(format!("Error: {}", err)))
         } else { container(text::body("")) };
 
-        column()
+        let main_content = column()
             .spacing(spacing)
             .push(header)
+            .push(filter_card)
             .push(status)
             .push(error)
-            .push(list)
-            .into()
+            .push(list);
+
+        main_content.into()
     }
 }
 

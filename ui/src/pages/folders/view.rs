@@ -21,23 +21,8 @@ impl Page {
             .push(text::title1("Folders Management"))
             .push(text::body("Manage which OneDrive folders are synchronized. Add or remove folders below."));
 
-        // Action buttons row
-        let action_buttons = row()
-            .spacing(spacing.space_s)
-            .push(button::standard("Get Folders").on_press(Message::FetchFolders));
-
-        // Header with actions
-        let header_row = row()
-            .spacing(spacing.space_l)
-            .align_y(cosmic::iced::Alignment::Center)
-            .push(header_section)
-            .push(
-                container(action_buttons)
-                    .align_x(cosmic::iced::alignment::Horizontal::Right)
-                    .width(Length::Fill)
-            );
-
-        content = content.push(header_row);
+        // Header section
+        content = content.push(header_section);
 
         // Loading and error states as cards
         if self.loading {

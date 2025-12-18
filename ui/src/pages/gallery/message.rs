@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use onedrive_sync_lib::dbus::types::MediaItem;
+use chrono::NaiveDate;
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -15,5 +16,10 @@ pub enum Message {
     OpenItem(String), // virtual_path
     Opened(Result<String, String>),
     Noop,
+    ToggleFilterCard,
+    OpenStartDateCalendar,
+    OpenEndDateCalendar,
+    StartDateSelected(NaiveDate),
+    EndDateSelected(NaiveDate),
 }
 

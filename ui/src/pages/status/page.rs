@@ -86,17 +86,31 @@ impl Page {
                 });
                 cosmic::task::batch(vec![flush_latest, a, b])
             }
-            Message::FullReset => {
-                info!("StatusPage: Full reset requested");
+            Message::RequestFullResetDialog => {
+                let action = crate::app::ApplicationAction::Dialog(
+                    crate::app::DialogAction::Open(crate::app::DialogPage::FullResetConfirm),
+                );
+                cosmic::task::future(async move {
+                    cosmic::Action::App(crate::app::Message::Application(action))
+                })
+            }
+            Message::ConfirmReset => {
+                info!("StatusPage: Full reset confirmed - executing");
                 self.loading = true;
                 self.error = None;
                 let reset = async move {
                     match DbusClient::new().await {
                         Ok(client) => {
                             info!("StatusPage: Successfully created DbusClient");
-                            match client.get_daemon_status().await {
-                                Ok(status) => Ok(status),
-                                Err(e) => Err(format!("Failed to get daemon status: {}", e)),
+                            match client.full_reset().await {
+                                Ok(_) => {
+                                    // After reset, try to get status (may fail if daemon restarts)
+                                    match client.get_daemon_status().await {
+                                        Ok(status) => Ok(status),
+                                        Err(_) => Err("Daemon is restarting after reset".to_string()),
+                                    }
+                                }
+                                Err(e) => Err(format!("Failed to perform full reset: {}", e)),
                             }
                         }
                         Err(e) => {

@@ -13,6 +13,7 @@ pub struct Page {
     pub logs: Vec<String>,
     pub loading: bool,
     pub error: Option<String>,
+    pub paused: bool,
 }
 
 impl Page {
@@ -21,11 +22,16 @@ impl Page {
             logs: Vec::new(),
             loading: false,
             error: None,
+            paused: false,
         }
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        time::every(Duration::from_secs(5)).map(|_| Message::AutoRefresh)
+        if self.paused {
+            Subscription::none()
+        } else {
+            time::every(Duration::from_secs(5)).map(|_| Message::AutoRefresh)
+        }
     }
 
     pub fn view(&self) -> cosmic::Element<Message> {
@@ -36,8 +42,9 @@ impl Page {
             .height(Length::Fill);
 
         let header = text::title2("Daemon Logs").size(24);
-        let refresh_row = row().width(Length::Fill).push(
-            container(button::standard("Refresh").on_press(Message::Refresh))
+        let pause_button_text = if self.paused { "Resume" } else { "Pause" };
+        let pause_row = row().width(Length::Fill).push(
+            container(button::standard(pause_button_text).on_press(Message::TogglePause))
                 .align_x(Alignment::End)
                 .width(Length::Fill),
         );
@@ -74,7 +81,7 @@ impl Page {
 
         content
             .push(header)
-            .push(refresh_row)
+            .push(pause_row)
             .push(loading_indicator)
             .push(error_display)
             .push(log_scroll)
@@ -86,7 +93,18 @@ impl Page {
         message: Message,
     ) -> cosmic::Task<cosmic::Action<crate::app::Message>> {
         match message {
+            Message::TogglePause => {
+                self.paused = !self.paused;
+                if !self.paused {
+                    // Auto-fetch when resuming
+                    return self.update(Message::FetchLogs);
+                }
+                cosmic::Task::none()
+            }
             Message::AutoRefresh | Message::FetchLogs | Message::Refresh => {
+                if self.paused {
+                    return cosmic::Task::none();
+                }
                 self.loading = true;
                 self.error = None;
                 let fetch_logs = async move {

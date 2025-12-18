@@ -62,29 +62,14 @@ impl Page {
                         Err(e) => Err(format!("Failed to connect to daemon: {}", e)),
                     }
                 };
-                let fetch_upload = async move {
-                    match DbusClient::new().await {
-                        Ok(client) => match client.get_upload_queue().await {
-                            Ok(items) => Ok(items),
-                            Err(e) => Err(format!("Failed to get upload queue: {}", e)),
-                        },
-                        Err(e) => Err(format!("Failed to connect to daemon: {}", e)),
-                    }
-                };
-                let a = cosmic::task::future(fetch_download).map(|result| {
+                cosmic::task::future(fetch_download).map(|result| {
                     cosmic::Action::App(crate::app::Message::QueuesPage(
                         Message::DownloadQueueLoaded(result),
                     ))
-                });
-                let b = cosmic::task::future(fetch_upload).map(|result| {
-                    cosmic::Action::App(crate::app::Message::QueuesPage(
-                        Message::UploadQueueLoaded(result),
-                    ))
-                });
-                cosmic::task::batch(vec![a, b])
+                })
             }
             Message::FetchQueues => {
-                info!("QueuesPage: Fetching download and upload queues");
+                info!("QueuesPage: Fetching download queue");
                 self.loading = true;
                 self.error = None;
                 let fetch_download = async move {
@@ -96,26 +81,11 @@ impl Page {
                         Err(e) => Err(format!("Failed to connect to daemon: {}", e)),
                     }
                 };
-                let fetch_upload = async move {
-                    match DbusClient::new().await {
-                        Ok(client) => match client.get_upload_queue().await {
-                            Ok(items) => Ok(items),
-                            Err(e) => Err(format!("Failed to get upload queue: {}", e)),
-                        },
-                        Err(e) => Err(format!("Failed to connect to daemon: {}", e)),
-                    }
-                };
-                let a = cosmic::task::future(fetch_download).map(|result| {
+                cosmic::task::future(fetch_download).map(|result| {
                     cosmic::Action::App(crate::app::Message::QueuesPage(
                         Message::DownloadQueueLoaded(result),
                     ))
-                });
-                let b = cosmic::task::future(fetch_upload).map(|result| {
-                    cosmic::Action::App(crate::app::Message::QueuesPage(
-                        Message::UploadQueueLoaded(result),
-                    ))
-                });
-                cosmic::task::batch(vec![a, b])
+                })
             }
             Message::DownloadQueueLoaded(result) => {
                 self.loading = false;
@@ -157,26 +127,11 @@ impl Page {
                         Err(e) => Err(format!("Failed to connect to daemon: {}", e)),
                     }
                 };
-                let fetch_upload = async move {
-                    match DbusClient::new().await {
-                        Ok(client) => match client.get_upload_queue().await {
-                            Ok(items) => Ok(items),
-                            Err(e) => Err(format!("Failed to get upload queue: {}", e)),
-                        },
-                        Err(e) => Err(format!("Failed to connect to daemon: {}", e)),
-                    }
-                };
-                let a = cosmic::task::future(fetch_download).map(|result| {
+                cosmic::task::future(fetch_download).map(|result| {
                     cosmic::Action::App(crate::app::Message::QueuesPage(
                         Message::DownloadQueueLoaded(result),
                     ))
-                });
-                let b = cosmic::task::future(fetch_upload).map(|result| {
-                    cosmic::Action::App(crate::app::Message::QueuesPage(
-                        Message::UploadQueueLoaded(result),
-                    ))
-                });
-                cosmic::task::batch(vec![a, b])
+                })
             }
         }
     }

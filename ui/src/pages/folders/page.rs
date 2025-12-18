@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use crate::dbus_client::{with_dbus_client, DbusClient};
+use cosmic::iced::{time, Subscription};
+use std::time::Duration;
 use super::message::Message;
 
 pub struct Page {
@@ -20,12 +22,16 @@ impl Page {
         }
     }
 
+    pub fn subscription(&self) -> Subscription<Message> {
+        time::every(Duration::from_secs(5)).map(|_| Message::AutoRefresh)
+    }
+
     pub fn update(
         &mut self,
         message: Message,
     ) -> cosmic::Task<cosmic::Action<crate::app::Message>> {
         match message {
-            Message::FetchFolders => {
+            Message::AutoRefresh | Message::FetchFolders => {
                 self.loading = true;
                 self.error = None;
                 let fetch_folders =
