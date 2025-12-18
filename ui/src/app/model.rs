@@ -166,7 +166,7 @@ impl cosmic::Application for AppModel {
             .icon(Self::APP_ID.to_string())
             .version(env!("CARGO_PKG_VERSION"))
             .author("Michał Banaś (digit1024)")
-            .license("MPL-2.0")
+            .license("MIT")
             .links([
                 (fl!("repository"), "https://github.com/digit1024/ondrivefs_bmideas"),
                 (fl!("support"), "https://github.com/digit1024/ondrivefs_bmideas/issues"),

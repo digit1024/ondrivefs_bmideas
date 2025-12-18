@@ -1,0 +1,37 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <defs>
+    <!-- Background gradient -->
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#667eea" />
+      <stop offset="100%" stop-color="#764ba2" />
+    </linearGradient>
+
+    <!-- Cloud gradient -->
+    <linearGradient id="cloudGradient" x1="0%" y1="50%" x2="100%" y2="50%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="100%" stop-color="#E0E7FF" />
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded square background -->
+  <rect x="2" y="2" width="60" height="60" rx="12" ry="12" fill="url(#bgGradient)" />
+
+  <!-- Cloud shape -->
+  <path
+    d="M48 30a10 10 0 0 0-19.9-2A7 7 0 0 0 22 35h1a7 7 0 0 0 0 14h25a7 7 0 0 0 0-14h-1"
+    fill="url(#cloudGradient)"
+  />
+
+  <!-- Checkmark circle -->
+  <circle cx="32" cy="36" r="8" fill="white" opacity="0.9" stroke="#FFFFFF" stroke-width="1" />
+
+  <!-- Checkmark -->
+  <path
+    d="M28 36l2.5 2.5L36 33"
+    stroke="#667eea"
+    stroke-width="2"
+    fill="none"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>
