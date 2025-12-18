@@ -184,7 +184,10 @@ impl SyncProcessor {
          async fn squash_delete_in_trash(&self, drive_item_id: &str) -> Result<bool> {
             let items = self.get_local_processing_items_for_drive_item(drive_item_id).await?;
             //Get the current Item from the database
-            let current_item = self.drive_item_with_fuse_repo.get_drive_item_with_fuse(drive_item_id).await?.unwrap();
+            let Some(current_item) = self.drive_item_with_fuse_repo.get_drive_item_with_fuse(drive_item_id).await? else {
+                // Item doesn't exist in DB yet (e.g., Create operation)
+                return Ok(false);
+            };
             let is_in_trash = current_item.virtual_path().unwrap_or("").starts_with("/root/.Trash-1000");
             
             let was_synced = !drive_item_id.starts_with("local_");

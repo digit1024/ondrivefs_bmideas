@@ -234,13 +234,22 @@ async fn test_remote_conflict_create_on_create() -> Result<()> {
 #[serial]
 async fn test_remote_conflict_modify_on_modify() -> Result<()> {
     println!("\n🧪 Remote Conflict: ModifyOnModify");
-    let (app_state, repo, drive_items_with_fuse_repo, _mock_client) = setup_test_env().await?;
+    let (app_state, repo, drive_items_with_fuse_repo, mock_client) = setup_test_env().await?;
 
     let original_item = drive_items_with_fuse_repo
         .get_drive_item_with_fuse_by_virtual_ino(5)
         .await?
         .unwrap();
     let original_etag = original_item.drive_item().etag.clone();
+    
+    // Configure mock to return item with DIFFERENT ctag (simulating remote has new content)
+    let mut remote_state_item = original_item.drive_item().clone();
+    remote_state_item.ctag = Some("remote-new-ctag-from-server".to_string());
+    remote_state_item.etag = Some("remote-etag-456".to_string());
+    mock_client.set_expected_drive_item(
+        original_item.drive_item().id.clone(),
+        remote_state_item
+    );
 
     // Create local file for update
     create_local_file(&app_state, 5, "local content").await?;
@@ -261,7 +270,7 @@ async fn test_remote_conflict_modify_on_modify() -> Result<()> {
         &sync_processor,
         remote_id,
         ProcessingStatus::Conflicted,
-        Some("Remote item was modified, but the local item was also modified"),
+        Some("Content conflict detected"),
     ).await?;
 
     // Verify original etag is preserved
