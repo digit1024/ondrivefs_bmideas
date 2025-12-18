@@ -54,7 +54,7 @@ impl Default for MockResponses {
                 etag: Some("mock_etag".to_string()),
                 web_url: Some("mock_url".to_string()),
                 size: Some(100),
-                ctag: None,
+                ctag: Some("mock_ctag".to_string()),
             }],
             create_folder_results: vec![CreateFolderResult {
                 onedrive_id: "mock_folder_id".to_string(),
@@ -221,7 +221,7 @@ impl OneDriveClientTrait for MockOneDriveClient {
                     etag: Some("mock_etag".to_string()),
                     web_url: Some("mock_url".to_string()),
                     size: Some(100),
-                    ctag: None,
+                    ctag: Some("mock_ctag".to_string()),
                 }))
         }
     }
@@ -240,7 +240,7 @@ impl OneDriveClientTrait for MockOneDriveClient {
                 etag: Some("mock_etag".to_string()),
                 web_url: Some("mock_url".to_string()),
                 size: Some(100),
-                ctag: None,
+                ctag: Some("mock_ctag".to_string()),
             })
         }
     }
@@ -259,7 +259,7 @@ impl OneDriveClientTrait for MockOneDriveClient {
                 etag: Some("mock_etag".to_string()),
                 web_url: Some("mock_url".to_string()),
                 size: Some(100),
-                ctag: None,
+                ctag: Some("mock_ctag".to_string()),
             })
         }
     }
@@ -273,7 +273,7 @@ impl OneDriveClientTrait for MockOneDriveClient {
                 etag: Some("mock_etag".to_string()),
                 web_url: Some("mock_url".to_string()),
                 size: Some(100),
-                ctag: None,
+                ctag: Some("mock_ctag".to_string()),
             })
         }
     }
@@ -301,7 +301,7 @@ impl OneDriveClientTrait for MockOneDriveClient {
                 download_url: Some("mock_download_url".to_string()),
                 deleted: None,
                 parent_reference: None,
-                ctag: None,
+                ctag: Some("mock_ctag".to_string()),
             })
         }
     }
@@ -320,7 +320,7 @@ impl OneDriveClientTrait for MockOneDriveClient {
                 etag: Some("mock_etag".to_string()),
                 web_url: Some("mock_url".to_string()),
                 size: Some(100),
-                ctag: None,
+                ctag: Some("mock_ctag".to_string()),
             })
         }
     }
@@ -334,7 +334,7 @@ impl OneDriveClientTrait for MockOneDriveClient {
                 etag: Some("mock_etag".to_string()),
                 web_url: Some("mock_url".to_string()),
                 size: Some(100),
-                ctag: None,
+                ctag: Some("mock_ctag".to_string()),
             })
         }
     }
@@ -360,7 +360,7 @@ impl OneDriveClientTrait for MockOneDriveClient {
                     download_url: Some("mock_download_url".to_string()),
                     deleted: None,
                     parent_reference: None,
-                    ctag: None,
+                    ctag: Some("mock_ctag".to_string()),
                 }))
         }
     }
@@ -408,7 +408,7 @@ impl OneDriveClientTrait for MockOneDriveClient {
                 download_url: Some("mock_download_url".to_string()),
                 deleted: None,
                 parent_reference: None,
-                ctag: None,
+                ctag: Some("mock_ctag".to_string()),
             })
         }
     }
@@ -431,7 +431,7 @@ impl OneDriveClientTrait for MockOneDriveClient {
                 download_url: Some("mock_download_url".to_string()),
                 deleted: None,
                 parent_reference: None,
-                ctag: None,
+                ctag: Some("mock_ctag".to_string()),
             })
         }
     }

@@ -3496,6 +3496,7 @@ dependencies = [
  "image",
  "lazy_static",
  "libc",
+ "license",
  "mime 0.3.17",
  "palette",
  "raw-window-handle",
@@ -3550,6 +3551,17 @@ dependencies = [
  "cc",
  "pkg-config",
  "vcpkg",
+]
+
+[[package]]
+name = "license"
+version = "3.7.0+3.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2db9430f1c0c6079d5650a97674467ff3934cb852400817eeb6c216b0a4eddb"
+dependencies = [
+ "reword",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -4430,6 +4442,7 @@ name = "onedrive-sync-ui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "env_logger 0.10.2",
  "futures-util",
  "i18n-embed",
@@ -5250,6 +5263,15 @@ dependencies = [
  "svgtypes",
  "tiny-skia",
  "usvg",
+]
+
+[[package]]
+name = "reword"
+version = "7.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2de73ec80cfacafa51b73b0db31d6c3a4718fc6b0d479ef445609704020c1b0"
+dependencies = [
+ "unicode-segmentation",
 ]
 
 [[package]]

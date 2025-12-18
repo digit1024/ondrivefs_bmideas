@@ -198,6 +198,7 @@ async fn test_fuse_mount_lifecycle() -> Result<()> {
 
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Requires FUSE support - not available in CI"]
 async fn test_basic_operations_on_fuse_mount_using_command_line() -> Result<()> {
     let (app_state, _, _, _mock_client) = setup_test_env().await?;
     
@@ -260,6 +261,7 @@ async fn test_basic_operations_on_fuse_mount_using_command_line() -> Result<()> 
 
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Requires FUSE support - not available in CI"]
 async fn test_basic_multple_updates() -> Result<()> {
     let (app_state, _, _, _mock_client) = setup_test_env().await?;
     
