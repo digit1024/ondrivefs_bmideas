@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 description = "onedrive-sync UI for POP OS Cosmic "
+repository = "https://github.com/digit1024/ondrivefs_bmideas"
 
 
 [build-dependencies]

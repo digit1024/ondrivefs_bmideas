@@ -327,7 +327,7 @@ impl cosmic::Application for AppModel {
             Message::QueuesPage(queues_message) => self.queues_page.update(queues_message),
             Message::ConflictsPage(conflicts_message) => self.conflicts_page.update(conflicts_message),
             Message::AboutElement(about_element::Message::OpenRepositoryUrl) => {
-                _ = open::that_detached("REPOITORY");
+                _ = open::that_detached(env!("CARGO_PKG_REPOSITORY"));
                 Task::none()
             }
             Message::AboutElement(about_element::Message::LaunchUrl(url)) => {
