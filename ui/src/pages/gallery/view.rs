@@ -36,7 +36,7 @@ impl Page {
                 let thumb_el: cosmic::Element<Message> = if let Some(path) = self.thumb_paths.get(&item.ino) {
                     let handle = ImageHandle::from_path(path.clone());
                     let img = image_widget(handle);
-                    let clickable = button::custom(img).class(cosmic::style::Button::Image).on_press(Message::OpenItem(item.ino));
+                    let clickable = button::custom(img).class(cosmic::style::Button::Image).on_press(Message::OpenItem(item.virtual_path.clone()));
                     let image_container = container(clickable)
                         .width(Length::Fill)
                         .height(Length::Fixed(176.0))

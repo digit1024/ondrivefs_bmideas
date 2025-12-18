@@ -12,7 +12,7 @@ pub enum Message {
     ApplyFilters,
     AutoRefresh,
     ThumbLoaded(u64, Result<String, String>),
-    OpenItem(u64),
+    OpenItem(String), // virtual_path
     Opened(Result<String, String>),
     Noop,
 }

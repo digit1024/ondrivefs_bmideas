@@ -100,9 +100,11 @@ impl Page {
                 }
                 cosmic::Task::none()
             }
-            Message::OpenItem(ino) => {
-                let fut = with_dbus_client(move |client| async move { client.ensure_local_by_ino(ino).await });
-                cosmic::task::future(fut).map(|result| {
+            Message::OpenItem(virtual_path) => {
+                // Construct the OneDrive mount path: ~/OneDrive{virtual_path}
+                let home_dir = std::env::var("HOME").unwrap_or_else(|_| "~".to_string());
+                let mount_path = format!("{}/OneDrive{}", home_dir, virtual_path);
+                cosmic::task::future(async move { Ok(mount_path) }).map(|result| {
                     cosmic::Action::App(crate::app::Message::GalleryPage(Message::Opened(result)))
                 })
             }
