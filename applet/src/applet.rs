@@ -1,7 +1,8 @@
 use std::time::Duration;
 
 use cosmic::app::{Core, Task};
-use cosmic::iced::{Subscription, time};
+use cosmic::iced::{Length, Subscription, time};
+use cosmic::widget::container;
 use onedrive_sync_lib::dbus::types::DaemonStatus;
 
 use crate::dbus_client::with_dbus_client;
@@ -137,14 +138,20 @@ impl cosmic::Application for OneDriveApplet {
         
         // Create a clickable button with the icon
         let icon = cosmic::widget::icon::from_name(icon_name)
-            .size(16)
-            .symbolic(false);
+            .symbolic(false)
+            .size(32); // Set icon size to fill applet area
         
         let button = cosmic::widget::button::custom(cosmic::Element::from(icon))
             .class(cosmic::theme::Button::AppletIcon)
             .on_press(Message::IconClicked);
 
-        cosmic::Element::from(button)
+        // Wrap button in container that fills the entire applet area
+        container(button)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .into()
     }
 
     fn view_window(&self, _id: cosmic::iced::window::Id) -> cosmic::Element<Message> {

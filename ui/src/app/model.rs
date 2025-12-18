@@ -7,34 +7,15 @@ use cosmic::cosmic_config::{self, CosmicConfigEntry};
 use cosmic::iced::{Length, Subscription};
 
 use cosmic::prelude::*;
+use cosmic::ApplicationExt;
 use cosmic::widget::{self, icon, menu, nav_bar};
 
-use crate::pages::{self, about_element, conflicts_page, folders_page, queues_page, status_page, gallery_page};
+use crate::pages::{self, about_element};
 use log::info;
 use std::collections::HashMap;
+use std::env;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
-enum PageId {
-    #[default]
-    Gallery,
-    Status,
-    Folders,
-    Queues,
-    Conflicts,
-    Logs,
-
-}
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
-pub enum ContextPage {
-    #[default]
-    About,
-}
-
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
-pub enum MenuAction {
-    #[default]
-    About,
-}
+use super::{ApplicationAction, ContextPage, MenuAction, PageId};
 
 /// The application model stores app-specific state used to describe its interface and
 /// drive its logic.
@@ -53,47 +34,43 @@ pub struct AppModel {
 
     #[allow(dead_code)]
     active_page: PageId,
-    status_page: pages::status_page::Page,
-    folders_page: pages::folders_page::Page,
-    queues_page: pages::queues_page::Page,
-    conflicts_page: pages::conflicts_page::ConflictsPage,
-    logs_page: pages::logs_page::Page,
-    gallery_page: pages::gallery_page::Page,
+    about: cosmic::widget::about::About,
+    status_page: pages::StatusPage,
+    folders_page: pages::FoldersPage,
+    queues_page: pages::QueuesPage,
+    conflicts_page: pages::ConflictsPage,
+    logs_page: pages::LogsPage,
+    gallery_page: pages::GalleryPage,
 }
 
 /// Messages emitted by the application and its widgets.
 #[derive(Debug, Clone)]
 pub enum Message {
-    // Navigation and UI
-    //OpenRepositoryUrl,
-    ToggleContextPage(ContextPage),
-    StatusPage(status_page::Message),
-    FoldersPage(folders_page::Message),
-    QueuesPage(queues_page::Message),
-    ConflictsPage(conflicts_page::Message),
+    Application(ApplicationAction),
+    StatusPage(pages::status::message::Message),
+    FoldersPage(pages::folders::message::Message),
+    QueuesPage(pages::queues::message::Message),
+    ConflictsPage(pages::conflicts::message::Message),
     AboutElement(about_element::Message),
-    LogsPage(pages::logs_page::Message),
-    GalleryPage(gallery_page::Message),
+    LogsPage(pages::logs::message::Message),
+    GalleryPage(pages::gallery::message::Message),
+    Open(String),
 }
-// impl From<status_page::Message> for Message {
-//     fn from(message: status_page::Message) -> Self {
-//         Self::StatusPage(message)
-//     }
-// }
-impl From<status_page::Message> for Message {
-    fn from(message: status_page::Message) -> Self {
+
+impl From<pages::status::message::Message> for Message {
+    fn from(message: pages::status::message::Message) -> Self {
         Self::StatusPage(message)
     }
 }
 
-impl From<folders_page::Message> for Message {
-    fn from(message: folders_page::Message) -> Self {
+impl From<pages::folders::message::Message> for Message {
+    fn from(message: pages::folders::message::Message) -> Self {
         Self::FoldersPage(message)
     }
 }
 
-impl From<queues_page::Message> for Message {
-    fn from(message: queues_page::Message) -> Self {
+impl From<pages::queues::message::Message> for Message {
+    fn from(message: pages::queues::message::Message) -> Self {
         Self::QueuesPage(message)
     }
 }
@@ -104,13 +81,22 @@ impl From<about_element::Message> for Message {
     }
 }
 
-impl From<pages::logs_page::Message> for Message {
-    fn from(message: pages::logs_page::Message) -> Self {
+impl From<pages::logs::message::Message> for Message {
+    fn from(message: pages::logs::message::Message) -> Self {
         Self::LogsPage(message)
     }
 }
-impl From<gallery_page::Message> for Message {
-    fn from(message: gallery_page::Message) -> Self { Self::GalleryPage(message) }
+
+impl From<pages::gallery::message::Message> for Message {
+    fn from(message: pages::gallery::message::Message) -> Self {
+        Self::GalleryPage(message)
+    }
+}
+
+impl From<pages::conflicts::message::Message> for Message {
+    fn from(message: pages::conflicts::message::Message) -> Self {
+        Self::ConflictsPage(message)
+    }
 }
 
 /// Create a COSMIC application from the app model
@@ -140,7 +126,7 @@ impl cosmic::Application for AppModel {
         core: cosmic::Core,
         _flags: Self::Flags,
     ) -> (Self, Task<cosmic::Action<Self::Message>>) {
-        // Create a nav bar with three page items.
+        // Create a nav bar with page items.
         let mut nav = nav_bar::Model::default();
         nav.insert()
             .text("Gallery")
@@ -173,9 +159,18 @@ impl cosmic::Application for AppModel {
             .data::<PageId>(PageId::Logs)
             .icon(icon::from_name("text-x-generic-symbolic"));
 
-
-
-
+        // Initialize About widget
+        let about = cosmic::widget::about::About::default()
+            .name(fl!("app-title"))
+            .icon(Self::APP_ID.to_string())
+            .version(env!("CARGO_PKG_VERSION"))
+            .author("Michał Banaś (digit1024)")
+            .license("MPL-2.0")
+            .links([
+                (fl!("repository"), "https://github.com/digit1024/ondrivefs_bmideas"),
+                (fl!("support"), "https://github.com/digit1024/ondrivefs_bmideas/issues"),
+            ])
+            .developers([("Michał Banaś", "https://github.com/digit1024")]);
 
         // Construct the app model with the runtime's core.
         let mut app = AppModel {
@@ -190,29 +185,30 @@ impl cosmic::Application for AppModel {
                 })
                 .unwrap_or_default(),
             active_page: PageId::Gallery,
-            status_page: pages::status_page::Page::new(),
-            folders_page: pages::folders_page::Page::new(),
-            queues_page: pages::queues_page::Page::new(),
-            conflicts_page: pages::conflicts_page::ConflictsPage::new(),
-            logs_page: pages::logs_page::Page::new(),
-            gallery_page: pages::gallery_page::Page::new(),
+            about,
+            status_page: pages::StatusPage::new(),
+            folders_page: pages::FoldersPage::new(),
+            queues_page: pages::QueuesPage::new(),
+            conflicts_page: pages::ConflictsPage::new(),
+            logs_page: pages::LogsPage::new(),
+            gallery_page: pages::GalleryPage::new(),
         };
 
         // Create startup commands: set window title and fetch initial data for pages
         let title_command = app.update_title();
         let fetch_status_command = cosmic::task::future(async move {
             info!("App: Initializing StatusPage with fetch command");
-            Message::StatusPage(status_page::Message::FetchStatus)
+            Message::StatusPage(pages::status::message::Message::FetchStatus)
         });
         let fetch_queues_command =
             cosmic::task::future(
-                async move { Message::QueuesPage(queues_page::Message::FetchQueues) },
+                async move { Message::QueuesPage(pages::queues::message::Message::FetchQueues) },
             );
         let fetch_folders_command = cosmic::task::future(async move {
-            Message::FoldersPage(folders_page::Message::FetchFolders)
+            Message::FoldersPage(pages::folders::message::Message::FetchFolders)
         });
         let fetch_gallery_command = cosmic::task::future(async move {
-            Message::GalleryPage(gallery_page::Message::FetchPage)
+            Message::GalleryPage(pages::gallery::message::Message::FetchPage)
         });
 
         (
@@ -232,6 +228,7 @@ impl cosmic::Application for AppModel {
             Some(PageId::Status) => self.status_page.subscription().map(Message::StatusPage),
             Some(PageId::Queues) => self.queues_page.subscription().map(Message::QueuesPage),
             Some(PageId::Gallery) => self.gallery_page.subscription().map(Message::GalleryPage),
+            Some(PageId::Logs) => self.logs_page.subscription().map(Message::LogsPage),
             _ => Subscription::none(),
         }
     }
@@ -255,19 +252,20 @@ impl cosmic::Application for AppModel {
     }
 
     /// Display a context drawer if the context page is requested.
-    // fn context_drawer(&self) -> Option<context_drawer::ContextDrawer<Self::Message>> {
-    //     if !self.core.window.show_context {
-    //         return None;
-    //     }
+    fn context_drawer(&self) -> Option<cosmic::app::context_drawer::ContextDrawer<Self::Message>> {
+        if !self.core.window.show_context {
+            return None;
+        }
 
-    //     // Some(match self.context_page {
-    //     //     ContextPage::About => context_drawer::context_drawer(
-    //     //         about_element::about(),
-    //     //         Message::ToggleContextPage(ContextPage::About),
-    //     //     )
-    //     //     .title(fl!("about")),
-    //     // })
-    // }
+        Some(match self.context_page {
+            ContextPage::About => cosmic::app::context_drawer::about(
+                &self.about,
+                Message::Open,
+                Message::Application(ApplicationAction::ToggleContextPage(ContextPage::About)),
+            )
+            .title(fl!("about")),
+        })
+    }
 
     /// Describes the interface based on the current state of the application model.
     fn view(&self) -> Element<Self::Message> {
@@ -292,19 +290,19 @@ impl cosmic::Application for AppModel {
     /// Handles messages emitted by the application and its widgets.
     fn update(&mut self, message: Self::Message) -> cosmic::Task<cosmic::Action<Message>> {
         match message {
-            // Message::OpenRepositoryUrl => {
-            //     _ = open::that_detached(REPOSITORY);
-            // }
-            Message::ToggleContextPage(context_page) => {
-                if self.context_page == context_page {
-                    self.core.window.show_context = !self.core.window.show_context;
-                } else {
-                    self.context_page = context_page;
-                    self.core.window.show_context = true;
+            Message::Application(action) => {
+                match action {
+                    ApplicationAction::ToggleContextPage(context_page) => {
+                        if self.context_page == context_page {
+                            self.core.window.show_context = !self.core.window.show_context;
+                        } else {
+                            self.context_page = context_page;
+                            self.core.window.show_context = true;
+                        }
+                    }
                 }
                 Task::none()
             }
-
             Message::StatusPage(status_message) => {
                 info!("App: Processing StatusPage message: {:?}", status_message);
                 self.status_page.update(status_message)
@@ -322,6 +320,12 @@ impl cosmic::Application for AppModel {
             }
             Message::LogsPage(logs_message) => self.logs_page.update(logs_message),
             Message::GalleryPage(gallery_message) => self.gallery_page.update(gallery_message),
+            Message::Open(url) => {
+                if let Err(err) = open::that_detached(url) {
+                    log::error!("Failed to open URL: {}", err);
+                }
+                Task::none()
+            }
         }
     }
 
@@ -331,24 +335,22 @@ impl cosmic::Application for AppModel {
         let mut tasks = vec![self.update_title()];
         if self.nav.active_data::<PageId>() == Some(&PageId::Folders) {
             tasks.push(cosmic::task::future(async move {
-                Message::FoldersPage(folders_page::Message::FetchFolders)
+                Message::FoldersPage(pages::folders::message::Message::FetchFolders)
             }));
         } else if self.nav.active_data::<PageId>() == Some(&PageId::Conflicts) {
             tasks.push(cosmic::task::future(async move {
-                Message::ConflictsPage(conflicts_page::Message::Reload)
+                Message::ConflictsPage(pages::conflicts::message::Message::Reload)
             }));
         } else if self.nav.active_data::<PageId>() == Some(&PageId::Gallery) {
-            tasks.push(cosmic::task::future(async move { Message::GalleryPage(gallery_page::Message::FetchPage) }));
+            tasks.push(cosmic::task::future(async move { 
+                Message::GalleryPage(pages::gallery::message::Message::FetchPage) 
+            }));
         }
         Task::batch(tasks)
     }
 }
 
 impl AppModel {
-    /// Status page showing sync information
-
-    /// The about page for this app.
-
     /// Updates the header and window titles.
     pub fn update_title(&mut self) -> Task<cosmic::Action<Message>> {
         let mut window_title = fl!("app-title");
@@ -371,7 +373,8 @@ impl menu::action::MenuAction for MenuAction {
 
     fn message(&self) -> Self::Message {
         match self {
-            MenuAction::About => Message::ToggleContextPage(ContextPage::About),
+            MenuAction::About => Message::Application(ApplicationAction::ToggleContextPage(ContextPage::About)),
         }
     }
 }
+

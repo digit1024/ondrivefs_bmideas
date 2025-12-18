@@ -51,7 +51,7 @@ features = [
     "xdg-portal",
     "desktop", 
     "debug",
-    
+    "about",
 ]
 
 # Uncomment to test a locally-cloned libcosmic
