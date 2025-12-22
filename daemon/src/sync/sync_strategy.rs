@@ -34,12 +34,15 @@ impl SyncStrategy {
                     .get_drive_item_with_fuse(&parent_ref.id)
                     .await
                 {
-                    if parent_item.is_deleted() {
+                    // Don't flag conflict for DELETE operations when parent is deleted - 
+                    // if parent is gone, child is effectively gone too
+                    if parent_item.is_deleted() && item.change_operation != ChangeOperation::Delete {
                         conflicts.push(RemoteConflict::ModifyOnParentDelete);
                     }
                 } else {
-                    // Parent does not exist, might be a conflict if the item is not a create operation
-                    if item.change_operation != ChangeOperation::Create {
+                    // Parent does not exist, might be a conflict if the item is not a create or delete operation
+                    // DELETE is fine - if parent doesn't exist, child is effectively gone
+                    if item.change_operation != ChangeOperation::Create && item.change_operation != ChangeOperation::Delete {
                         conflicts.push(RemoteConflict::MoveToDeletedParent)
                     }
                 }
