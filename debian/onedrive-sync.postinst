@@ -1,0 +1,27 @@
+#!/bin/sh
+set -e
+
+# Update desktop database
+if [ -x /usr/bin/update-desktop-database ]; then
+    update-desktop-database -q || true
+fi
+
+# Update MIME database
+if [ -x /usr/bin/update-mime-database ]; then
+    update-mime-database /usr/share/mime || true
+fi
+
+# Update icon cache
+if [ -x /usr/bin/gtk-update-icon-cache ]; then
+    gtk-update-icon-cache -q -t /usr/share/icons/hicolor || true
+fi
+
+# Reload systemd user daemon
+if command -v systemctl >/dev/null 2>&1 && systemctl --user is-system-running >/dev/null 2>&1; then
+    systemctl --user daemon-reload || true
+    # Enable service but don't start it automatically (user should start manually after auth)
+    systemctl --user enable onedrive-sync-daemon.service || true
+fi
+
+# DEBHELPER#
+

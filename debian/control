@@ -1,0 +1,37 @@
+Source: onedrive-sync
+Section: net
+Priority: optional
+Maintainer: Michał Banas <digit1024@github>
+Build-Depends: debhelper-compat (= 13),
+               cargo,
+               rustc,
+               libfuse-dev,
+               libssl-dev,
+               libdbus-1-dev,
+               pkg-config,
+               build-essential
+Standards-Version: 4.6.2
+Homepage: https://github.com/digit1024/ondrivefs_bmideas
+Vcs-Browser: https://github.com/digit1024/ondrivefs_bmideas
+Vcs-Git: https://github.com/digit1024/ondrivefs_bmideas.git
+Rules-Requires-Root: no
+
+Package: onedrive-sync
+Architecture: any
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+         libfuse2t64 | libfuse2,
+         libxkbcommon0,
+         libc6,
+         libgcc-s1,
+         systemd
+Description: OneDrive client for Linux with FUSE filesystem
+ A Linux client for Microsoft OneDrive that mounts your cloud storage
+ as a local filesystem using FUSE. Files are downloaded on-demand when
+ accessed, and local changes are automatically synced to OneDrive.
+ .
+ The package includes:
+  - onedrive-sync-daemon: Background service that mounts OneDrive as FUSE
+  - onedrive-sync-ui: Graphical interface for COSMIC/Pop!_OS
+  - onedrive-sync-applet: System tray indicator
+

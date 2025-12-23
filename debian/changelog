@@ -1,0 +1,9 @@
+onedrive-sync (1.0.0-1) unstable; urgency=medium
+
+  * Initial release version 1.0.0
+  * Package includes daemon, UI, and applet components
+  * Full desktop integration with icons and MIME types
+  * User systemd service for automatic daemon startup
+
+ -- Michał Banas <digit1024@github>  Mon, 23 DEC 2025 11:41:00 +0000
+

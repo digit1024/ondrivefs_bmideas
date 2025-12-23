@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+# Stop and disable service before removal
+if command -v systemctl >/dev/null 2>&1 && systemctl --user is-system-running >/dev/null 2>&1; then
+    systemctl --user stop onedrive-sync-daemon.service || true
+    systemctl --user disable onedrive-sync-daemon.service || true
+    systemctl --user daemon-reload || true
+fi
+
+# DEBHELPER#
+

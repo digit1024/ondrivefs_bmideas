@@ -5,10 +5,11 @@
   <project_license>MPL-2.0</project_license>
   <name>Onedrive Sync Ui</name>
   <summary>onedrive-sync UI for POP OS Cosmic </summary>
-  <icon type="remote" width="64" height="64" scale="1">
-    https://github.com/pop-os/cosmic-app-template/raw/main/resources/icons/hicolor/scalable/apps/icon.svg
-  </icon>
-  <url type="vcs-browser">https://github.com/pop-os/cosmic-app-template</url>
+  <icon type="stock">com.github.bmideas.onedrive-sync</icon>
+  <url type="vcs-browser">https://github.com/digit1024/ondrivefs_bmideas</url>
+  <releases>
+    <release version="1.0.0" date="2025-12-23"/>
+  </releases>
   <launchable type="desktop-id">com.github.bmideas.onedrive-sync.desktop</launchable>
   <provides>
     <id>com.github.bmideas.onedrive-sync</id>

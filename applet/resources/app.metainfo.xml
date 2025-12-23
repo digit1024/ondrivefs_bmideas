@@ -1,19 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>com.github.bmideas.onedrive-sync</id>
+  <id>com.github.bmideas.onedrive-sync-applet</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MPL-2.0</project_license>
-  <name>Onedrive Sync Ui</name>
-  <summary>onedrive-sync UI for POP OS Cosmic </summary>
-  <icon type="remote" width="64" height="64" scale="1">
-    https://github.com/pop-os/cosmic-app-template/raw/main/resources/icons/hicolor/scalable/apps/icon.svg
-  </icon>
-  <url type="vcs-browser">https://github.com/pop-os/cosmic-app-template</url>
-  <launchable type="desktop-id">com.github.bmideas.onedrive-sync.desktop</launchable>
+  <name>Onedrive Sync Applet</name>
+  <summary>onedrive-sync applet for POP OS Cosmic </summary>
+  <icon type="stock">com.github.bmideas.onedrive-sync</icon>
+  <url type="vcs-browser">https://github.com/digit1024/ondrivefs_bmideas</url>
+  <launchable type="desktop-id">com.github.bmideas.onedrive-sync-applet.desktop</launchable>
   <provides>
-    <id>com.github.bmideas.onedrive-sync</id>
+    <id>com.github.bmideas.onedrive-sync-applet</id>
     <binaries>
-      <binary>onedrive-sync-ui</binary>
+      <binary>onedrive-sync-applet</binary>
     </binaries>
   </provides>
   <requires>
@@ -31,5 +29,7 @@
     <keyword>COSMIC</keyword>
   </keywords>
   <content_rating type="oars-1.1" />
+  <releases>
+    <release version="1.0.0" date="2024-01-01"/>
+  </releases>
 </component>
-

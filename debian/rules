@@ -1,0 +1,31 @@
+#!/usr/bin/make -f
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+export DEB_CARGO_REGISTRY_DIR = $(CURDIR)/debian/cargo-registry
+export CARGO_HOME = $(DEB_CARGO_REGISTRY_DIR)
+
+%:
+	dh $@
+
+override_dh_auto_clean:
+	# Clean build artifacts
+	rm -rf target/release/onedrive-sync-*
+
+override_dh_auto_build:
+	# Unset ARGV0 to avoid cargo proxy issues
+	ARGV0= cargo build --release --frozen
+
+override_dh_auto_test:
+	# Skip tests during package build
+	# Tests should be run separately with: cargo test --test tests -- --test-threads=1 --nocapture
+
+override_dh_install:
+	dh_install
+	# Ensure binaries are executable
+	chmod +x debian/onedrive-sync/usr/bin/*
+
+override_dh_fixperms:
+	dh_fixperms
+	# Ensure binaries are executable
+	chmod +x debian/onedrive-sync/usr/bin/*
+

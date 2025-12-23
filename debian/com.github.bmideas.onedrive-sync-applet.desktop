@@ -1,5 +1,5 @@
 [Desktop Entry]
-Name=Onedrive Sync Ui
+Name=Onedrive Sync Applet
 Comment=onedrive-sync applet for POP OS Cosmic 
 Type=Application
 Icon=com.github.bmideas.onedrive-sync
@@ -10,3 +10,5 @@ Categories=COSMIC
 Keywords=COSMIC
 X-CosmicApplet=true
 X-CosmicHoverPopup=Auto
+NoDisplay=true
+

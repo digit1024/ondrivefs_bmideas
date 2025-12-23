@@ -9,3 +9,4 @@ Icon=open-onedrive
 Categories=Network;FileManager;
 StartupNotify=true
 NoDisplay=true
+

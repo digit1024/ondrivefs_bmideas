@@ -1,0 +1,13 @@
+[Unit]
+Description=OneDrive Sync Daemon
+Documentation=https://github.com/digit1024/ondrivefs_bmideas
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/onedrive-sync-daemon
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+
