@@ -2,10 +2,12 @@
 set -e
 
 # Stop and disable service before removal
-if command -v systemctl >/dev/null 2>&1 && systemctl --user is-system-running >/dev/null 2>&1; then
-    systemctl --user stop onedrive-sync-daemon.service || true
-    systemctl --user disable onedrive-sync-daemon.service || true
-    systemctl --user daemon-reload || true
+if command -v systemctl >/dev/null 2>&1; then
+    if systemctl --user is-system-running >/dev/null 2>&1 || [ -S "$XDG_RUNTIME_DIR/systemd/private" ] 2>/dev/null; then
+        systemctl --user stop onedrive-sync.service || true
+        systemctl --user disable onedrive-sync.service || true
+        systemctl --user daemon-reload || true
+    fi
 fi
 
 # DEBHELPER#

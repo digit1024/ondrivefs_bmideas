@@ -1,3 +1,26 @@
+# Build artifacts
 /target
 /daemon_bcp
 /alternate_ui
+
+# Debian build artifacts (keep config files)
+/debian/.debhelper/
+/debian/onedrive-sync/
+/debian/cargo-registry/
+/debian/*.debhelper.log
+/debian/*.substvars
+/debian/*.build-stamp
+/debian/files
+/debian/*.postrm.debhelper
+
+# Debian package build outputs (in parent directory)
+../onedrive-sync_*.deb
+../onedrive-sync_*.buildinfo
+../onedrive-sync_*.changes
+../onedrive-sync_*.ddeb
+../onedrive-sync_*.tar.*
+
+# Config files - include these (not ignored)
+# !*.toml
+# !*.conf
+# !*.config

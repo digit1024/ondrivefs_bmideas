@@ -13,15 +13,13 @@ fi
 
 # Update icon cache
 if [ -x /usr/bin/gtk-update-icon-cache ]; then
-    gtk-update-icon-cache -q -t /usr/share/icons/hicolor || true
+    gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
+fi
+# Also update for root if needed
+if [ "$(id -u)" = "0" ] && [ -x /usr/bin/update-icon-caches ]; then
+    update-icon-caches /usr/share/icons/hicolor || true
 fi
 
-# Reload systemd user daemon
-if command -v systemctl >/dev/null 2>&1 && systemctl --user is-system-running >/dev/null 2>&1; then
-    systemctl --user daemon-reload || true
-    # Enable service but don't start it automatically (user should start manually after auth)
-    systemctl --user enable onedrive-sync-daemon.service || true
-fi
 
 # DEBHELPER#
 

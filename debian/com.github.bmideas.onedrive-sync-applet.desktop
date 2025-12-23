@@ -1,8 +1,8 @@
 [Desktop Entry]
 Name=Onedrive Sync Applet
-Comment=onedrive-sync applet for POP OS Cosmic 
+Comment=Open Onedrive applet for POP OS Cosmic 
 Type=Application
-Icon=com.github.bmideas.onedrive-sync
+Icon=open-onedrive
 Exec=onedrive-sync-applet %F
 Terminal=false
 StartupNotify=true

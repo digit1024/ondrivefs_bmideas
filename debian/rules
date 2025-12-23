@@ -13,7 +13,7 @@ override_dh_auto_clean:
 
 override_dh_auto_build:
 	# Unset ARGV0 to avoid cargo proxy issues
-	ARGV0= cargo build --release --frozen
+	env -u ARGV0 cargo build --release
 
 override_dh_auto_test:
 	# Skip tests during package build
@@ -21,6 +21,35 @@ override_dh_auto_test:
 
 override_dh_install:
 	dh_install
+	# Install appdata files with correct names (they have same source name so need manual handling)
+	@mkdir -p debian/onedrive-sync/usr/share/appdata
+	@cp ui/resources/app.metainfo.xml debian/onedrive-sync/usr/share/appdata/com.github.bmideas.onedrive-sync.appdata.xml
+	@cp applet/resources/app.metainfo.xml debian/onedrive-sync/usr/share/appdata/com.github.bmideas.onedrive-sync-applet.appdata.xml
+	# Install icons with correct names (they're installed to icons/ subdirectory)
+	@mkdir -p debian/onedrive-sync/usr/share/icons/hicolor/16x16/apps
+	@mkdir -p debian/onedrive-sync/usr/share/icons/hicolor/32x32/apps
+	@mkdir -p debian/onedrive-sync/usr/share/icons/hicolor/48x48/apps
+	@mkdir -p debian/onedrive-sync/usr/share/icons/hicolor/64x64/apps
+	@mkdir -p debian/onedrive-sync/usr/share/icons/hicolor/128x128/apps
+	@mkdir -p debian/onedrive-sync/usr/share/icons/hicolor/256x256/apps
+	@mkdir -p debian/onedrive-sync/usr/share/icons/hicolor/scalable/apps
+	@for size in 16 32 48 64 128 256; do \
+		cp resources/programfiles/icons/ok.png debian/onedrive-sync/usr/share/icons/hicolor/$${size}x$${size}/apps/open-onedrive-ok.png; \
+		cp resources/programfiles/icons/error.png debian/onedrive-sync/usr/share/icons/hicolor/$${size}x$${size}/apps/open-onedrive-error.png; \
+		cp resources/programfiles/icons/offline.png debian/onedrive-sync/usr/share/icons/hicolor/$${size}x$${size}/apps/open-onedrive-offline.png; \
+		cp resources/programfiles/icons/downloading.png debian/onedrive-sync/usr/share/icons/hicolor/$${size}x$${size}/apps/open-onedrive-downloading.png; \
+		cp resources/programfiles/icons/conflict.png debian/onedrive-sync/usr/share/icons/hicolor/$${size}x$${size}/apps/open-onedrive-conflict.png; \
+	done
+	@cp resources/programfiles/icons/syncing.svg debian/onedrive-sync/usr/share/icons/hicolor/scalable/apps/open-onedrive-syncing.svg
+	# Remove incorrectly installed icons from dh_install and install with correct names
+	@rm -f debian/onedrive-sync/usr/share/icons/hicolor/scalable/apps/icon.svg 2>/dev/null || true
+	@rm -rf debian/onedrive-sync/usr/share/icons/hicolor/scalable/apps/open-onedrive.svg 2>/dev/null || true
+	@rm -rf debian/onedrive-sync/usr/share/icons/hicolor/scalable/apps/com.github.bmideas.onedrive-sync.svg 2>/dev/null || true
+	# Install main application icons with correct names
+	@cp resources/programfiles/open-onedrive.svg debian/onedrive-sync/usr/share/icons/hicolor/scalable/apps/open-onedrive.svg
+	@cp ui/resources/icons/hicolor/scalable/apps/icon.svg debian/onedrive-sync/usr/share/icons/hicolor/scalable/apps/com.github.bmideas.onedrive-sync.svg
+	# Remove the incorrectly installed icons directory
+	@rm -rf debian/onedrive-sync/usr/share/icons/hicolor/icons 2>/dev/null || true
 	# Ensure binaries are executable
 	chmod +x debian/onedrive-sync/usr/bin/*
 
@@ -28,4 +57,3 @@ override_dh_fixperms:
 	dh_fixperms
 	# Ensure binaries are executable
 	chmod +x debian/onedrive-sync/usr/bin/*
-

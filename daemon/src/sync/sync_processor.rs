@@ -1514,8 +1514,8 @@ impl SyncProcessor {
 
         // If no download folders specified, download all files
         if download_folders.is_empty() {
-            debug!("📥 No download folders configured, downloading all files");
-            return true;
+            debug!("📥 No download folders configured, do not download anything!");
+            return false;
         }
 
         // Check if item's parent path matches any configured download folder
