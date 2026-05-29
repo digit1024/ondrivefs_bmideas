@@ -1,4 +1,8 @@
-# Open OneDrive
+# [DISCONTINUED] Open OneDrive
+
+## THIS PROJECT IS NOW DISCONTINUED - I have switched to Nextcloud 
+
+
 
 A Linux client for Microsoft OneDrive that mounts your cloud storage as a local filesystem.
 
